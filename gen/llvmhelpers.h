@@ -230,6 +230,9 @@ DValue *toElem(Expression *e, bool tryGetLvalue);
 DValue *toElemDtor(Expression *e);
 LLConstant *toConstElem(Expression *e, IRState *p);
 
+llvm::CallInst* generateExceptionIncRef();
+llvm::CallInst* generateExceptionDecRef();
+
 #if LDC_LLVM_VER >= 307
 bool supportsCOMDAT();
 

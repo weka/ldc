@@ -268,6 +268,13 @@ public:
             irs->scope() = IRScope(irs->func()->retBlock);
         }
 
+        // Normally, we wouldn't need to generate a decref for exceptions here;
+        // however, if we return in a catch block, our decref post-catch never
+        // gets run, and the exception struct never gets freed. This becomes a
+        // no-op for normal returns, as either the exception struct would've been
+        // caught (and destroyed), or used in unwinding (where we never return.)
+        generateExceptionDecRef();
+
         if (returnValue) {
             // Hack: the frontend generates 'return 0;' as last statement of
             // 'void main()'. But the debug location is missing. Use the end
@@ -670,9 +677,14 @@ public:
         llvm::BasicBlock* finallybb =
             llvm::BasicBlock::Create(irs->context(), "finally", irs->topfunc());
         irs->scope() = IRScope(finallybb);
+
+        irs->func()->scopes->catchBlockCount++;
+
         irs->DBuilder.EmitBlockStart(stmt->finalbody->loc);
         stmt->finalbody->accept(this);
         irs->DBuilder.EmitBlockEnd();
+
+        irs->func()->scopes->catchBlockCount--;
 
         CleanupCursor cleanupBefore = irs->func()->scopes->currentCleanupScope();
         irs->func()->scopes->pushCleanup(finallybb, irs->scopebb());
@@ -693,6 +705,7 @@ public:
             irs->func()->scopes->runCleanups(cleanupBefore, successbb);
             irs->scope() = IRScope(successbb);
         }
+
         irs->func()->scopes->popCleanups(cleanupBefore);
     }
 
@@ -770,15 +783,27 @@ public:
                 }
             }
 
+            irs->func()->scopes->catchBlockCount++;
+
+            // Ensure the eh.ptr slot exists; otherwise, our dec ref code won't work
+            // Why do we have to do this? In the case of a catch block that doesn't
+            // actually use the exception, the eh.ptr slot's not generated until later, 
+            // which means dec ref never gets generated (as it checks for the eh.ptr slot)
+            irs->func()->getOrCreateEhPtrSlot();
+
             // emit handler, if there is one
             // handler is zero for instance for 'catch { debug foo(); }'
             if ((*it)->handler) {
                 Statement_toIR((*it)->handler, irs);
             }
 
+            generateExceptionDecRef();
+
             if (!irs->scopereturned()) {
                 irs->ir->CreateBr(endbb);
             }
+
+            irs->func()->scopes->catchBlockCount--;
 
             irs->DBuilder.EmitBlockEnd();
 
@@ -834,6 +859,14 @@ public:
         DValue* e = toElemDtor(stmt->exp);
 
         llvm::Function* fn = LLVM_D_GetRuntimeFunction(stmt->loc, irs->module, "_d_throw_exception");
+        // If we're going to throw and not return to this function, decrement the ref count on
+        // the current eh.ptr
+        if (!irs->func()->scopes->doesCalleeNeedInvoke(fn))
+        {
+            irs->func()->getOrCreateEhPtrSlot();
+            generateExceptionDecRef();
+        }
+
         LLValue* arg = DtoBitCast(e->getRVal(), fn->getFunctionType()->getParamType(0));;
         irs->CreateCallOrInvoke(fn, arg);
         irs->ir->CreateUnreachable();

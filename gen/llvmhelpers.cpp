@@ -1825,6 +1825,46 @@ unsigned getFieldGEPIndex(AggregateDeclaration* ad, VarDeclaration* vd)
     return fieldIndex;
 }
 
+// This function is necessary to ensure the call to the exception function
+// is emitted in the right place: we want to emit it at the end of the basic
+// block, unless the basic block's already been terminated; in which case,
+// we insert it prior to the terminating instruction
+llvm::CallInst* createExceptionCall(llvm::Function* fn)
+{
+    llvm::TerminatorInst* terminator = gIR->scopebb()->getTerminator();
+
+    if (terminator)
+    {
+        return llvm::CallInst::Create(
+            fn, gIR->func()->ehPtrSlot, "", terminator);
+    }
+    else
+    {
+        return llvm::CallInst::Create(
+            fn, gIR->func()->ehPtrSlot, "", gIR->scopebb());
+    }
+}
+
+llvm::CallInst* generateExceptionIncRef()
+{
+    if (!gIR->func()->ehPtrSlot)
+        return nullptr;
+
+    llvm::Function* fn = LLVM_D_GetRuntimeFunction(Loc(),
+        gIR->module, "_d_eh_exception_incref");
+    return createExceptionCall(fn);
+}
+
+llvm::CallInst* generateExceptionDecRef()
+{
+    if (!gIR->func()->ehPtrSlot)
+        return nullptr;
+
+    llvm::Function* fn = LLVM_D_GetRuntimeFunction(Loc(),
+        gIR->module, "_d_eh_exception_decref");
+    return createExceptionCall(fn);
+}
+
 #if LDC_LLVM_VER >= 307
 bool supportsCOMDAT()
 {
