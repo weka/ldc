@@ -1597,7 +1597,8 @@ void VarDeclaration::semantic2(Scope *sc)
     }
     else if (init && isThreadlocal())
     {
-        if ((type->ty == Tclass) && type->isMutable() && !type->isShared())
+        // weka.io patch: allow thread-local globals/statics if it's a throwable (exception/error)
+        if ((type->ty == Tclass) && type->isMutable() && !type->isShared() && !ClassDeclaration::throwable->isBaseOf(type->isClassHandle(), NULL))
         {
             ExpInitializer *ei = init->isExpInitializer();
             if (ei && ei->exp->op == TOKclassreference)
