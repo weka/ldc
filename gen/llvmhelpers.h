@@ -31,11 +31,22 @@ void DtoDeleteClass(Loc& loc, DValue* inst);
 void DtoDeleteInterface(Loc& loc, DValue* inst);
 void DtoDeleteArray(Loc& loc, DValue* arr);
 
+unsigned DtoAlignment(Type* type);
+unsigned DtoAlignment(VarDeclaration* vd);
+
 // emit an alloca
 llvm::AllocaInst* DtoAlloca(Type* type, const char* name = "");
+llvm::AllocaInst* DtoAlloca(VarDeclaration* vd, const char* name = "");
 llvm::AllocaInst* DtoArrayAlloca(Type* type, unsigned arraysize, const char* name = "");
 llvm::AllocaInst* DtoRawAlloca(LLType* lltype, size_t alignment, const char* name = "");
 LLValue* DtoGcMalloc(Loc& loc, LLType* lltype, const char* name = "");
+
+LLValue* DtoAllocaDump(DValue* val, const char* name = "");
+LLValue* DtoAllocaDump(DValue* val, Type* asType, const char* name = "");
+LLValue* DtoAllocaDump(DValue* val, LLType* asType, int alignment = 0, const char* name = "");
+LLValue* DtoAllocaDump(LLValue* val, int alignment = 0, const char* name = "");
+LLValue* DtoAllocaDump(LLValue* val, Type* asType, const char* name = "");
+LLValue* DtoAllocaDump(LLValue* val, LLType* asType, int alignment = 0, const char* name = "");
 
 // assertion generator
 void DtoAssert(Module* M, Loc& loc, DValue* msg);

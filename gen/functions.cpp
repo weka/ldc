@@ -196,6 +196,9 @@ llvm::FunctionType* DtoFunctionType(Type* type, IrFuncTy &irFty, Type* thistype,
     if (irFty.arg_nest) argtypes.push_back(irFty.arg_nest->ltype);
     if (irFty.arg_arguments) argtypes.push_back(irFty.arg_arguments->ltype);
 
+    if (irFty.arg_sret && irFty.arg_this && abi->passThisBeforeSret(f))
+        std::swap(argtypes[0], argtypes[1]);
+
     const size_t firstExplicitArg = argtypes.size();
     const size_t numExplicitLLArgs = irFty.args.size();
     for (size_t i = 0; i < numExplicitLLArgs; i++)
@@ -405,8 +408,18 @@ static void set_param_attrs(TypeFunction* f, llvm::Function* func, FuncDeclarati
     }
 
     ADD_PA(ret)
-    ADD_PA(arg_sret)
-    ADD_PA(arg_this)
+
+    if (irFty.arg_sret && irFty.arg_this && gABI->passThisBeforeSret(f))
+    {
+        ADD_PA(arg_this)
+        ADD_PA(arg_sret)
+    }
+    else
+    {
+        ADD_PA(arg_sret)
+        ADD_PA(arg_this)
+    }
+
     ADD_PA(arg_nest)
     ADD_PA(arg_arguments)
 
@@ -537,7 +550,9 @@ void DtoDeclareFunction(FuncDeclaration* fdecl)
     // name parameters
     llvm::Function::arg_iterator iarg = func->arg_begin();
 
-    if (irFty.arg_sret) {
+    const bool passThisBeforeSret = irFty.arg_sret && irFty.arg_this && gABI->passThisBeforeSret(f);
+
+    if (irFty.arg_sret && !passThisBeforeSret) {
         iarg->setName(".sret_arg");
         irFunc->retArg = iarg;
         ++iarg;
@@ -566,6 +581,12 @@ void DtoDeclareFunction(FuncDeclaration* fdecl)
         iarg->setName(".nest_arg");
         irFunc->nestArg = iarg;
         assert(irFunc->nestArg);
+        ++iarg;
+    }
+
+    if (passThisBeforeSret) {
+        iarg->setName(".sret_arg");
+        irFunc->retArg = iarg;
         ++iarg;
     }
 
@@ -819,8 +840,7 @@ void DtoDefineFunction(FuncDeclaration* fd)
         LLValue* thismem = thisvar;
         if (!irFty.arg_this->byref)
         {
-            thismem = DtoRawAlloca(thisvar->getType(), 0, "this"); // FIXME: align?
-            DtoStore(thisvar, thismem);
+            thismem = DtoAllocaDump(thisvar, 0, "this");
             irFunc->thisArg = thismem;
         }
 
@@ -832,12 +852,7 @@ void DtoDefineFunction(FuncDeclaration* fd)
 
     // give the 'nestArg' storage
     if (irFty.arg_nest)
-    {
-        LLValue *nestArg = irFunc->nestArg;
-        LLValue *val = DtoRawAlloca(nestArg->getType(), 0, "nestedFrame");
-        DtoStore(nestArg, val);
-        irFunc->nestArg = val;
-    }
+        irFunc->nestArg = DtoAllocaDump(irFunc->nestArg, 0, "nestedFrame");
 
     // give arguments storage and debug info
     if (fd->parameters)
@@ -861,7 +876,7 @@ void DtoDefineFunction(FuncDeclaration* fd)
                 // Create the param here and set it to a "dummy" alloca that
                 // we do not store to here.
                 irparam = getIrParameter(vd, true);
-                irparam->value = DtoAlloca(vd->type, vd->ident->toChars());
+                irparam->value = DtoAlloca(vd, vd->ident->toChars());
             }
             else
             {
@@ -873,8 +888,7 @@ void DtoDefineFunction(FuncDeclaration* fd)
                     LLValue* mem = DtoAlloca(irparam->arg->type, vd->ident->toChars());
 
                     // let the abi transform the argument back first
-                    DImValue arg_dval(vd->type, irparam->value);
-                    irFty.getParam(vd->type, llArgIdx, &arg_dval, mem);
+                    irFty.getParam(vd->type, llArgIdx, irparam->value, mem);
 
                     // set the arg var value to the alloca
                     irparam->value = mem;
@@ -912,10 +926,7 @@ void DtoDefineFunction(FuncDeclaration* fd)
             llvm::CallInst::Create(GET_INTRINSIC_DECL(vastart), vaStartArg, "", gIR->scopebb());
 
             // copy _arguments to a memory location
-            LLType* argumentsType = irFunc->_arguments->getType();
-            LLValue* argumentsmem = DtoRawAlloca(argumentsType, 0, "_arguments_mem");
-            new llvm::StoreInst(irFunc->_arguments, argumentsmem, gIR->scopebb());
-            irFunc->_arguments = argumentsmem;
+            irFunc->_arguments = DtoAllocaDump(irFunc->_arguments, 0, "_arguments_mem");
         }
 
         // output function body

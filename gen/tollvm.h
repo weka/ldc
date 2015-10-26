@@ -32,6 +32,11 @@
  * DtoTypeFunction(FuncDeclaration*) is to be used instead.
  */
 LLType* DtoType(Type* t);
+// Uses DtoType(), but promotes i1 and void to i8.
+LLType* DtoMemType(Type* t);
+// Returns a pointer to the type returned by DtoMemType(t).
+LLPointerType* DtoPtrToType(Type* t);
+
 LLType* voidToI8(LLType* t);
 LLType* i1ToI8(LLType* t);
 
@@ -126,7 +131,7 @@ size_t getTypePaddedSize(LLType* t);
 size_t getTypeAllocSize(LLType* t);
 
 // type alignments
-unsigned char getABITypeAlign(LLType* t);
+unsigned int getABITypeAlign(LLType* t);
 
 // pair type helpers
 LLValue* DtoAggrPair(LLType* type, LLValue* V1, LLValue* V2, const char* name = "");

@@ -302,8 +302,7 @@ public:
             if (result && result->getType()->ty != Tvoid &&
                 (result->isIm() || result->isSlice())
             ) {
-                llvm::AllocaInst* alloca = DtoAlloca(result->getType());
-                DtoStoreZextI8(result->getRVal(), alloca);
+                LLValue* alloca = DtoAllocaDump(result);
                 result = new DVarValue(result->getType(), alloca);
             }
 
@@ -431,7 +430,7 @@ public:
         Type* dtype = e->type->toBasetype();
         Type* cty = dtype->nextOf()->toBasetype();
 
-        LLType* ct = voidToI8(DtoType(cty));
+        LLType* ct = DtoMemType(cty);
         LLArrayType* at = LLArrayType::get(ct, e->len+1);
 
         llvm::StringMap<llvm::GlobalVariable*>* stringLiteralCache = 0;
@@ -993,7 +992,7 @@ public:
 
         // handle cast to void (usually created by frontend to avoid "has no effect" error)
         if (e->to == Type::tvoid) {
-            result = new DImValue(Type::tvoid, llvm::UndefValue::get(voidToI8(DtoType(Type::tvoid))));
+            result = new DImValue(Type::tvoid, llvm::UndefValue::get(DtoMemType(Type::tvoid)));
             return;
         }
 
@@ -1107,9 +1106,7 @@ public:
         else
         {
             assert(v->isSlice());
-            LLValue* rval = v->getRVal();
-            lval = DtoRawAlloca(rval->getType(), 0, ".tmp_slice_storage");
-            DtoStore(rval, lval);
+            lval = DtoAllocaDump(v, ".tmp_slice_storage");
         }
 
         IF_LOG Logger::cout() << "lval: " << *lval << '\n';
@@ -1940,6 +1937,10 @@ public:
         IF_LOG Logger::print("AssertExp::toElem: %s\n", e->toChars());
         LOG_SCOPE;
 
+        // DMD allows syntax like this:
+        // f() == 0 || assert(false)
+        result = new DImValue(e->type, DtoConstBool(false));
+
         if (!global.params.useAssert)
             return;
 
@@ -2009,10 +2010,6 @@ public:
             DFuncValue invfunc(invdecl, getIrFunc(invdecl)->func, cond->getRVal());
             DtoCallFunction(e->loc, NULL, &invfunc, NULL);
         }
-
-        // DMD allows syntax like this:
-        // f() == 0 || assert(false)
-        result = new DImValue(e->type, DtoConstBool(false));
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////
@@ -2373,7 +2370,7 @@ public:
         if (retPtr)
             result = new DVarValue(e->type, DtoLoad(retPtr));
         else
-            result = new DConstValue(e->type, getNullValue(voidToI8(DtoType(dtype))));
+            result = new DConstValue(e->type, getNullValue(DtoMemType(dtype)));
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////
@@ -2451,7 +2448,7 @@ public:
                 DtoAppendDCharToUnicodeString(e->loc, result, e->e2);
         }
         else if (e1type->equals(e2type)) {
-            // apeend array
+            // append array
             DSliceValue* slice = DtoCatAssignArray(e->loc, result, e->e2);
             DtoAssign(e->loc, result, slice);
         }
@@ -2554,7 +2551,7 @@ public:
         IF_LOG Logger::cout() << (dyn?"dynamic":"static") << " array literal with length " << len << " of D type: '" << arrayType->toChars() << "' has llvm type: '" << *llType << "'\n";
 
         // llvm storage type
-        LLType* llElemType = i1ToI8(voidToI8(DtoType(elemType)));
+        LLType* llElemType = DtoMemType(elemType);
         LLType* llStoType = LLArrayType::get(llElemType, len);
         IF_LOG Logger::cout() << "llvm storage type: '" << *llStoType << "'\n";
 
@@ -2590,7 +2587,7 @@ public:
         }
         else
         {
-            llvm::Value* storage = DtoRawAlloca(llStoType, 0, "arrayliteral");
+            llvm::Value* storage = DtoRawAlloca(llStoType, DtoAlignment(e->type), "arrayliteral");
             initializeArrayLiteral(p, e, storage);
             result = new DImValue(e->type, storage);
         }
@@ -2629,7 +2626,7 @@ public:
         DtoResolveStruct(e->sd);
 
         // alloca a stack slot
-        e->inProgressMemory = DtoRawAlloca(DtoType(e->type), 0, ".structliteral");
+        e->inProgressMemory = DtoAlloca(e->type, ".structliteral");
 
         // fill the allocated struct literal
         write_struct_literal(e->loc, e->inProgressMemory, e->sd, e->elements);
@@ -2796,9 +2793,8 @@ public:
     LruntimeInit:
 
         // it should be possible to avoid the temporary in some cases
-        LLValue* tmp = DtoAlloca(e->type, "aaliteral");
+        LLValue* tmp = DtoAllocaDump(LLConstant::getNullValue(DtoType(e->type)), e->type, "aaliteral");
         result = new DVarValue(e->type, tmp);
-        DtoStore(LLConstant::getNullValue(DtoType(e->type)), tmp);
 
         const size_t n = e->keys->dim;
         for (size_t i = 0; i<n; ++i)
@@ -2825,7 +2821,7 @@ public:
         // (&a.foo).funcptr is a case where toElem(e1) is genuinely not an l-value.
         LLValue* val = makeLValue(exp->loc, toElem(exp->e1));
         LLValue* v = DtoGEPi(val, 0, index);
-        return new DVarValue(exp->type, DtoBitCast(v, getPtrToType(DtoType(exp->type))));
+        return new DVarValue(exp->type, DtoBitCast(v, DtoPtrToType(exp->type)));
     }
 
     void visit(DelegatePtrExp *e)
@@ -2889,7 +2885,7 @@ public:
         types.reserve(e->exps->dim);
         for (size_t i = 0; i < e->exps->dim; i++)
         {
-            types.push_back(i1ToI8(voidToI8(DtoType((*e->exps)[i]->type))));
+            types.push_back(DtoMemType((*e->exps)[i]->type));
         }
         LLValue *val = DtoRawAlloca(LLStructType::get(gIR->context(), types), 0, ".tuple");
         for (size_t i = 0; i < e->exps->dim; i++)
