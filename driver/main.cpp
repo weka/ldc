@@ -1003,7 +1003,7 @@ int main(int argc, char **argv)
 
     gTargetMachine = createTargetMachine(mTargetTriple, mArch, mCPU, mAttrs,
         bitness, mFloatABI, mRelocModel, mCodeModel, codeGenOptLevel(),
-        global.params.symdebug || disableFpElim, disableLinkerStripDead);
+        disableFpElim, disableLinkerStripDead);
 
 #if LDC_LLVM_VER >= 308
     static llvm::DataLayout DL = gTargetMachine->createDataLayout();
