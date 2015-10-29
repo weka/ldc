@@ -507,7 +507,7 @@ public:
 
             result = se->globalVar;
         }
-        else if (e->e1->op == TOKslice)
+        else if (e->e1->op == TOKslice || e->e1->op == TOKdotvar)
         {
             e->error("non-constant expression '%s'", e->toChars());
             if (!global.gag) fatal();
