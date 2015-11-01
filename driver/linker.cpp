@@ -103,7 +103,7 @@ static std::string getOutputName(bool const sharedLib)
 
 static std::string gExePath;
 
-static int linkObjToBinaryGcc(bool sharedLib)
+static int linkObjToBinaryGcc(bool sharedLib, bool fullyStatic)
 {
     Logger::println("*** Linking executable ***");
 
@@ -132,6 +132,9 @@ static int linkObjToBinaryGcc(bool sharedLib)
 
     if (sharedLib)
         args.push_back("-shared");
+
+    if (fullyStatic)
+        args.push_back("-static");
 
     args.push_back("-o");
     args.push_back(output);
@@ -585,17 +588,19 @@ static int linkObjToBinaryWin(bool sharedLib)
 
 //////////////////////////////////////////////////////////////////////////////
 
-int linkObjToBinary(bool sharedLib)
+int linkObjToBinary(bool sharedLib, bool fullyStatic)
 {
     int exitCode;
 #if LDC_LLVM_VER >= 305
-    if (global.params.targetTriple.isWindowsMSVCEnvironment())
+    if (global.params.targetTriple.isWindowsMSVCEnvironment()) {
 #else
-    if (global.params.targetTriple.getOS() == llvm::Triple::Win32)
+    if (global.params.targetTriple.getOS() == llvm::Triple::Win32) {
 #endif
+        // TODO: Map -static (fullyStatic) to static vs. dynamic MSVC runtime?
         exitCode = linkObjToBinaryWin(sharedLib);
-    else
-        exitCode = linkObjToBinaryGcc(sharedLib);
+    } else {
+        exitCode = linkObjToBinaryGcc(sharedLib, fullyStatic);
+    }
     return exitCode;
 }
 
