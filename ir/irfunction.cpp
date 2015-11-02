@@ -337,6 +337,10 @@ llvm::BasicBlock* ScopeStack::emitLandingPad() {
 
         irs->scope() = IRScope(oldBB);
     }
+    // Decrease the reference count on the already existing eh.ptr; this
+    // solves the issue in which the eh.ptr was never freed if a new exception
+    // was thrown in the same function
+    generateExceptionDecRef();
     irs->ir->CreateStore(ehPtr, irs->func()->getOrCreateEhPtrSlot());
 
     llvm::Value* ehSelector = DtoExtractValue(landingPad, 1);
@@ -401,11 +405,21 @@ llvm::BasicBlock* ScopeStack::emitLandingPad() {
         irs->scopebb()->replaceAllUsesWith(irs->func()->resumeUnwindBlock);
         irs->scopebb()->eraseFromParent();
     } else {
+        landingPad->setCleanup(true);
         irs->ir->CreateBr(irs->func()->resumeUnwindBlock);
     }
 
     irs->scope() = savedIRScope;
     return beginBB;
+}
+
+bool ScopeStack::doesCalleeNeedInvoke(llvm::Function* calleeFn)
+{
+    // Intrinsics don't support invoking and 'nounwind' functions don't need it.
+    const bool doesNotThrow = calleeFn &&
+        (calleeFn->isIntrinsic() || calleeFn->doesNotThrow());
+
+    return !(doesNotThrow || (cleanupScopes.empty() && catchScopes.empty() && catchBlockCount == 0));
 }
 
 IrFunction::IrFunction(FuncDeclaration* fd) {
@@ -467,6 +481,10 @@ void IrFunction::setAlwaysInline() {
 llvm::AllocaInst* IrFunction::getOrCreateEhPtrSlot() {
     if (!ehPtrSlot) {
         ehPtrSlot = DtoRawAlloca(getVoidPtrType(), 0, "eh.ptr");
+        // Initialize eh.ptr to null
+        llvm::StoreInst* si = new llvm::StoreInst(
+            llvm::ConstantPointerNull::get(getVoidPtrType()), ehPtrSlot, gIR->topallocapoint());
+        (void)si;
     }
     return ehPtrSlot;
 }

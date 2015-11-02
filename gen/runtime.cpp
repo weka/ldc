@@ -241,7 +241,8 @@ static void LLVM_D_BuildRuntimeModule()
     LLType* longTy = LLType::getInt64Ty(gIR->context());
     LLType* sizeTy = DtoSize_t();
 
-    LLType* voidPtrTy = rt_ptr(byteTy);
+    LLType* voidPtrTy = rt_ptr(voidTy);
+    LLType* voidPtrPtrTy = rt_ptr(voidPtrTy);
     LLType* voidArrayTy = rt_array(byteTy);
     LLType* voidArrayPtrTy = rt_ptr(voidArrayTy);
     LLType* stringTy = DtoType(Type::tchar->arrayOf());
@@ -888,7 +889,7 @@ static void LLVM_D_BuildRuntimeModule()
     /////////////////////////////////////////////////////////////////////////////////////
     /////////////////////////////////////////////////////////////////////////////////////
 
-    // void _d_throw_exception(Object e)
+    // void _d_throw_exception(Object e) @nogc
     {
         llvm::StringRef fname("_d_throw_exception");
         LLType *types[] = { objectTy };
@@ -960,7 +961,7 @@ static void LLVM_D_BuildRuntimeModule()
         llvm::Function::Create(fty, llvm::GlobalValue::ExternalLinkage, fname, M);
     }
 
-    // void _d_eh_resume_unwind(ptr exc_struct)
+    // void _d_eh_resume_unwind(ptr exc_struct) @nogc
     {
         llvm::StringRef fname("_d_eh_resume_unwind");
         LLType *types[] = { voidPtrTy };
@@ -968,7 +969,23 @@ static void LLVM_D_BuildRuntimeModule()
         llvm::Function::Create(fty, llvm::GlobalValue::ExternalLinkage, fname, M);
     }
 
-    // void _d_eh_enter_catch()
+    // void _d_eh_exception_incref(_d_exception** exc_struct) @nogc
+    {
+        llvm::StringRef fname("_d_eh_exception_incref");
+        LLType *types[] = { voidPtrPtrTy };
+        LLFunctionType* fty = llvm::FunctionType::get(voidTy, types, false);
+        llvm::Function::Create(fty, llvm::GlobalValue::ExternalLinkage, fname, M);
+    }
+
+    // void _d_eh_exception_decref(_d_exception** exc_struct) @nogc
+    {
+        llvm::StringRef fname("_d_eh_exception_decref");
+        LLType *types[] = { voidPtrPtrTy };
+        LLFunctionType* fty = llvm::FunctionType::get(voidTy, types, false);
+        llvm::Function::Create(fty, llvm::GlobalValue::ExternalLinkage, fname, M);
+    }
+
+    // void _d_eh_enter_catch() @nogc
     {
         llvm::StringRef fname("_d_eh_enter_catch");
         LLFunctionType* fty = llvm::FunctionType::get(voidTy, false);

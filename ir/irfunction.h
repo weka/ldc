@@ -178,7 +178,7 @@ struct CatchScope {
 /// resolving forward references across cleanup scopes.
 class ScopeStack {
 public:
-    ScopeStack(IRState* irs) : irs(irs) {}
+    ScopeStack(IRState* irs) : catchBlockCount(0), irs(irs) {}
     ~ScopeStack();
 
     /// Registers a piece of cleanup code to be run.
@@ -253,6 +253,10 @@ public:
     llvm::CallSite callOrInvoke(llvm::Value* callee, const T &args,
         const char* name = "");
 
+    /// Determines whether a given callee will be an invoke (same criteria as
+    /// callOrInvoke)
+    bool doesCalleeNeedInvoke(llvm::Function* calleeFn);
+
     /// Terminates the current basic block with an unconditional branch to the
     /// given label, along with the cleanups to execute on the way there.
     ///
@@ -287,6 +291,9 @@ public:
     void breakToClosest() {
         jumpToClosest(breakTargets);
     }
+
+    /// !HACK!: Used to force an invoke (so that calls in catch blocks get unwound)
+    int catchBlockCount;
 
 private:
     /// Internal version that allows specifying the scope at which to start
@@ -349,11 +356,7 @@ llvm::CallSite ScopeStack::callOrInvoke(llvm::Value* callee, const T &args,
     // to our advantage.
     llvm::Function* calleeFn = llvm::dyn_cast<llvm::Function>(callee);
 
-    // Intrinsics don't support invoking and 'nounwind' functions don't need it.
-    const bool doesNotThrow = calleeFn &&
-        (calleeFn->isIntrinsic() || calleeFn->doesNotThrow());
-
-    if (doesNotThrow || (cleanupScopes.empty() && catchScopes.empty())) {
+    if (!doesCalleeNeedInvoke(calleeFn)) {
         llvm::CallInst* call = irs->ir->CreateCall(callee, args, name);
         if (calleeFn) {
             call->setAttributes(calleeFn->getAttributes());
