@@ -642,6 +642,42 @@ public:
 
   //////////////////////////////////////////////////////////////////////////
 
+  void visit(MaybeStatement *stmt) LLVM_OVERRIDE {
+    IF_LOG Logger::println("MaybeStatement::toIR(): %s", stmt->loc.toChars());
+    LOG_SCOPE;
+
+    irs->DBuilder.EmitBlockStart(stmt->loc);
+    emitCoverageLinecountInc(stmt->loc);
+
+    const auto decideFn =
+        LLVM_D_GetRuntimeFunction(Loc(), irs->module, "_d_decide_maybe");
+    auto decision = irs->ir->CreateCall(decideFn);
+
+    auto yesBB =
+        llvm::BasicBlock::Create(irs->context(), "maybe.yes", irs->topfunc());
+    auto endBB =
+        llvm::BasicBlock::Create(irs->context(), "maybe.end", irs->topfunc());
+
+    irs->ir->CreateCondBr(decision, yesBB, endBB);
+
+    irs->scope() = IRScope(yesBB);
+
+    if (stmt->body) {
+      irs->DBuilder.EmitBlockStart(stmt->body->loc);
+      stmt->body->accept(this);
+      irs->DBuilder.EmitBlockEnd();
+    }
+
+    if (!irs->scopereturned()) {
+      irs->ir->CreateBr(endBB);
+    }
+
+    irs->DBuilder.EmitBlockEnd();
+    irs->scope() = IRScope(endBB);
+  }
+
+  //////////////////////////////////////////////////////////////////////////
+
   void visit(OnScopeStatement *stmt) LLVM_OVERRIDE {
     stmt->error("Internal Compiler Error: OnScopeStatement should have been "
                 "lowered by frontend.");
@@ -1538,7 +1574,7 @@ public:
   //////////////////////////////////////////////////////////////////////////
 
   void visit(Statement *stmt) LLVM_OVERRIDE {
-    error(stmt->loc, "Statement type Statement not implemented: %s",
+    error(stmt->loc, "Statement type 'Statement' not implemented: %s",
           stmt->toChars());
     fatal();
   }
@@ -1546,7 +1582,7 @@ public:
   //////////////////////////////////////////////////////////////////////////
 
   void visit(PragmaStatement *stmt) LLVM_OVERRIDE {
-    error(stmt->loc, "Statement type PragmaStatement not implemented: %s",
+    error(stmt->loc, "Statement type 'PragmaStatement' not implemented: %s",
           stmt->toChars());
     fatal();
   }

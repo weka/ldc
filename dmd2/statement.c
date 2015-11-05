@@ -647,6 +647,11 @@ int Statement::blockExit(FuncDeclaration *func, bool mustNotThrow)
             result |= finalresult & ~BEfallthru;
         }
 
+        void visit(MaybeStatement *s)
+        {
+            result |= s->body->blockExit(func, mustNotThrow);
+        }
+
         void visit(OnScopeStatement *s)
         {
             // At this point, this statement is just an empty placeholder
@@ -4979,6 +4984,27 @@ Statement *OnScopeStatement::scopeCode(Scope *sc, Statement **sentry, Statement 
             assert(0);
     }
     return NULL;
+}
+
+/******************************** MaybeStatement **************************/
+
+MaybeStatement::MaybeStatement(Loc loc, Statement *body)
+    : Statement(loc), body(body)
+{}
+
+Statement *MaybeStatement::syntaxCopy()
+{
+    return new MaybeStatement(loc, body ? body->syntaxCopy() : NULL);
+}
+
+Statement *MaybeStatement::semantic(Scope *sc)
+{
+    if (!body) return this;
+
+    body = body->semanticScope(sc, NULL, NULL);
+
+    if (body->isErrorStatement()) return body;
+    return this;
 }
 
 /******************************** ThrowStatement ***************************/

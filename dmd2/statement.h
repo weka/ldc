@@ -276,6 +276,18 @@ public:
     void accept(Visitor *v) { v->visit(this); }
 };
 
+class MaybeStatement : public Statement
+{
+public:
+    Statement *body;
+
+    MaybeStatement(Loc loc, Statement *body);
+    Statement *syntaxCopy();
+    Statement *semantic(Scope *sc);
+
+    void accept(Visitor *v) { v->visit(this); }
+};
+
 class WhileStatement : public Statement
 {
 public:

@@ -5273,6 +5273,11 @@ Statement *Parser::parseStatement(int flags, const utf8_t** endPtr, Loc *pEndloc
                 break;
             }
 
+        case TOKmaybe:
+            nextToken();
+            s = new MaybeStatement(loc, parseStatement(PScurlyscope));
+            break;
+
         case TOKdebug:
             nextToken();
             if (token.value == TOKassign)

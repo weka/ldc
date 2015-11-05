@@ -284,6 +284,7 @@ static Keyword keywords[] =
     {   "foreach",      TOKforeach      },
     {   "foreach_reverse",      TOKforeach_reverse      },
     {   "scope",        TOKscope        },
+    {   "maybe",        TOKmaybe        },
 
     {   "struct",       TOKstruct       },
     {   "class",        TOKclass        },

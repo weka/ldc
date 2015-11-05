@@ -150,6 +150,7 @@ enum TOK
         TOKasm, TOKforeach, TOKforeach_reverse,
         TOKscope,
         TOKon_scope_exit, TOKon_scope_failure, TOKon_scope_success,
+        TOKmaybe,
 
         // Contracts
         TOKbody, TOKinvariant,

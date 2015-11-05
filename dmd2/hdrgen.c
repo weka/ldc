@@ -574,6 +574,12 @@ public:
         s->statement->accept(this);
     }
 
+    void visit(MaybeStatement *s)
+    {
+        buf->writestring("maybe ");
+        s->body->accept(this);
+    }
+
     void visit(ThrowStatement *s)
     {
         buf->printf("throw ");
