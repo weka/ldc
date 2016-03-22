@@ -15,10 +15,10 @@ namespace {
 namespace attr {
 const std::string section = "section";
 const std::string target  = "target";
+const std::string weak    = "_weak";
 }
 
-bool isFromLdcAttibutes(StructLiteralExp *e) {
-  auto moduleDecl = e->sd->getModule()->md;
+bool isFromLdcAttibutes(const ModuleDeclaration *moduleDecl) {
   if (!moduleDecl)
     return false;
 
@@ -31,6 +31,11 @@ bool isFromLdcAttibutes(StructLiteralExp *e) {
     return false;
   }
   return true;
+}
+
+bool isFromLdcAttibutes(const StructLiteralExp *e) {
+  auto moduleDecl = e->sd->getModule()->md;
+  return isFromLdcAttibutes(moduleDecl);
 }
 
 StructLiteralExp *getLdcAttributesStruct(Expression *attr) {
@@ -201,4 +206,34 @@ void applyFuncDeclUDAs(FuncDeclaration *decl, llvm::Function *func) {
           sle->sd->ident->string);
     }
   }
+}
+
+/// Checks whether 'sym' has the @ldc.attributes._weak() UDA applied.
+bool hasWeakUDA(Dsymbol *sym) {
+  if (!sym->userAttribDecl)
+    return false;
+
+  // Loop over all UDAs and early return true if @weak was found.
+  Expressions *attrs = sym->userAttribDecl->getAttributes();
+  expandTuples(attrs);
+  for (auto &attr : *attrs) {
+    auto sle = getLdcAttributesStruct(attr);
+    if (!sle)
+      continue;
+
+    auto name = sle->sd->ident->string;
+    if (name == attr::weak) {
+        // Check whether @weak can be applied to this symbol.
+        // Because hasWeakUDA is currently only called for global symbols, this check never errors.
+        auto vd = sym->isVarDeclaration();
+        if (!(vd && vd->isDataseg()) && !sym->isFuncDeclaration()) {
+          sym->error("@ldc.attributes.weak can only be applied to functions or global variables");
+          return false;
+        }
+
+      return true;
+    }
+  }
+
+  return false;
 }
