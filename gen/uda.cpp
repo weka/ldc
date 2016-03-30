@@ -18,7 +18,8 @@ const std::string target  = "target";
 const std::string weak    = "_weak";
 }
 
-bool isFromLdcAttibutes(const ModuleDeclaration *moduleDecl) {
+/// Checks whether `moduleDecl` is the ldc.attributes module.
+bool isLdcAttibutes(const ModuleDeclaration *moduleDecl) {
   if (!moduleDecl)
     return false;
 
@@ -33,9 +34,10 @@ bool isFromLdcAttibutes(const ModuleDeclaration *moduleDecl) {
   return true;
 }
 
+/// Checks whether the type of `e` is a struct from the ldc.attributes module.
 bool isFromLdcAttibutes(const StructLiteralExp *e) {
   auto moduleDecl = e->sd->getModule()->md;
-  return isFromLdcAttibutes(moduleDecl);
+  return isLdcAttibutes(moduleDecl);
 }
 
 StructLiteralExp *getLdcAttributesStruct(Expression *attr) {
@@ -176,6 +178,8 @@ void applyVarDeclUDAs(VarDeclaration *decl, llvm::GlobalVariable *gvar) {
     } else if (name == attr::target) {
       sle->error("Special attribute 'ldc.attributes.target' is only valid for "
                  "functions");
+    } else if (name == attr::weak) {
+      // @weak is applied elsewhere
     } else {
       sle->warning(
           "Ignoring unrecognized special attribute 'ldc.attributes.%s'",
@@ -200,6 +204,8 @@ void applyFuncDeclUDAs(FuncDeclaration *decl, llvm::Function *func) {
       applyAttrSection(sle, func);
     } else if (name == attr::target) {
       applyAttrTarget(sle, func);
+    } else if (name == attr::weak) {
+      // @weak is applied elsewhere
     } else {
       sle->warning(
           "ignoring unrecognized special attribute 'ldc.attributes.%s'",
