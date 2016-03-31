@@ -372,6 +372,10 @@ cl::opt<uint32_t, true> hashThreshold(
         "(experimental) hash (MD5) symbol names longer than this threshold (0 = no hashing)"),
     cl::location(global.params.hashThreshold), cl::init(0));
 
+cl::opt<bool, true>
+    compressSymbols("compsymb", cl::desc("Tries to reduce symbol name sizes, incompatible with tomorrow's implementation"),
+              cl::location(global.params.compressSymbols));
+
 cl::opt<bool> linkonceTemplates(
     "linkonce-templates",
     cl::desc(

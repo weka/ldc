@@ -208,6 +208,7 @@ struct Param
     bool disableRedZone;
 
     uint32_t hashThreshold; // MD5 hash symbols larger than this threshold (0 = no hashing)
+    bool compressSymbols; // reduces symbol name sizes, incompatible with tomorrow's implementation
 #endif
 };
 
