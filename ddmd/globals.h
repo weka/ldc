@@ -206,6 +206,8 @@ struct Param
     // Codegen cl options
     bool singleObj;
     bool disableRedZone;
+
+    uint32_t hashThreshold; // MD5 hash symbols larger than this threshold (0 = no hashing)
 #endif
 };
 
