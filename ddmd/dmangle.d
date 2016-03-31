@@ -132,6 +132,32 @@ extern (C++) void MODtoDecoBuffer(OutBuffer* buf, MOD mod)
 extern (C++) final class Mangler : Visitor
 {
     alias visit = super.visit;
+
+    void*[] saved_types = new void*[0];
+
+    bool checkSavedType(void* t)
+    {
+        if (!global.params.compressSymbols)
+            return false;
+
+        // Try to find symbol, and early return if found
+        foreach (idx, s; saved_types)
+        {
+            if (s == cast(void*)t)
+            {
+                //printf("Found saved type %u\n", cast(uint)idx);
+                buf.printf("Q%u", idx);
+                return true;
+            }
+        }
+
+        // Add to types seen
+        saved_types ~= cast(void*)t;
+
+        return false;
+    }
+
+
 public:
     OutBuffer* buf;
 
@@ -281,6 +307,9 @@ public:
 
     override void visit(TypeEnum t)
     {
+        if (checkSavedType(cast(void*)t))
+            return;
+
         visit(cast(Type)t);
         t.sym.accept(this);
     }
@@ -288,6 +317,10 @@ public:
     override void visit(TypeStruct t)
     {
         //printf("TypeStruct::toDecoBuffer('%s') = '%s'\n", t->toChars(), name);
+
+        if (checkSavedType(cast(void*)t))
+            return;
+
         visit(cast(Type)t);
         t.sym.accept(this);
     }
@@ -295,6 +328,10 @@ public:
     override void visit(TypeClass t)
     {
         //printf("TypeClass::toDecoBuffer('%s' mod=%x) = '%s'\n", t->toChars(), mod, name);
+
+        if (checkSavedType(cast(void*)t))
+            return;
+
         visit(cast(Type)t);
         t.sym.accept(this);
     }
