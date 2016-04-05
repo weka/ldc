@@ -816,10 +816,14 @@ public:
 
 extern (C++) const(char)* mangle(Dsymbol s)
 {
-    OutBuffer buf;
-    scope Mangler v = new Mangler(&buf);
-    s.accept(v);
-    return buf.extractString();
+    if (!s.mangleCache)
+    {
+        OutBuffer buf;
+        scope Mangler v = new Mangler(&buf);
+        s.accept(v);
+        s.mangleCache = buf.extractString();
+    }
+    return s.mangleCache;
 }
 
 /******************************************************************************

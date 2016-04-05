@@ -173,6 +173,8 @@ public:
     uint32_t llvmInternal;
 
     IrDsymbol *ir;
+
+    const char *mangleCache;           // mangled symbol created from mangle()
 #endif
 
     Dsymbol();

@@ -211,6 +211,8 @@ public:
         uint llvmInternal;
 
         void* ir; // IrDsymbol*
+
+        const(char)* mangleCache;          // mangled symbol created from mangle()
     }
 
     final extern (D) this()
