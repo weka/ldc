@@ -34,6 +34,19 @@
 #include "ir/irfunction.h"
 #include "ir/irtypeclass.h"
 
+#include "llvm/Support/MD5.h"
+static std::string hashSymbolName(llvm::StringRef name)
+{
+  llvm::MD5 hasher;
+  hasher.update(name);
+  llvm::MD5::MD5Result result;
+  hasher.final(result);
+  llvm::SmallString<32> hashStr;
+  llvm::MD5::stringifyResult(result, hashStr);
+
+  return ("MD5_" + hashStr).str();
+}
+
 //////////////////////////////////////////////////////////////////////////////
 
 extern LLConstant *DtoDefineClassInfo(ClassDeclaration *cd);
@@ -47,7 +60,14 @@ LLGlobalVariable *IrAggr::getVtblSymbol() {
 
   // create the initZ symbol
   std::string initname("_D");
-  initname.append(mangle(aggrdecl));
+
+  llvm::StringRef mangledname = mangle(aggrdecl);
+  if (global.params.hashThreshold && (mangledname.size() > global.params.hashThreshold)) {
+    initname.append(hashSymbolName(mangledname));
+  } else {
+    initname.append(mangledname);
+  }
+
   initname.append("6__vtblZ");
 
   LLType *vtblTy = stripModifiers(type)->ctype->isClass()->getVtbl();
@@ -68,7 +88,13 @@ LLGlobalVariable *IrAggr::getClassInfoSymbol() {
 
   // create the initZ symbol
   std::string initname("_D");
-  initname.append(mangle(aggrdecl));
+
+  llvm::StringRef mangledname = mangle(aggrdecl);
+  if (global.params.hashThreshold && (mangledname.size() > global.params.hashThreshold)) {
+    initname.append(hashSymbolName(mangledname));
+  } else {
+    initname.append(mangledname);
+  }
 
   if (aggrdecl->isInterfaceDeclaration()) {
     initname.append("11__InterfaceZ");

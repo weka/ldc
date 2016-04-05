@@ -38,6 +38,7 @@
 #include "ir/irmodule.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/Support/MD5.h"
 #include <iostream>
 
 llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
@@ -397,6 +398,26 @@ void applyParamAttrsToLLFunc(TypeFunction *f, IrFuncTy &irFty,
 
 ////////////////////////////////////////////////////////////////////////////////
 
+std::string hashFunctionName(llvm::StringRef name, FuncDeclaration *fdecl, LINK link)
+{
+  if ( (link != LINKd) && (link != LINKdefault) )
+    return name;
+
+  if (name.size() <= global.params.hashThreshold)
+    return name;
+
+  // TODO: checks for which functions to hash or not. Try to not hash libdruntime and libphobos functions!
+
+  llvm::MD5 hasher;
+  hasher.update(name);
+  llvm::MD5::MD5Result result;
+  hasher.final(result);
+  llvm::SmallString<32> hashStr;
+  llvm::MD5::stringifyResult(result, hashStr);
+
+  return ("MD5_" + hashStr).str();
+}
+
 void DtoDeclareFunction(FuncDeclaration *fdecl) {
   DtoResolveFunction(fdecl);
 
@@ -447,6 +468,10 @@ void DtoDeclareFunction(FuncDeclaration *fdecl) {
   // mangled name
   std::string mangledName(mangleExact(fdecl));
   mangledName = gABI->mangleForLLVM(mangledName, link);
+
+  if (global.params.hashThreshold > 0) {
+    mangledName = hashFunctionName(mangledName, fdecl, link);
+  }
 
   // construct function
   LLFunctionType *functype = DtoFunctionType(fdecl);

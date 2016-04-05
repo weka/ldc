@@ -22,6 +22,7 @@
 #include "ir/irtypeclass.h"
 #include "ir/irtypestruct.h"
 #include <algorithm>
+#include "llvm/Support/MD5.h"
 
 //////////////////////////////////////////////////////////////////////////////
 
@@ -33,6 +34,19 @@ IrAggr::IrAggr(AggregateDeclaration *aggr)
 
 //////////////////////////////////////////////////////////////////////////////
 
+static std::string hashSymbolName(llvm::StringRef name)
+{
+  llvm::MD5 hasher;
+  hasher.update(name);
+  llvm::MD5::MD5Result result;
+  hasher.final(result);
+  llvm::SmallString<32> hashStr;
+  llvm::MD5::stringifyResult(result, hashStr);
+
+  return ("MD5_" + hashStr).str();
+}
+
+
 LLGlobalVariable *IrAggr::getInitSymbol() {
   if (init) {
     return init;
@@ -40,7 +54,12 @@ LLGlobalVariable *IrAggr::getInitSymbol() {
 
   // create the initZ symbol
   std::string initname("_D");
-  initname.append(mangle(aggrdecl));
+  llvm::StringRef mangledname = mangle(aggrdecl);
+  if (global.params.hashThreshold && (mangledname.size() > global.params.hashThreshold)) {
+    initname.append(hashSymbolName(mangledname));
+  } else {
+    initname.append(mangledname);
+  }
   initname.append("6__initZ");
 
   init =
