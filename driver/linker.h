@@ -15,6 +15,16 @@
 #ifndef LDC_DRIVER_LINKER_H
 #define LDC_DRIVER_LINKER_H
 
+namespace llvm {
+    class Module;
+    class LLVMContext;
+}
+
+/**
+ * Inserts bitcode files passed on the commandline into a module.
+ */
+void insertBitcodeFiles(llvm::Module &M, llvm::LLVMContext &Ctx);
+
 /**
  * Link an executable only from object files.
  * @return 0 on success.

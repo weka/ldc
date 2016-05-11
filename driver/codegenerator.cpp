@@ -13,6 +13,7 @@
 #include "mars.h"
 #include "module.h"
 #include "scope.h"
+#include "driver/linker.h"
 #include "driver/toobj.h"
 #include "gen/logger.h"
 #include "gen/runtime.h"
@@ -51,6 +52,9 @@ CodeGenerator::~CodeGenerator() {
     } else {
       filename = firstModuleObjfileName_;
     }
+
+    // If there are bitcode files passed on the cmdline, add them here.
+    insertBitcodeFiles(ir_->module, ir_->context());
 
     writeAndFreeLLModule(filename);
   }
@@ -91,6 +95,12 @@ void CodeGenerator::finishLLModule(Module *m) {
     return;
   }
 
+  // If there are bitcode files passed on the cmdline, add them to
+  // module.
+  // FIXME: should we really add the bc to ALL files??? that doesn't make sense to me.
+  //        perhaps only add to main() module?
+  insertBitcodeFiles(ir_->module, ir_->context());
+
   m->deleteObjFile();
   writeAndFreeLLModule(m->objfile->name->str);
 }
@@ -99,9 +109,11 @@ void CodeGenerator::writeAndFreeLLModule(const char *filename) {
   ir_->DBuilder.Finalize();
 
   // Add the linker options metadata flag.
-  ir_->module.addModuleFlag(
-      llvm::Module::AppendUnique, "Linker Options",
-      llvm::MDNode::get(ir_->context(), ir_->LinkerMetadataArgs));
+  if (!ir_->module.getModuleFlag("Linker Options")) {
+    ir_->module.addModuleFlag(
+        llvm::Module::Override, "Linker Options",
+        llvm::MDNode::get(ir_->context(), ir_->LinkerMetadataArgs));
+  }
 
   // Emit ldc version as llvm.ident metadata.
   llvm::NamedMDNode *IdentMetadata =

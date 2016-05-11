@@ -19,9 +19,12 @@
 #include "gen/optimizer.h"
 #include "gen/programs.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/IRReader/IRReader.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/SourceMgr.h"
 #if _WIN32
 #include "llvm/Support/SystemUtils.h"
 #include <Windows.h>
@@ -85,6 +88,37 @@ static std::string getOutputName(bool const sharedLib) {
   }
 
   return result;
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
+namespace {
+
+/// Link an LLVM bitcode file into the module
+void insertBitcodeIntoModule(const char *bcFile, llvm::Module &M,
+                           llvm::LLVMContext &Context) {
+  Logger::println("*** Linking-in bitcode file %s ***", bcFile);
+
+  llvm::SMDiagnostic Err;
+  std::unique_ptr<llvm::Module> loadedModule =
+      getLazyIRFileModule(bcFile, Err, Context);
+  if (!loadedModule) {
+    // Err.print(argv0, errs());
+    error(Loc(), "Error when linking in llvm bitcode file: %s", bcFile);
+    return;
+  }
+
+
+
+  llvm::Linker(M).linkInModule(std::move(loadedModule));
+}
+}
+
+/// Link LLVM bitcode files passed on cmdline into global module
+void insertBitcodeFiles(llvm::Module &M, llvm::LLVMContext &Ctx) {
+  for (const char *fname : *global.params.bitcodeFiles) {
+    insertBitcodeIntoModule(fname, M, Ctx);
+  }
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -168,9 +202,9 @@ static int linkObjToBinaryGcc(bool sharedLib, bool fullyStatic) {
       args.push_back("-Wl,--gc-sections");
     }
     if (global.params.targetTriple->getEnvironment() == llvm::Triple::Android) {
-        args.push_back("-ldl");
-        args.push_back("-lm");
-        break;
+      args.push_back("-ldl");
+      args.push_back("-lm");
+      break;
     }
     args.push_back("-lrt");
   // fallthrough
@@ -248,8 +282,7 @@ static int linkObjToBinaryGcc(bool sharedLib, bool fullyStatic) {
       default:
         if (global.params.is64bit) {
           args.push_back("-m64");
-        }
-        else {
+        } else {
           args.push_back("-m32");
         }
       }
@@ -381,7 +414,8 @@ int executeMsvcToolAndWait(const std::string &tool,
 
     auto comspecEnv = getenv("ComSpec");
     if (!comspecEnv) {
-      warning(Loc(), "'ComSpec' environment variable is not set, assuming 'cmd.exe'.");
+      warning(Loc(),
+              "'ComSpec' environment variable is not set, assuming 'cmd.exe'.");
       comspecEnv = "cmd.exe";
     }
     std::string cmdExecutable = comspecEnv;
