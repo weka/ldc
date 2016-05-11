@@ -5,4 +5,4 @@ struct SomeStrukt {
     int i;
 }
 
-extern(C) void takeStrukt(SomeStrukt*);
+extern(C) void takeStrukt(SomeStrukt*) {};

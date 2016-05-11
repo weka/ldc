@@ -118,6 +118,9 @@ static cl::opt<bool>
                             cl::desc("Disable the slp vectorization pass"),
                             cl::init(false));
 
+static cl::opt<bool> enableInternalize("internalize",
+                                       cl::desc("Internalize all symbols"));
+
 static unsigned optLevel() {
   // Use -O2 as a base for the size-optimization levels.
   return optimizeLevel >= 0 ? optimizeLevel : 2;
@@ -149,6 +152,14 @@ static inline void addPass(PassManagerBase &pm, Pass *pass) {
 
   if (verifyEach) {
     pm.add(createVerifierPass());
+  }
+}
+
+static void addInternalizePass(const PassManagerBuilder &builder,
+                               PassManagerBase &pm) {
+  if (enableInternalize) {
+    addPass(pm, createInternalizePass());
+    addPass(pm, createGlobalDCEPass());
   }
 }
 
@@ -292,6 +303,9 @@ static void addOptimizationPasses(PassManagerBase &mpm,
   // EP_OptimizerLast does not exist in LLVM 3.0, add it manually below.
   builder.addExtension(PassManagerBuilder::EP_OptimizerLast,
                        addStripExternalsPass);
+
+  builder.addExtension(PassManagerBuilder::EP_EnabledOnOptLevel0,
+                       addInternalizePass);
 
   builder.populateFunctionPassManager(fpm);
   builder.populateModulePassManager(mpm);
