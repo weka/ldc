@@ -401,8 +401,11 @@ static void parseCommandLine(int argc, char **argv, Strings &sourceFiles,
 
   global.params.cov = (global.params.covPercent <= 100);
 
-  templateLinkage = opts::linkonceTemplates ? LLGlobalValue::LinkOnceODRLinkage
-                                            : LLGlobalValue::WeakODRLinkage;
+  templateLinkage = opts::internalizeTemplates
+                        ? LLGlobalValue::InternalLinkage
+                        : opts::linkonceTemplates
+                              ? LLGlobalValue::LinkOnceODRLinkage
+                              : LLGlobalValue::WeakODRLinkage;
 
   if (global.params.run || !runargs.empty()) {
     // FIXME: how to properly detect the presence of a PositionalEatsArgs

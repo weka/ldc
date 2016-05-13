@@ -10,6 +10,7 @@
 #include "gen/optimizer.h"
 #include "mars.h" // error()
 #include "gen/cl_helpers.h"
+#include "driver/cl_options.h"
 #include "gen/logger.h"
 #include "gen/passes/Passes.h"
 #include "llvm/LinkAllPasses.h"
@@ -159,6 +160,8 @@ static void addInternalizePass(const PassManagerBuilder &builder,
                                PassManagerBase &pm) {
   if (enableInternalize) {
     addPass(pm, createInternalizePass());
+    addPass(pm, createGlobalDCEPass());
+  } else if (opts::internalizeTemplates) {
     addPass(pm, createGlobalDCEPass());
   }
 }

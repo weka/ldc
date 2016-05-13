@@ -377,6 +377,12 @@ cl::opt<bool> linkonceTemplates(
         "Use linkonce_odr linkage for template symbols instead of weak_odr"),
     cl::ZeroOrMore);
 
+cl::opt<bool> internalizeTemplates(
+    "internalize-templates",
+    cl::desc(
+        "Use internal linkage for template symbols, overrides linkonce-templates"),
+    cl::ZeroOrMore);
+
 cl::opt<bool> disableLinkerStripDead(
     "disable-linker-strip-dead",
     cl::desc("Do not try to remove unused symbols during linking"),

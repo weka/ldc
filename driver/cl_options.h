@@ -71,6 +71,7 @@ extern cl::opt<bool> disableFpElim;
 extern cl::opt<FloatABI::Type> mFloatABI;
 extern cl::opt<bool, true> singleObj;
 extern cl::opt<bool> linkonceTemplates;
+extern cl::opt<bool> internalizeTemplates;
 extern cl::opt<bool> disableLinkerStripDead;
 
 extern cl::opt<BOUNDSCHECK> boundsCheck;
