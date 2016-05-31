@@ -7074,7 +7074,7 @@ else
             {
                 //printf("type %s\n", ta->toChars());
                 // It might really be an Expression or an Alias
-                ta.resolve(loc, sc, &ea, &ta, &sa);
+                ta.resolve(loc, sc, &ea, &ta, &sa, (flags & 1) != 0);
                 if (ea)
                     goto Lexpr;
                 if (sa)
@@ -7202,7 +7202,7 @@ else
                         //goto Ldsym;
                     }
                 }
-                if (ea.op == TOKdotvar)
+                if (ea.op == TOKdotvar && !(flags & 1))
                 {
                     // translate expression to dsymbol.
                     sa = (cast(DotVarExp)ea).var;
@@ -7213,7 +7213,7 @@ else
                     sa = (cast(TemplateExp)ea).td;
                     goto Ldsym;
                 }
-                if (ea.op == TOKdottd)
+                if (ea.op == TOKdottd && !(flags & 1))
                 {
                     // translate expression to dsymbol.
                     sa = (cast(DotTemplateExp)ea).td;

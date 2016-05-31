@@ -40,6 +40,31 @@ import ddmd.visitor;
 
 enum LOGSEMANTIC = false;
 
+/**************************************
+ * Convert Expression or Type to corresponding Dsymbol,
+ * additionally strip off expression contexts.
+ *
+ * Some symbol related `__traits` ignore arguments expression contexts.
+ * For example:
+ *  struct S { void f() {} }
+ *  S s;
+ *  pragma(msg, __traits(isNested, s.f));
+ *  // s.f is DotVarExp, but __traits(isNested) needs a FuncDeclaration.
+ *
+ * This is used for that common `__traits` behavior.
+ */
+private Dsymbol getDsymbol2(RootObject oarg)
+{
+    if (auto e = isExpression(oarg))
+    {
+        if (e.op == TOKdotvar)
+            return (cast(DotVarExp)e).var;
+        if (e.op == TOKdottd)
+            return (cast(DotTemplateExp)e).td;
+    }
+    return getDsymbol(oarg);
+}
+
 /************************ TraitsExp ************************************/
 
 // callback for TypeFunction::attributesApply
@@ -373,7 +398,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
 
             static if (is(T : Dsymbol))
             {
-                auto s = getDsymbol(o);
+                auto s = getDsymbol2(o);
                 if (!s)
                     goto Lfalse;
             }
@@ -476,7 +501,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
             goto Ldimerror;
 
         auto o = (*e.args)[0];
-        auto s = getDsymbol(o);
+        auto s = getDsymbol2(o);
         if (!s)
         {
         }
@@ -555,7 +580,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         }
         else
         {
-            Dsymbol s = getDsymbol(o);
+            Dsymbol s = getDsymbol2(o);
             if (!s || !s.ident)
             {
                 e.error("argument %s has no identifier", o.toChars());
@@ -580,7 +605,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
             return new ErrorExp();
 
         auto o = (*e.args)[0];
-        auto s = getDsymbol(o);
+        auto s = getDsymbol2(o);
         if (!s)
         {
             if (!isError(o))
@@ -601,7 +626,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
             goto Ldimerror;
 
         auto o = (*e.args)[0];
-        auto s = getDsymbol(o);
+        auto s = getDsymbol2(o);
         if (s)
         {
             if (auto fd = s.isFuncDeclaration()) // Bugzilla 8943
@@ -669,9 +694,13 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
 
         /* Prefer dsymbol, because it might need some runtime contexts.
          */
-        Dsymbol sym = getDsymbol(o);
-        if (sym)
+        if (auto sym = getDsymbol(o))   // don't ignore expression context
         {
+            if (e.ident == Id.hasMember)
+            {
+                if (auto sm = sym.search(e.loc, id))
+                    goto Ltrue;
+            }
             ex = new DsymbolExp(e.loc, sym);
             ex = new DotIdExp(e.loc, ex, id);
         }
@@ -686,12 +715,6 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
         }
         if (e.ident == Id.hasMember)
         {
-            if (sym)
-            {
-                if (auto sm = sym.search(e.loc, id))
-                    goto Ltrue;
-            }
-
             /* Take any errors as meaning it wasn't found
              */
             Scope* sc2 = sc.push();
@@ -817,7 +840,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
             goto Ldimerror;
 
         auto o = (*e.args)[0];
-        auto s = getDsymbol(o);
+        auto s = getDsymbol2(o);
         if (!s)
         {
             version (none)
@@ -850,7 +873,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
             goto Ldimerror;
 
         auto o = (*e.args)[0];
-        auto s = getDsymbol(o);
+        auto s = getDsymbol2(o);
         auto t = isType(o);
         TypeFunction tf = null;
         if (s)
@@ -1114,7 +1137,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
             goto Ldimerror;
 
         auto o = (*e.args)[0];
-        auto s = getDsymbol(o);
+        auto s = getDsymbol2(o);
         if (!s)
         {
             e.error("argument %s to __traits(getUnitTests) must be a module or aggregate",
@@ -1175,7 +1198,7 @@ extern (C++) Expression semanticTraits(TraitsExp e, Scope* sc)
             goto Ldimerror;
 
         auto o = (*e.args)[0];
-        auto s = getDsymbol(o);
+        auto s = getDsymbol2(o);
 
         auto fd = s ? s.isFuncDeclaration() : null;
         if (!fd)
