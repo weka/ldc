@@ -43,6 +43,42 @@ void CompoundAsmStatement_toIR(CompoundAsmStatement *stmt, IRState *p);
 
 //////////////////////////////////////////////////////////////////////////////
 
+// TODO: Place in an "exceptions.cpp" file ?
+namespace {
+
+/// Creates a block that calls `_d_eh_exit_catch` upon cleanup of current scope.
+class ExitCatchCleanupCall {
+  IRState &irs;
+  llvm::BasicBlock *endbb;
+  CleanupCursor presaveCleanupScope;
+
+public:
+  ExitCatchCleanupCall(IRState &_irs, llvm::BasicBlock *_endbb)
+      : irs(_irs), endbb(_endbb),
+        presaveCleanupScope(irs.func()->scopes->currentCleanupScope()) {
+
+    // Push cleanup block that restores the old current exception value
+    auto *exitCatchBB =
+        llvm::BasicBlock::Create(irs.context(), "catch.exit", irs.topfunc());
+    IRScope oldScope = irs.scope();
+    irs.scope() = IRScope(exitCatchBB);
+    irs.ir->CreateCall(
+        getRuntimeFunction(Loc(), irs.module, "_d_eh_exit_catch"));
+    irs.func()->scopes->pushCleanup(exitCatchBB, irs.scopebb());
+    irs.scope() = oldScope;
+  }
+
+  ~ExitCatchCleanupCall() {
+    if (!irs.scopereturned()) {
+      irs.func()->scopes->runCleanups(presaveCleanupScope, endbb);
+    }
+    irs.func()->scopes->popCleanups(presaveCleanupScope);
+  }
+};
+}
+
+//////////////////////////////////////////////////////////////////////////////
+
 // used to build the sorted list of cases
 struct Case {
   StringExp *str;
@@ -53,7 +89,7 @@ struct Case {
     index = i;
   }
 
-  friend bool operator<(const Case& l, const Case& r) {
+  friend bool operator<(const Case &l, const Case &r) {
     return l.str->compare(r.str) < 0;
   }
 };
@@ -708,7 +744,7 @@ public:
     irs->func()->scopes->popCleanups(cleanupBefore);
   }
 
-  //////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////
 
 #if LDC_LLVM_VER >= 308
   void emitBeginCatchMSVCEH(Catch *ctch, llvm::BasicBlock *endbb,
@@ -779,13 +815,14 @@ public:
     // Exceptions are never rethrown by D code (but thrown again), so
     // we can leave the catch handler right away and continue execution
     // outside the catch funclet
-    llvm::BasicBlock *catchhandler =
-      llvm::BasicBlock::Create(irs->context(), "catchhandler", irs->topfunc());
+    llvm::BasicBlock *catchhandler = llvm::BasicBlock::Create(
+        irs->context(), "catchhandler", irs->topfunc());
     llvm::CatchReturnInst::Create(catchpad, catchhandler, irs->scopebb());
     irs->scope() = IRScope(catchhandler);
     auto enterCatchFn =
-      getRuntimeFunction(Loc(), irs->module, "_d_eh_enter_catch");
-    irs->CreateCallOrInvoke(enterCatchFn, DtoBitCast(exnObj, getVoidPtrType()), clssInfo);
+        getRuntimeFunction(Loc(), irs->module, "_d_eh_enter_catch");
+    irs->CreateCallOrInvoke(enterCatchFn, DtoBitCast(exnObj, getVoidPtrType()),
+                            clssInfo);
   }
 #endif
 
@@ -830,8 +867,8 @@ public:
       for (auto it = stmt->catches->begin(), end = stmt->catches->end();
            it != end; ++it) {
         llvm::BasicBlock *catchBB = llvm::BasicBlock::Create(
-          irs->context(), llvm::Twine("catch.") + (*it)->type->toChars(),
-          irs->topfunc(), endbb);
+            irs->context(), llvm::Twine("catch.") + (*it)->type->toChars(),
+            irs->topfunc(), endbb);
 
         irs->scope() = IRScope(catchBB);
         irs->DBuilder.EmitBlockStart((*it)->loc);
@@ -849,7 +886,6 @@ public:
         }
 
         irs->DBuilder.EmitBlockEnd();
-
       }
       catchBlocks.push_back(
           std::make_pair(nullptr, catchSwitchBlock)); // just for cleanup
@@ -861,14 +897,14 @@ public:
       if (!irs->func()->func->hasPersonalityFn()) {
         const char *personality = "__CxxFrameHandler3";
         LLFunction *personalityFn =
-          getRuntimeFunction(Loc(), irs->module, personality);
+            getRuntimeFunction(Loc(), irs->module, personality);
         irs->func()->func->setPersonalityFn(personalityFn);
       }
     } else
 #endif
     {
       for (Catches::reverse_iterator it = stmt->catches->rbegin(),
-           end = stmt->catches->rend();
+                                     end = stmt->catches->rend();
            it != end; ++it) {
         llvm::BasicBlock *catchBB = llvm::BasicBlock::Create(
             irs->context(), llvm::Twine("catch.") + (*it)->type->toChars(),
@@ -897,10 +933,16 @@ public:
                    getIrLocal(var)->value);
         }
 
-        // Emit handler, if there is one. The handler is zero, for instance,
-        // when building 'catch { debug foo(); }' in non-debug mode.
-        if ((*it)->handler) {
-          Statement_toIR((*it)->handler, irs);
+        {
+          // Note, the destructor of S does cleanup (thus the scope of S is
+          // important).
+          auto S = ExitCatchCleanupCall(*irs, endbb);
+
+          // Emit handler, if there is one. The handler is zero, for instance,
+          // when building 'catch { debug foo(); }' in non-debug mode.
+          if ((*it)->handler) {
+            Statement_toIR((*it)->handler, irs);
+          }
         }
 
         if (!irs->scopereturned()) {
