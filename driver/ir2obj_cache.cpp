@@ -119,10 +119,10 @@ void cacheObjectFile(llvm::StringRef objectFile,
   llvm::SmallString<128> cacheFile;
   storeCacheFileName(cacheObjectHash, cacheFile);
 
-  IF_LOG Logger::println("Copy object file to cache: %s --> %s",
+  IF_LOG Logger::println("Copy object file to cache: %s to %s",
                          objectFile.str().c_str(), cacheFile.c_str());
   if (llvm::sys::fs::copy_file(objectFile, cacheFile)) {
-    error(Loc(), "Failed to copy object file to cache: %s --> %s",
+    error(Loc(), "Failed to copy object file to cache: %s to %s",
           objectFile.str().c_str(), cacheFile.c_str());
     fatal();
   }
@@ -132,13 +132,14 @@ void recoverObjectFile(llvm::StringRef cacheObjectHash,
                        llvm::StringRef objectFile) {
   llvm::SmallString<128> cacheFile;
   storeCacheFileName(cacheObjectHash, cacheFile);
+
   llvm::sys::fs::remove(objectFile);
-  // TODO: optimize a little with making a symlink? llvm::sys::fs::create_link
-  IF_LOG Logger::println("Take cached object file: %s --> %s",
-                         cacheFile.c_str(), objectFile.str().c_str());
-  if (llvm::sys::fs::copy_file(cacheFile, objectFile)) {
-    error(Loc(), "Failed to copy object file to cache: %s --> %s",
-          objectFile.str().c_str(), cacheFile.c_str());
+
+  IF_LOG Logger::println("SymLink output to cached object file: %s -> %s",
+                         objectFile.str().c_str(), cacheFile.c_str());
+  if (llvm::sys::fs::create_link(cacheFile, objectFile)) {
+    error(Loc(), "Failed to link object file to cache: %s -> %s",
+          cacheFile.c_str(), objectFile.str().c_str());
     fatal();
   }
 }

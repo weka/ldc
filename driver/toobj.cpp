@@ -366,15 +366,35 @@ void writeObjectFile(llvm::Module *m, std::string &filename) {
 } // end of anonymous namespace
 
 void writeModule(llvm::Module *m, std::string filename) {
-  // run optimizer
-  ldc_optimize_module(m);
-
   // There is no integrated assembler on AIX because XCOFF is not supported.
   // Starting with LLVM 3.5 the integrated assembler can be used with MinGW.
   bool const assembleExternally =
       global.params.output_o &&
       (NoIntegratedAssembler ||
        global.params.targetTriple->getOS() == llvm::Triple::AIX);
+
+  // Use cached object code if possible
+  bool useIRToObjCache = !opts::ir2objCacheDir.empty();
+  llvm::SmallString<32> moduleHash;
+  if (useIRToObjCache && global.params.output_o && !assembleExternally) {
+    llvm::SmallString<128> cacheDir(opts::ir2objCacheDir.c_str());
+    llvm::sys::fs::make_absolute(cacheDir);
+    opts::ir2objCacheDir = cacheDir.c_str();
+
+    IF_LOG Logger::println("Use IR-to-Object cache in %s",
+                           opts::ir2objCacheDir.c_str());
+    LOG_SCOPE
+
+    ir2obj::calculateModuleHash(m, moduleHash);
+    std::string cacheFile = ir2obj::cacheLookup(moduleHash);
+    if (!cacheFile.empty()) {
+      ir2obj::recoverObjectFile(moduleHash, filename);
+      return;
+    }
+  }
+
+  // run optimizer
+  ldc_optimize_module(m);
 
   // eventually do our own path stuff, dmd's is a bit strange.
   using LLPath = llvm::SmallString<128>;
@@ -446,26 +466,9 @@ void writeModule(llvm::Module *m, std::string filename) {
   }
 
   if (global.params.output_o && !assembleExternally) {
-    bool useIRToObjCache = !opts::ir2objCacheDir.empty();
+    writeObjectFile(m, filename);
     if (useIRToObjCache) {
-      IF_LOG Logger::println("Use IR-to-Object cache");
-      LOG_SCOPE
-
-      llvm::SmallString<128> cacheDir ( opts::ir2objCacheDir.c_str() );
-      llvm::sys::fs::make_absolute(cacheDir);
-      opts::ir2objCacheDir = cacheDir.c_str();
-
-      llvm::SmallString<32> moduleHash;
-      ir2obj::calculateModuleHash(m, moduleHash);
-      std::string cacheFile = ir2obj::cacheLookup(moduleHash);
-      if (cacheFile.empty()) {
-        writeObjectFile(m, filename);
-        ir2obj::cacheObjectFile(filename, moduleHash);
-      } else {
-        ir2obj::recoverObjectFile(moduleHash, filename);
-      }
-    } else {
-      writeObjectFile(m, filename);
+      ir2obj::cacheObjectFile(filename, moduleHash);
     }
   }
 }
