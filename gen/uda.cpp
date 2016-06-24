@@ -22,6 +22,7 @@ const std::string llvmFastMathFlag = "llvmFastMathFlag";
 const std::string section = "section";
 const std::string target = "target";
 const std::string weak = "_weak";
+const std::string disallowClosureCapture = "_disallowClosureCapture";
 }
 
 /// Checks whether `moduleDecl` is the ldc.attributes module.
@@ -320,4 +321,8 @@ bool hasWeakUDA(Dsymbol *sym) {
   }
 
   return true;
+}
+
+bool hasDisallowClosureCaptureUDA(StructDeclaration *decl) {
+  return hasUDA(decl, attr::disallowClosureCapture);
 }

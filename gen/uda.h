@@ -17,6 +17,7 @@
 
 class Dsymbol;
 class FuncDeclaration;
+class StructDeclaration;
 class VarDeclaration;
 struct IrFunction;
 namespace llvm {
@@ -27,5 +28,9 @@ void applyFuncDeclUDAs(FuncDeclaration *decl, IrFunction *irFunc);
 void applyVarDeclUDAs(VarDeclaration *decl, llvm::GlobalVariable *gvar);
 
 bool hasWeakUDA(Dsymbol *sym);
+
+/// Returns whther the given declaration has the disallowClosureCapture
+/// attribute applied.
+bool hasDisallowClosureCaptureUDA(StructDeclaration *decl);
 
 #endif

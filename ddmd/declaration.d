@@ -44,6 +44,8 @@ import ddmd.target;
 import ddmd.tokens;
 import ddmd.visitor;
 
+version (IN_WEKA) extern(C++) bool hasDisallowClosureCaptureUDA(StructDeclaration decl);
+
 /************************************
  * Check to see the aggregate type is nested and its context pointer is
  * accessible from the current scope.
@@ -2182,6 +2184,16 @@ public:
             if (lv == -2) // error
                 return true;
         }
+
+version (IN_WEKA)
+{
+        if (type.ty == Tstruct &&
+            hasDisallowClosureCaptureUDA((cast(TypeStruct)type).sym))
+        {
+            error(loc, "of type '%s' not allowed to be captured from closure",
+                type.toPrettyChars());
+        }
+}
 
         // Add this to fdv.closureVars[] if not already there
         for (size_t i = 0; 1; i++)
