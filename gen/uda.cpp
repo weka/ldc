@@ -13,7 +13,9 @@
 
 namespace {
 
-/// Names of the attribute structs we recognize.
+/// Names of the attribute structs we recognize. Note that the string value is
+/// the name of the struct type, while the user-facing attribute might be an
+/// instance of it for a zero-member type to allow omitting the parens.
 namespace attr {
 const std::string llvmAttr = "llvmAttr";
 const std::string llvmFastMathFlag = "llvmFastMathFlag";
@@ -64,6 +66,28 @@ StructLiteralExp *getLdcAttributesStruct(Expression *attr) {
   }
 
   return nullptr;
+}
+
+/// Checks whether an UDA has been applied to the given symbol.
+bool hasUDA(Dsymbol *sym, const std::string &name) {
+  if (!sym->userAttribDecl) {
+    return false;
+  }
+
+  Expressions *attrs = sym->userAttribDecl->getAttributes();
+  expandTuples(attrs);
+  for (auto &attr : *attrs) {
+    auto sle = getLdcAttributesStruct(attr);
+    if (!sle) {
+      continue;
+    }
+
+    if (sle->sd->ident->string == name) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 void checkStructElems(StructLiteralExp *sle, ArrayParam<Type *> elemTypes) {
@@ -281,30 +305,19 @@ void applyFuncDeclUDAs(FuncDeclaration *decl, IrFunction *irFunc) {
 
 /// Checks whether 'sym' has the @ldc.attributes._weak() UDA applied.
 bool hasWeakUDA(Dsymbol *sym) {
-  if (!sym->userAttribDecl)
+  if (!hasUDA(sym, attr::weak)) {
     return false;
-
-  // Loop over all UDAs and early return true if @weak was found.
-  Expressions *attrs = sym->userAttribDecl->getAttributes();
-  expandTuples(attrs);
-  for (auto &attr : *attrs) {
-    auto sle = getLdcAttributesStruct(attr);
-    if (!sle)
-      continue;
-
-    auto name = sle->sd->ident->string;
-    if (name == attr::weak) {
-        // Check whether @weak can be applied to this symbol.
-        // Because hasWeakUDA is currently only called for global symbols, this check never errors.
-        auto vd = sym->isVarDeclaration();
-        if (!(vd && vd->isDataseg()) && !sym->isFuncDeclaration()) {
-          sym->error("@ldc.attributes.weak can only be applied to functions or global variables");
-          return false;
-        }
-
-      return true;
-    }
   }
 
-  return false;
+  // Check whether @weak can be applied to this symbol.
+  // Because hasWeakUDA is currently only called for global symbols, this
+  // check never errors.
+  auto vd = sym->isVarDeclaration();
+  if (!(vd && vd->isDataseg()) && !sym->isFuncDeclaration()) {
+    sym->error("@ldc.attributes.weak can only be applied to functions or "
+               "global variables");
+    return false;
+  }
+
+  return true;
 }
