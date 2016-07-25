@@ -367,7 +367,7 @@ cl::opt<bool, true>
               cl::location(global.params.singleObj));
 
 cl::opt<uint32_t, true> hashThreshold(
-    "hashthres",
+    "hash-threshold",
     cl::desc("hash symbol names longer than this threshold (experimental)"),
     cl::location(global.params.hashThreshold), cl::init(0));
 

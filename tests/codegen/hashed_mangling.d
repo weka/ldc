@@ -1,7 +1,7 @@
 // Test hashing of symbols above hash threshold
 
-// RUN: %ldc -hashthres=90 -g -c -output-ll -of=%t90.ll %s && FileCheck %s --check-prefix HASH90 < %t90.ll
-// RUN: %ldc -hashthres=90 -run %s
+// RUN: %ldc -hash-threshold=90 -g -c -output-ll -of=%t90.ll %s && FileCheck %s --check-prefix HASH90 < %t90.ll
+// RUN: %ldc -hash-threshold=90 -run %s
 
 // Don't use Phobos functions in this test, because the test hashthreshold is too low for an unhashed libphobos.
 
