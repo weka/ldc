@@ -4655,8 +4655,17 @@ public:
                  * run on them for the size, since they may be forward referenced.
                  */
                 bool overflow = false;
+version(IN_WEKA)
+{
+                mulu(tbn.size(loc), d2, overflow);
+                if (overflow)
+                    goto Loverflow;
+}
+else
+{
                 if (mulu(tbn.size(loc), d2, overflow) >= 0x1000000 || overflow) // put a 'reasonable' limit on it
                     goto Loverflow;
+}
             }
         }
         switch (tbn.ty)
