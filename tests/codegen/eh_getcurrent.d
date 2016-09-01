@@ -235,15 +235,15 @@ struct DtorThrowsBarException
 
 void testchain1_bar()
 {
-    assert(cast(ZazzException)getCurrEx());
+    assert(cast(ZazzException) getCurrEx());
 
     try
     {
-        assert(cast(ZazzException)getCurrEx());
+        assert(cast(ZazzException) getCurrEx());
 
         scope (exit)
         {
-            assert(cast(WoowException)getCurrEx());
+            assert(cast(WoowException) getCurrEx());
             throw new BarException;
         }
 
@@ -254,10 +254,11 @@ void testchain1_bar()
         assert(cast(WoowException) e);
         assert(cast(BarException) e.next);
 
-        assert(cast(WoowException)getCurrEx());
+        assert(cast(WoowException) getCurrEx());
+        assert(cast(BarException) getCurrEx().next);
     }
 
-    assert(cast(ZazzException)getCurrEx());
+    assert(cast(ZazzException) getCurrEx());
 }
 
 void testchain1()
@@ -268,14 +269,14 @@ void testchain1()
     {
         scope (exit)
         {
-            assert(cast(ZazzException)getCurrEx());
+            assert(cast(ZazzException) getCurrEx());
 
             scope (exit)
                 throw new FooException();
 
             testchain1_bar();
 
-            assert(cast(ZazzException)getCurrEx());
+            assert(cast(ZazzException) getCurrEx());
         }
 
         throw new ZazzException();
@@ -285,7 +286,8 @@ void testchain1()
         assert(cast(ZazzException) e);
         assert(cast(FooException) e.next);
 
-        assert(cast(ZazzException)getCurrEx());
+        assert(cast(ZazzException) getCurrEx());
+        assert(cast(FooException) getCurrEx().next);
     }
 }
 
