@@ -293,6 +293,43 @@ void testchain1()
 
 /////////////////////////////////////////////////////////////
 
+void testrethrow_throws()
+{
+    assert(!getCurrEx());
+
+    try
+    {
+        throw new ZazzException();
+    }
+    catch (Exception e)
+    {
+        assert(cast(ZazzException) e);
+        assert(cast(ZazzException) getCurrEx());
+
+        throw e;
+    }
+
+    assert(cast(ZazzException) getCurrEx());
+}
+
+void testrethrow()
+{
+    assert(!getCurrEx());
+
+    try
+    {
+        testrethrow_throws();
+    }
+    catch (Exception)
+    {
+        assert(cast(ZazzException) getCurrEx());
+    }
+
+    assert(!getCurrEx());
+}
+
+/////////////////////////////////////////////////////////////
+
 void main()
 {
     assert(!getCurrEx());
@@ -306,6 +343,8 @@ void main()
     test6();
 
     testchain1();
+
+    testrethrow();
 
     assert(!getCurrEx());
 }
