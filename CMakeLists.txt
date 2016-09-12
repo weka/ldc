@@ -684,6 +684,11 @@ add_custom_command(
 
 
 #
+# Auxiliary tools.
+#
+add_subdirectory(tools)
+
+#
 # Test and runtime targets. Note that enable_testing() is order-sensitive!
 #
 enable_testing()
