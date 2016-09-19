@@ -155,6 +155,22 @@ void printVersion() {
   exit(EXIT_SUCCESS);
 }
 
+bool canDoSourceCachedBuild()
+{
+/*  printf("%d, %d, %d, %d, %d, %d, %d, %d, %d", (int)opts::compileOnly,
+         (int)global.params.oneobj, (int)!opts::dontWriteObj,
+         (int)!opts::output_bc, (int)!opts::output_ll, (int)!opts::output_s,
+         (int)!global.params.doDocComments,
+         (int)!global.params.doJsonGeneration,
+         (int)!global.params.doHdrGeneration);
+*/
+  return opts::compileOnly && global.params.singleObj && !opts::dontWriteObj &&
+         !opts::output_bc && !opts::output_ll && !opts::output_s &&
+         !global.params.doDocComments && !global.params.doJsonGeneration &&
+         !global.params.doHdrGeneration;
+}
+
+
 // Helper function to handle -d-debug=* and -d-version=*
 static void processVersions(std::vector<std::string> &list, const char *type,
                             void (*setLevel)(unsigned),
@@ -180,6 +196,14 @@ static void processVersions(std::vector<std::string> &list, const char *type,
       }
     }
   }
+}
+
+char *dupPathString(const std::string &src) {
+  char *r = mem.xstrdup(src.c_str());
+#if _WIN32
+  std::replace(r, r + src.length(), '/', '\\');
+#endif
+  return r;
 }
 
 // Helper function to handle -of, -od, etc.
@@ -395,6 +419,10 @@ static void parseCommandLine(int argc, char **argv, Strings &sourceFiles,
   if (global.params.moduleDepsFile != nullptr) {
     global.params.moduleDeps = new OutBuffer;
   }
+
+  // Cache options
+  if (!opts::ir2objCacheDir.empty())
+    global.params.useCompileCache = dupPathString(opts::ir2objCacheDir);
 
   processVersions(debugArgs, "debug", DebugCondition::setGlobalLevel,
                   DebugCondition::addGlobalIdent);
@@ -1183,7 +1211,7 @@ int cppmain(int argc, char **argv) {
     modules.push(m);
   }
 
-  // Read files, parse them
+  // Read files
   for (unsigned i = 0; i < modules.dim; i++) {
     Module *m = modules[i];
     if (global.params.verbose) {
@@ -1201,7 +1229,34 @@ int cppmain(int argc, char **argv) {
     } else {
       m->read(Loc());
     }
+  }
 
+  if (global.params.useCompileCache && canDoSourceCachedBuild()) {
+    // TODO: This really should be a function or someth else:
+    const char *oname;
+    const char *filename;
+    if ((oname = global.params.exefile) || (oname = global.params.objname)) {
+      filename = FileName::forceExt(
+          oname, global.params.targetTriple->isOSWindows() ? global.obj_ext_alt
+                                                           : global.obj_ext);
+      if (global.params.objdir) {
+        filename =
+            FileName::combine(global.params.objdir, FileName::name(filename));
+      }
+    } else {
+      // filename = firstModuleObjfileName_;
+      filename = nullptr;
+    }
+
+    if (filename && attemptRecoverFromCache(&modules, filename)) {
+      IF_LOG Logger::println("Cached compile found!");
+      return EXIT_SUCCESS;
+    }
+  }
+
+  // Parse files
+  for (unsigned i = 0; i < modules.dim; i++) {
+    Module *m = modules[i];
     m->parse(global.params.doDocComments);
     buildTargetFiles(m, singleObj, createSharedLib || createStaticLib);
     m->deleteObjFile();

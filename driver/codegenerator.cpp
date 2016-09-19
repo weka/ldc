@@ -16,6 +16,7 @@
 #include "driver/toobj.h"
 #include "gen/logger.h"
 #include "gen/runtime.h"
+#include "driver/ir2obj_cache.h"
 
 void codegenModule(IRState *irs, Module *m, bool emitFullModuleInfo);
 
@@ -123,7 +124,16 @@ void CodeGenerator::writeAndFreeLLModule(const char *filename) {
       {llvm::MDString::get(ir_->context(), Version)};
   IdentMetadata->addOperand(llvm::MDNode::get(ir_->context(), IdentNode));
 
-  writeModule(&ir_->module, filename);
+  std::string cachedFile;
+  writeModule(&ir_->module, filename, cachedFile);
+
+  if (global.params.useCompileCache && singleObj_ && !cachedFile.empty() &&
+      global.params.compileHash) {
+
+    // better add cachedFile to output files (with output filename) so multiple files can be recovered at the same time?
+    cacheManifest(global.params.compileHash, cachedFile.c_str());
+  }
+
   global.params.objfiles->push(const_cast<char *>(filename));
   delete ir_;
   ir_ = nullptr;

@@ -272,10 +272,10 @@ std::string cacheLookup(llvm::StringRef cacheObjectHash) {
   return "";
 }
 
-void cacheObjectFile(llvm::StringRef objectFile,
+std::string cacheObjectFile(llvm::StringRef objectFile,
                      llvm::StringRef cacheObjectHash) {
   if (opts::ir2objCacheDir.empty())
-    return;
+    return "";
 
   if (!llvm::sys::fs::exists(opts::ir2objCacheDir) &&
       llvm::sys::fs::create_directory(opts::ir2objCacheDir)) {
@@ -294,21 +294,27 @@ void cacheObjectFile(llvm::StringRef objectFile,
           objectFile.str().c_str(), cacheFile.c_str());
     fatal();
   }
+
+  return cacheFile.str().str();
 }
 
-void recoverObjectFile(llvm::StringRef cacheObjectHash,
-                       llvm::StringRef objectFile) {
-  llvm::SmallString<128> cacheFile;
-  storeCacheFileName(cacheObjectHash, cacheFile);
+// For interfacing with D.
+void recoverObjectFile(const char *cacheFile, size_t cacheFileLen,
+                       const char *objectFile, size_t objectFileLen) {
+  recoverObjectFile(llvm::StringRef(cacheFile, cacheFileLen),
+                    llvm::StringRef(objectFile, objectFileLen));
+}
 
+void recoverObjectFile(llvm::StringRef cacheFile,
+                       llvm::StringRef objectFile) {
   // Remove the potentially pre-existing output file.
   llvm::sys::fs::remove(objectFile);
 
   IF_LOG Logger::println("SymLink output to cached object file: %s -> %s",
-                         objectFile.str().c_str(), cacheFile.c_str());
-  if (llvm::sys::fs::create_link(cacheFile.c_str(), objectFile)) {
+                         objectFile.str().c_str(), cacheFile.str().c_str());
+  if (llvm::sys::fs::create_link(cacheFile, objectFile)) {
     error(Loc(), "Failed to create a symlink to the cached file: %s -> %s",
-          cacheFile.c_str(), objectFile.str().c_str());
+          cacheFile.str().c_str(), objectFile.str().c_str());
     fatal();
   }
 
@@ -319,17 +325,17 @@ void recoverObjectFile(llvm::StringRef cacheObjectHash,
   // during linking, it's not perfect but it's the best we can do.
   {
     int FD;
-    if (llvm::sys::fs::openFileForWrite(cacheFile.c_str(), FD,
+    if (llvm::sys::fs::openFileForWrite(cacheFile, FD,
                                         llvm::sys::fs::F_Append)) {
       error(Loc(), "Failed to open the cached file for writing: %s",
-            cacheFile.c_str());
+            cacheFile.str().c_str());
       fatal();
     }
 
     if (llvm::sys::fs::setLastModificationAndAccessTime(
             FD, llvm::sys::TimeValue::now())) {
       error(Loc(), "Failed to set the cached file modification time: %s",
-            cacheFile.c_str());
+            cacheFile.str().c_str());
       fatal();
     }
 

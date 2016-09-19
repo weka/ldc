@@ -43,6 +43,8 @@
 #include <cstddef>
 #include <fstream>
 
+#include "ddmd/module.h"
+
 #if LDC_LLVM_VER >= 306
 using LLErrorInfo = std::error_code;
 #define ERRORINFO_STRING(errinfo) errinfo.message().c_str()
@@ -365,7 +367,8 @@ void writeObjectFile(llvm::Module *m, std::string &filename) {
 }
 } // end of anonymous namespace
 
-void writeModule(llvm::Module *m, std::string filename) {
+void writeModule(llvm::Module *m, std::string filename,
+                 std::string &cachedObjectFilename) {
   // There is no integrated assembler on AIX because XCOFF is not supported.
   // Starting with LLVM 3.5 the integrated assembler can be used with MinGW.
   bool const assembleExternally =
@@ -374,9 +377,9 @@ void writeModule(llvm::Module *m, std::string filename) {
        global.params.targetTriple->getOS() == llvm::Triple::AIX);
 
   // Use cached object code if possible
-  bool useIR2ObjCache = !opts::ir2objCacheDir.empty();
   llvm::SmallString<32> moduleHash;
-  if (useIR2ObjCache && global.params.output_o && !assembleExternally) {
+  if (global.params.useCompileCache && global.params.output_o &&
+      !assembleExternally) {
     llvm::SmallString<128> cacheDir(opts::ir2objCacheDir.c_str());
     llvm::sys::fs::make_absolute(cacheDir);
     opts::ir2objCacheDir = cacheDir.c_str();
@@ -386,9 +389,9 @@ void writeModule(llvm::Module *m, std::string filename) {
     LOG_SCOPE
 
     ir2obj::calculateModuleHash(m, moduleHash);
-    std::string cacheFile = ir2obj::cacheLookup(moduleHash);
-    if (!cacheFile.empty()) {
-      ir2obj::recoverObjectFile(moduleHash, filename);
+    cachedObjectFilename = ir2obj::cacheLookup(moduleHash);
+    if (!cachedObjectFilename.empty()) {
+      ir2obj::recoverObjectFile(cachedObjectFilename, filename);
       return;
     }
   }
@@ -467,8 +470,8 @@ void writeModule(llvm::Module *m, std::string filename) {
 
   if (global.params.output_o && !assembleExternally) {
     writeObjectFile(m, filename);
-    if (useIR2ObjCache) {
-      ir2obj::cacheObjectFile(filename, moduleHash);
+    if (global.params.useCompileCache) {
+      cachedObjectFilename = ir2obj::cacheObjectFile(filename, moduleHash);
     }
   }
 }
