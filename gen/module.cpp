@@ -406,7 +406,7 @@ static void build_module_ref(std::string moduleMangle,
       false, // FIXME: mRelocModel != llvm::Reloc::PIC_
       llvm::GlobalValue::LinkOnceODRLinkage,
       DtoBitCast(thisModuleInfo, moduleInfoPtrTy), thismrefname);
-  thismref->setSection(".minfo");
+  thismref->setSection("minfo");
   gIR->usedArray.push_back(thismref);
 }
 
@@ -418,12 +418,19 @@ static void build_dso_registry_calls(std::string moduleMangle,
   // Order is important here: We must create the symbols in the
   // bracketing sections right before/after the ModuleInfo reference
   // so that they end up in the correct order in the object file.
+/*
   auto minfoBeg =
       new llvm::GlobalVariable(gIR->module, moduleInfoPtrTy,
                                false, // FIXME: mRelocModel != llvm::Reloc::PIC_
                                llvm::GlobalValue::LinkOnceODRLinkage,
                                getNullPtr(moduleInfoPtrTy), "_minfo_beg");
   minfoBeg->setSection(".minfo_beg");
+*/
+  auto minfoBeg =
+      new llvm::GlobalVariable(gIR->module, moduleInfoPtrTy,
+                               false,
+                               llvm::GlobalValue::ExternalLinkage,
+                               nullptr, "__start_minfo");
   minfoBeg->setVisibility(llvm::GlobalValue::HiddenVisibility);
 
   std::string thismrefname = "_D";
@@ -434,15 +441,22 @@ static void build_dso_registry_calls(std::string moduleMangle,
       false, // FIXME: mRelocModel != llvm::Reloc::PIC_
       llvm::GlobalValue::LinkOnceODRLinkage,
       DtoBitCast(thisModuleInfo, moduleInfoPtrTy), thismrefname);
-  thismref->setSection(".minfo");
+  thismref->setSection("minfo");
   gIR->usedArray.push_back(thismref);
 
+/*
   auto minfoEnd =
       new llvm::GlobalVariable(gIR->module, moduleInfoPtrTy,
                                false, // FIXME: mRelocModel != llvm::Reloc::PIC_
                                llvm::GlobalValue::LinkOnceODRLinkage,
                                getNullPtr(moduleInfoPtrTy), "_minfo_end");
   minfoEnd->setSection(".minfo_end");
+*/
+  auto minfoEnd =
+      new llvm::GlobalVariable(gIR->module, moduleInfoPtrTy,
+                               false,
+                               llvm::GlobalValue::ExternalLinkage,
+                               nullptr, "__stop_minfo");
   minfoEnd->setVisibility(llvm::GlobalValue::HiddenVisibility);
 
   // Build the ctor to invoke _d_dso_registry.

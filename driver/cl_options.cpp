@@ -194,6 +194,12 @@ cl::opt<std::string>
     ir2objCacheDir("ir2obj-cache", cl::desc("Use <cache dir> to cache object files for whole IR modules (experimental)"),
             cl::value_desc("cache dir"));
 
+#if LDC_LLVM_VER >= 309
+llvm::cl::opt<bool>
+    enableThinLTO("thinlto",
+                  llvm::cl::desc("Enable ThinLTO (requires linker support)"));
+#endif
+
 static StringsAdapter strImpPathStore("J", global.params.fileImppath);
 static cl::list<std::string, StringsAdapter>
     stringImportPaths("J", cl::desc("Where to look for string imports"),

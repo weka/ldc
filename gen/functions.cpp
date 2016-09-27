@@ -18,6 +18,7 @@
 #include "mtype.h"
 #include "statement.h"
 #include "template.h"
+#include "driver/cl_options.h"
 #include "gen/abi.h"
 #include "gen/arrays.h"
 #include "gen/classes.h"
@@ -39,7 +40,46 @@
 #include "ir/irmodule.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/CFG.h"
+#include "llvm/Target/TargetMachine.h"
 #include <iostream>
+
+namespace {
+
+// These attributes may be overridden by magic UDAs, so this function should be
+// called before applying UDA attributes.
+void applyTargetMachineAttributes(llvm::Function &func,
+                                  const llvm::TargetMachine &target) {
+
+  const llvm::TargetOptions &TO = target.Options;
+
+  // Target CPU capabilities
+  func.addFnAttr("target-cpu", target.getTargetCPU());
+  auto featStr = target.getTargetFeatureString();
+  if (!featStr.empty())
+    func.addFnAttr("target-features", featStr);
+
+  // Floating point settings
+  func.addFnAttr("unsafe-fp-math", TO.UnsafeFPMath ? "true" : "false");
+  func.addFnAttr("less-precise-fpmad", TO.LessPreciseFPMADOption ? "true" : "false");
+  func.addFnAttr("no-infs-fp-math", TO.NoInfsFPMath ? "true" : "false");
+  func.addFnAttr("no-nans-fp-math", TO.NoNaNsFPMath ? "true" : "false");
+  switch (TO.FloatABIType)
+  {
+    case llvm::FloatABI::Default:
+      break;
+    case llvm::FloatABI::Soft:
+      func.addFnAttr("use-soft-float", "true");
+      break;
+    case llvm::FloatABI::Hard:
+      func.addFnAttr("use-soft-float", "false");
+      break;
+  }
+
+  // Frame pointer elimination
+  func.addFnAttr("no-frame-pointer-elim", opts::disableFpElim ? "true" : "false");
+}
+
+} // anonymous namespace
 
 llvm::FunctionType *DtoFunctionType(Type *type, IrFuncTy &irFty, Type *thistype,
                                     Type *nesttype, bool isMain, bool isCtor,
@@ -495,6 +535,8 @@ void DtoDeclareFunction(FuncDeclaration *fdecl) {
       func->addFnAttr(LLAttribute::NoRedZone);
     }
   }
+
+  applyTargetMachineAttributes(*func, *gTargetMachine);
 
   applyFuncDeclUDAs(fdecl, func);
 

@@ -88,6 +88,66 @@ static std::string getOutputName(bool const sharedLib) {
 }
 
 //////////////////////////////////////////////////////////////////////////////
+// LTO functionality
+
+namespace {
+
+std::string getLTOGoldPluginPath() {
+  // TODO: generalize path (on ubuntu, cmakebuild installs it in
+  // /usr/local/lib/LLVMgold.so
+  std::string pluginPath = "/usr/lib/bfd-plugins/LLVMgold.so";
+  return pluginPath;
+}
+
+void addLTOGoldPluginFlags(std::vector<std::string> &args) {
+  args.push_back("-Xlinker");
+  args.push_back("-plugin");
+  args.push_back("-Xlinker");
+  args.push_back(getLTOGoldPluginPath());
+
+  if (!opts::mCPU.empty()) {
+    args.push_back("-Xlinker");
+    args.push_back(std::string("-plugin-opt=mcpu=") + opts::mCPU);
+  }
+
+  // FIXME: we cannot pass mattr to the plugin, so we have to add it for each function in the IR.
+
+  // FIXME: use cmdline `-O*` instead of codeGenOptLevel
+  args.push_back("-Xlinker");
+  switch(codeGenOptLevel()) {
+    case llvm::CodeGenOpt::Level::None:
+      args.push_back("-plugin-opt=O0");
+      break;
+    case llvm::CodeGenOpt::Level::Less:
+      args.push_back("-plugin-opt=O1");
+      break;
+    case llvm::CodeGenOpt::Level::Default:
+      args.push_back("-plugin-opt=O2");
+      break;
+    case llvm::CodeGenOpt::Level::Aggressive:
+      args.push_back("-plugin-opt=O3");
+      break;
+    default:
+      llvm_unreachable("Unexpected optimization level for LTO");
+  }
+
+  args.push_back("-Xlinker");
+  args.push_back("-plugin-opt=thinlto");
+
+  args.push_back("-Xlinker");
+  args.push_back("-plugin-opt=save-temps");
+}
+
+/// Adds the required linker flags for LTO builds to args.
+void addLTOLinkFlags(std::vector<std::string> &args) {
+  // Assume that on Linux, ld.gold is used with plugin support.
+  if (global.params.targetTriple->isOSLinux()) {
+    addLTOGoldPluginFlags(args);
+  }
+}
+} // anonymous namespace
+
+//////////////////////////////////////////////////////////////////////////////
 
 static std::string gExePath;
 
@@ -158,6 +218,9 @@ static int linkObjToBinaryGcc(bool sharedLib, bool fullyStatic) {
     }
     args.push_back(p);
   }
+
+  if (opts::enableThinLTO)
+    addLTOLinkFlags(args);
 
   // default libs
   bool addSoname = false;
