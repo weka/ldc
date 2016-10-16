@@ -52,31 +52,31 @@
 namespace {
 
 // Options for the cache pruning algorithm
-llvm::cl::opt<bool> pruneEnabled("ir2obj-cache-prune",
+llvm::cl::opt<bool> pruneEnabled("cache-prune",
                                  llvm::cl::desc("Enable cache pruning."),
                                  llvm::cl::ZeroOrMore);
 llvm::cl::opt<unsigned long long> pruneSizeLimitInBytes(
-    "ir2obj-cache-prune-maxbytes",
+    "cache-prune-maxbytes",
     llvm::cl::desc("Sets the maximum cache size to <size> bytes. Implies "
-                   "-ir2obj-cache-prune."),
+                   "-cache-prune."),
     llvm::cl::value_desc("size"), llvm::cl::init(0));
 llvm::cl::opt<unsigned> pruneInterval(
-    "ir2obj-cache-prune-interval",
+    "cache-prune-interval",
     llvm::cl::desc("Sets the cache pruning interval to <dur> seconds "
                    "(default: 20 min). Set to 0 to force pruning. Implies "
-                   "-ir2obj-cache-prune."),
+                   "-cache-prune."),
     llvm::cl::value_desc("dur"), llvm::cl::init(20 * 60));
 llvm::cl::opt<unsigned> pruneExpiration(
-    "ir2obj-cache-prune-expiration",
+    "cache-prune-expiration",
     llvm::cl::desc(
         "Sets the pruning expiration time of cache files to "
-        "<dur> seconds (default: 1 week). Implies -ir2obj-cache-prune."),
+        "<dur> seconds (default: 1 week). Implies -cache-prune."),
     llvm::cl::value_desc("dur"), llvm::cl::init(7 * 24 * 3600));
 llvm::cl::opt<unsigned> pruneSizeLimitPercentage(
-    "ir2obj-cache-prune-maxpercentage",
+    "cache-prune-maxpercentage",
     llvm::cl::desc(
         "Sets the cache size limit to <perc> percent of the available "
-        "space (default: 75%). Implies -ir2obj-cache-prune."),
+        "space (default: 75%). Implies -cache-prune."),
     llvm::cl::value_desc("perc"), llvm::cl::init(75));
 
 bool isPruningEnabled() {
