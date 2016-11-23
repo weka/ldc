@@ -49,6 +49,51 @@
 #include <io.h>
 #endif
 
+#if LDC_POSIX
+#include <unistd.h>
+// Returns true upon error.
+static bool createHardLink(const char *to, const char *from) {
+  return link(to, from) == -1;
+}
+// Returns true upon error.
+static bool createSymLink(const char *to, const char *from) {
+  return symlink(to, from) == -1;
+}
+#elif _WIN32
+#include <windows.h>
+#include "llvm/Support/Windows/WindowsSupport.h"
+// Returns true upon error.
+static template<typename FType>
+bool createLink(FType f, const char *to, const char *from) {
+  //===----------------------------------------------------------------------===//
+  //
+  // Code copied from LLVM 3.9 llvm/Support/Windows/Path.inc, distributed under
+  // the University of Illinois Open Source License. See LICENSE for details.
+  //
+  //===----------------------------------------------------------------------===//
+
+  SmallVector<wchar_t, 128> wide_from;
+  SmallVector<wchar_t, 128> wide_to;
+  if (widenPath(from, wide_from))
+    return true;
+  if (widenPath(to, wide_to))
+    return true;
+
+  if (!(*f)(wide_from.begin(), wide_to.begin(), NULL))
+    return true;
+
+  return false;
+}
+// Returns true upon error.
+static bool createHardLink(const char *to, const char *from) {
+  return createLink(&CreateHardLinkW, to, from);
+}
+// Returns true upon error.
+static bool createSymLink(const char *to, const char *from) {
+  return createLink(&CreateSymbolicLinkW, to, from);
+}
+#endif
+
 namespace {
 
 // Options for the cache pruning algorithm
@@ -78,6 +123,19 @@ llvm::cl::opt<unsigned> pruneSizeLimitPercentage(
         "Sets the cache size limit to <perc> percent of the available "
         "space (default: 75%). Implies -cache-prune."),
     llvm::cl::value_desc("perc"), llvm::cl::init(75));
+
+enum class RecoveryMode { Copy, HardLink, AnyLink, SymLink };
+llvm::cl::opt<RecoveryMode> cacheRecoveryMode(
+    "cache-recovery", llvm::cl::desc("Set the cache recovery mechanism (default: copy)."),
+    llvm::cl::init(RecoveryMode::AnyLink),
+    clEnumValues(clEnumValN(RecoveryMode::Copy, "copy",
+                            "Make a copy of the cache file."),
+                 clEnumValN(RecoveryMode::HardLink, "hardlink",
+                            "Create a hard link to the cache file"),
+                 clEnumValN(RecoveryMode::AnyLink, "link",
+                            "Equal to 'hardlink' on Windows, but 'symlink' on Unix and OS X"),
+                 clEnumValN(RecoveryMode::SymLink, "symlink",
+                            "Create a symbolic link to the cache file")));
 
 bool isPruningEnabled() {
   if (pruneEnabled)
@@ -304,12 +362,43 @@ void recoverObjectFile(llvm::StringRef cacheObjectHash,
   // Remove the potentially pre-existing output file.
   llvm::sys::fs::remove(objectFile);
 
-  IF_LOG Logger::println("SymLink output to cached object file: %s -> %s",
-                         objectFile.str().c_str(), cacheFile.c_str());
-  if (llvm::sys::fs::create_link(cacheFile.c_str(), objectFile)) {
-    error(Loc(), "Failed to create a symlink to the cached file: %s -> %s",
-          cacheFile.c_str(), objectFile.str().c_str());
-    fatal();
+  switch (cacheRecoveryMode) {
+  case RecoveryMode::Copy: {
+    IF_LOG Logger::println("Copy cached object file: %s -> %s",
+                           cacheFile.c_str(), objectFile.str().c_str());
+    if (llvm::sys::fs::copy_file(cacheFile.c_str(), objectFile)) {
+      error(Loc(), "Failed to copy the cached file: %s -> %s",
+            cacheFile.c_str(), objectFile.str().c_str());
+      fatal();
+    }
+  } break;
+  case RecoveryMode::HardLink: {
+    IF_LOG Logger::println("HardLink output to cached object file: %s -> %s",
+                           objectFile.str().c_str(), cacheFile.c_str());
+    if (createHardLink(cacheFile.c_str(), objectFile.str().c_str())) {
+      error(Loc(), "Failed to create a hard link to the cached file: %s -> %s",
+            cacheFile.c_str(), objectFile.str().c_str());
+      fatal();
+    }
+  } break;
+  case RecoveryMode::AnyLink: {
+    IF_LOG Logger::println("Link output to cached object file: %s -> %s",
+                           objectFile.str().c_str(), cacheFile.c_str());
+    if (llvm::sys::fs::create_link(cacheFile.c_str(), objectFile)) {
+      error(Loc(), "Failed to create a link to the cached file: %s -> %s",
+            cacheFile.c_str(), objectFile.str().c_str());
+      fatal();
+    }
+  } break;
+  case RecoveryMode::SymLink: {
+    IF_LOG Logger::println("SymLink output to cached object file: %s -> %s",
+                           objectFile.str().c_str(), cacheFile.c_str());
+    if (createSymLink(cacheFile.c_str(), objectFile.str().c_str())) {
+      error(Loc(), "Failed to create a symbolic link to the cached file: %s -> %s",
+            cacheFile.c_str(), objectFile.str().c_str());
+      fatal();
+    }
+  } break;
   }
 
   // We reset the modification time to "now" such that the pruning algorithm
