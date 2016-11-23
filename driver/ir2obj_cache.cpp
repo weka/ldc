@@ -124,18 +124,21 @@ llvm::cl::opt<unsigned> pruneSizeLimitPercentage(
         "space (default: 75%). Implies -cache-prune."),
     llvm::cl::value_desc("perc"), llvm::cl::init(75));
 
-enum class RecoveryMode { Copy, HardLink, AnyLink, SymLink };
-llvm::cl::opt<RecoveryMode> cacheRecoveryMode(
-    "cache-recovery", llvm::cl::desc("Set the cache recovery mechanism (default: copy)."),
-    llvm::cl::init(RecoveryMode::AnyLink),
-    clEnumValues(clEnumValN(RecoveryMode::Copy, "copy",
-                            "Make a copy of the cache file."),
-                 clEnumValN(RecoveryMode::HardLink, "hardlink",
-                            "Create a hard link to the cache file"),
-                 clEnumValN(RecoveryMode::AnyLink, "link",
-                            "Equal to 'hardlink' on Windows, but 'symlink' on Unix and OS X"),
-                 clEnumValN(RecoveryMode::SymLink, "symlink",
-                            "Create a symbolic link to the cache file")));
+enum class RetrievalMode { Copy, HardLink, AnyLink, SymLink };
+llvm::cl::opt<RetrievalMode> cacheRetrievalMode(
+    "cache-retrieval",
+    llvm::cl::desc("Set the cache retrieval mechanism (default: copy)."),
+    llvm::cl::init(RetrievalMode::AnyLink),
+    clEnumValues(
+        clEnumValN(RetrievalMode::Copy, "copy",
+                   "Make a copy of the cache file."),
+        clEnumValN(RetrievalMode::HardLink, "hardlink",
+                   "Create a hard link to the cache file"),
+        clEnumValN(
+            RetrievalMode::AnyLink, "link",
+            "Equal to 'hardlink' on Windows, but 'symlink' on Unix and OS X"),
+        clEnumValN(RetrievalMode::SymLink, "symlink",
+                   "Create a symbolic link to the cache file")));
 
 bool isPruningEnabled() {
   if (pruneEnabled)
@@ -362,8 +365,8 @@ void recoverObjectFile(llvm::StringRef cacheObjectHash,
   // Remove the potentially pre-existing output file.
   llvm::sys::fs::remove(objectFile);
 
-  switch (cacheRecoveryMode) {
-  case RecoveryMode::Copy: {
+  switch (cacheRetrievalMode) {
+  case RetrievalMode::Copy: {
     IF_LOG Logger::println("Copy cached object file: %s -> %s",
                            cacheFile.c_str(), objectFile.str().c_str());
     if (llvm::sys::fs::copy_file(cacheFile.c_str(), objectFile)) {
@@ -372,7 +375,7 @@ void recoverObjectFile(llvm::StringRef cacheObjectHash,
       fatal();
     }
   } break;
-  case RecoveryMode::HardLink: {
+  case RetrievalMode::HardLink: {
     IF_LOG Logger::println("HardLink output to cached object file: %s -> %s",
                            objectFile.str().c_str(), cacheFile.c_str());
     if (createHardLink(cacheFile.c_str(), objectFile.str().c_str())) {
@@ -381,7 +384,7 @@ void recoverObjectFile(llvm::StringRef cacheObjectHash,
       fatal();
     }
   } break;
-  case RecoveryMode::AnyLink: {
+  case RetrievalMode::AnyLink: {
     IF_LOG Logger::println("Link output to cached object file: %s -> %s",
                            objectFile.str().c_str(), cacheFile.c_str());
     if (llvm::sys::fs::create_link(cacheFile.c_str(), objectFile)) {
@@ -390,7 +393,7 @@ void recoverObjectFile(llvm::StringRef cacheObjectHash,
       fatal();
     }
   } break;
-  case RecoveryMode::SymLink: {
+  case RetrievalMode::SymLink: {
     IF_LOG Logger::println("SymLink output to cached object file: %s -> %s",
                            objectFile.str().c_str(), cacheFile.c_str());
     if (createSymLink(cacheFile.c_str(), objectFile.str().c_str())) {
