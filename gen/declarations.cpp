@@ -576,17 +576,7 @@ public:
 //////////////////////////////////////////////////////////////////////////////
 
 void Declaration_codegen(Dsymbol *decl) {
-  using namespace std::chrono;
-  auto name = decl->toChars();
-  printf("Declaration_codegen: %s\n", name ? name : "(null)");
-  auto t1 = high_resolution_clock::now();
-
-  CodegenVisitor v(gIR);
-  decl->accept(&v);
-
-  auto t2 = high_resolution_clock::now();
-  auto time_span = duration_cast<std::chrono::milliseconds>(t2 - t1);
-  std::cout << "  codegen time = " << time_span.count() << " ms" << ((time_span.count() > 500) ? " LONG " : "") << std::endl;
+  Declaration_codegen(decl, gIR);
 }
 
 void Declaration_codegen(Dsymbol *decl, IRState *irs) {
@@ -600,7 +590,7 @@ void Declaration_codegen(Dsymbol *decl, IRState *irs) {
 
   auto t2 = high_resolution_clock::now();
   auto time_span = duration_cast<std::chrono::milliseconds>(t2 - t1);
-  std::cout << "  codegen time = " << time_span.count() << " ms" << ((time_span.count() > 500) ? " LONG " : "") << std::endl;
+  std::cout << "  codegen time = " << time_span.count() << " ms  (" << name << ") "  << ((time_span.count() > 500) ? " LONG " : "") << std::endl;
 }
 
 //////////////////////////////////////////////////////////////////////////////
