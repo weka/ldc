@@ -790,6 +790,10 @@ extern (C++) Expression ctfeInterpretForPragmaMsg(Expression e)
  */
 extern (C++) Expression interpret(FuncDeclaration fd, InterState* istate, Expressions* arguments, Expression thisarg)
 {
+    import driver.report_timing;
+    import std.string : fromStringz;
+    auto ptsip = printTimeSpentInScope("  interpret(FuncDeclaration), %s, %s", fromStringz(fd.loc.toChars()), fromStringz(fd.toChars()));
+
     static if (LOG)
     {
         printf("\n********\n%s FuncDeclaration::interpret(istate = %p) %s\n", fd.loc.toChars(), istate, fd.toChars());
@@ -6065,8 +6069,15 @@ public:
 
 extern (C++) Expression interpret(Expression e, InterState* istate, CtfeGoal goal = ctfeNeedRvalue)
 {
+
     if (!e)
         return null;
+
+    import driver.report_timing;
+    import std.string : fromStringz;
+    //auto ptsip = printTimeSpentInScope("  interpret(Expression), %s, %s", fromStringz(e.loc.toChars()), fromStringz(e.toChars()));
+    auto ptsip = printTimeSpentInScope("  interpret(Expression), %s", fromStringz(e.loc.toChars()));
+
     scope Interpreter v = new Interpreter(istate, goal);
     e.accept(v);
     Expression ex = v.result;
@@ -6085,6 +6096,12 @@ extern (C++) Expression interpret(Statement s, InterState* istate)
 {
     if (!s)
         return null;
+
+    import driver.report_timing;
+    import std.string : fromStringz;
+    //auto ptsip = printTimeSpentInScope("  interpret(Statement), %s, %s", fromStringz(s.loc.toChars()), fromStringz(s.toChars()));
+    auto ptsip = printTimeSpentInScope("  interpret(Statement), %s", fromStringz(s.loc.toChars()));
+
     scope Interpreter v = new Interpreter(istate, ctfeNeedNothing);
     s.accept(v);
     return v.result;

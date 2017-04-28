@@ -44,6 +44,7 @@ import ddmd.visitor;
 version(IN_LLVM)
 {
 import gen.llvmhelpers;
+import driver.report_timing;
 }
 
 private enum LOG = false;
@@ -511,6 +512,10 @@ else
 
     override void semantic(Scope* sc)
     {
+        import driver.report_timing;
+        import std.string : fromStringz;
+        auto ptsip = printTimeSpentInScope("  TemplateDeclaration.semantic, %s, %s", fromStringz(loc.toChars()), fromStringz(ident.toChars()));
+
         static if (LOG)
         {
             printf("TemplateDeclaration::semantic(this = %p, id = '%s')\n", this, ident.toChars());
@@ -6349,11 +6354,18 @@ version(IN_WEKA) {
 
     override void semantic(Scope* sc)
     {
+        import driver.report_timing;
+        import std.string : fromStringz;
+        auto ptsip = printTimeSpentInScope("  TemplateInstance.semantic, %s, %s", fromStringz(loc.toChars()), fromStringz(toChars()));
         semantic(sc, null);
     }
 
     override void semantic2(Scope* sc)
     {
+        import driver.report_timing;
+        import std.string : fromStringz;
+        auto ptsip = printTimeSpentInScope("  TemplateInstance.semantic2, %s, %s", fromStringz(loc.toChars()), fromStringz(toChars()));
+
         if (semanticRun >= PASSsemantic2)
             return;
         semanticRun = PASSsemantic2;
@@ -6411,6 +6423,10 @@ version(IN_WEKA) {
 
     override void semantic3(Scope* sc)
     {
+        import driver.report_timing;
+        import std.string : fromStringz;
+        auto ptsip = printTimeSpentInScope("  TemplateInstance.semantic3, %s, %s", fromStringz(loc.toChars()), fromStringz(toChars()));
+
         static if (LOG)
         {
             printf("TemplateInstance::semantic3('%s'), semanticRun = %d\n", toChars(), semanticRun);
@@ -6675,6 +6691,11 @@ version(IN_WEKA) {
      */
     final bool needsCodegen()
     {
+        import driver.report_timing;
+        import std.string : fromStringz;
+        //auto ptsip = printTimeSpentInScope("  TemplateInstance.needsCodegen, %s, %s", fromStringz(loc.toChars()), fromStringz(toChars()));
+        //auto ptsip = printTimeSpentInScope("  TemplateInstance.needsCodegen, %s", fromStringz(loc.toChars()));
+
         // Now -allInst is just for the backward compatibility.
         if (global.params.allInst)
         {
@@ -6824,7 +6845,17 @@ version(IN_WEKA) {
 // instance pointing back to 'this', so there the symbol corresponding to 'tnext'
 // would again not be emitted. By commenting out this block, we are always
 // emitting non-speculative instantiations directly from root nodes.
-version(IN_WEKA) {}
+version(IN_WEKA)
+{
+            TemplateInstance tnext = this.tnext;
+            this.tnext = null;
+
+            if (tnext && !tnext.needsCodegen() && tnext.minst)
+            {
+                import std.stdio : writeln;
+                writeln("   weka-mod forces codegen");
+            }
+}
 else
 {
             TemplateInstance tnext = this.tnext;
@@ -8144,6 +8175,10 @@ public:
 
     override void semantic(Scope* sc)
     {
+        import driver.report_timing;
+        import std.string : fromStringz;
+        auto ptsip = printTimeSpentInScope("  TemplateMixin.semantic, %s, %s", fromStringz(loc.toChars()), fromStringz(toChars()));
+
         static if (LOG)
         {
             printf("+TemplateMixin::semantic('%s', this=%p)\n", toChars(), this);
@@ -8371,6 +8406,10 @@ public:
 
     override void semantic2(Scope* sc)
     {
+        import driver.report_timing;
+        import std.string : fromStringz;
+        auto ptsip = printTimeSpentInScope("  TemplateMixin.semantic2, %s, %s", fromStringz(loc.toChars()), fromStringz(toChars()));
+
         if (semanticRun >= PASSsemantic2)
             return;
         semanticRun = PASSsemantic2;
@@ -8403,6 +8442,10 @@ public:
 
     override void semantic3(Scope* sc)
     {
+        import driver.report_timing;
+        import std.string : fromStringz;
+        auto ptsip = printTimeSpentInScope("  TemplateMixin.semantic3, %s, %s", fromStringz(loc.toChars()), fromStringz(toChars()));
+
         if (semanticRun >= PASSsemantic3)
             return;
         semanticRun = PASSsemantic3;

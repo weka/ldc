@@ -50,6 +50,9 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
 
+#include "driver/report_timing.h"
+#include <chrono>
+
 #if _AIX || __sun
 #include <alloca.h>
 #endif
@@ -710,6 +713,55 @@ void codegenModule(IRState *irs, Module *m) {
   if (!isPseudoModule) {
     loadInstrProfileData(gIR);
   }
+
+
+
+
+  unsigned numTemplates = 0;
+  unsigned numNeeded = 0;
+
+/*  printf("Start loop\n");
+{
+  timing::PrintTimeSpentInScope timing("loop over all templates");
+  for (unsigned k = 0; k < m->members->dim; k++) {
+    Dsymbol *dsym = (*m->members)[k];
+    if (TemplateInstance *templ = dsym->isTemplateInstance()) {
+      ++numTemplates;
+      if (isError(templ) || !templ->members)
+        continue;
+      if (numTemplates==47)
+        continue;
+      bool needed = templ->needsCodegen();
+      numNeeded += needed;
+    }
+  }
+}
+  printf("\n\nnumTemplates, numNeeded: %d, %d\n\n", (int)numTemplates, (int)numNeeded);
+   numTemplates = 0;
+   numNeeded = 0;
+*/
+
+/*
+  printf("Number of module members: %d\n", (int)m->members->dim);
+  for (unsigned k = 0; k < m->members->dim; k++) {
+    using namespace std::chrono;
+    Dsymbol *dsym = (*m->members)[k];
+    if (TemplateInstance *templ = dsym->isTemplateInstance()) {
+      printf("instance (%u): %s\n", ++numTemplates, templ->toChars());
+      if (isError(templ) || !templ->members)
+        continue;
+      if (numTemplates==47)
+        continue;
+      auto t1 = high_resolution_clock::now();
+      bool needed = templ->needsCodegen();
+      numNeeded += needed;
+      auto t2 = high_resolution_clock::now();
+      auto time_span = duration_cast<std::chrono::milliseconds>(t2 - t1);
+      std::cout << "  needed(" << numNeeded << ")=" << needed << "  " << time_span.count() << " ms" << ((time_span.count() > 500) ? " LONG " : "") << std::endl;
+    }
+  }
+  printf("\n\nnumTemplates, numNeeded: %d, %d\n\n", (int)numTemplates, (int)numNeeded);
+*/
 
   // process module members
   for (unsigned k = 0; k < m->members->dim; k++) {

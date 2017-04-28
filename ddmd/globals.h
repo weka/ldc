@@ -207,6 +207,7 @@ struct Param
     bool hasObjectiveC;
     bool fullyQualifiedObjectFiles;
     bool cleanupObjectFiles;
+    bool verboseCompileTimings;
 
     // Profile-guided optimization:
     bool genInstrProf;             // Whether to generate PGO instrumented code

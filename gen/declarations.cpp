@@ -28,6 +28,8 @@
 #include "ir/irvar.h"
 #include "llvm/ADT/SmallString.h"
 
+#include <chrono>
+
 //////////////////////////////////////////////////////////////////////////////
 
 namespace {
@@ -451,6 +453,8 @@ public:
       }
     }
 
+    std::cout << "  templ codegen  "; // no newline
+
     for (auto &m : *decl->members) {
       m->accept(this);
     }
@@ -572,13 +576,31 @@ public:
 //////////////////////////////////////////////////////////////////////////////
 
 void Declaration_codegen(Dsymbol *decl) {
+  using namespace std::chrono;
+  auto name = decl->toChars();
+  printf("Declaration_codegen: %s\n", name ? name : "(null)");
+  auto t1 = high_resolution_clock::now();
+
   CodegenVisitor v(gIR);
   decl->accept(&v);
+
+  auto t2 = high_resolution_clock::now();
+  auto time_span = duration_cast<std::chrono::milliseconds>(t2 - t1);
+  std::cout << "  codegen time = " << time_span.count() << " ms" << ((time_span.count() > 500) ? " LONG " : "") << std::endl;
 }
 
 void Declaration_codegen(Dsymbol *decl, IRState *irs) {
+  using namespace std::chrono;
+  auto name = decl->toChars();
+  printf("Declaration_codegen: %s\n", name ? name : "(null)");
+  auto t1 = high_resolution_clock::now();
+
   CodegenVisitor v(irs);
   decl->accept(&v);
+
+  auto t2 = high_resolution_clock::now();
+  auto time_span = duration_cast<std::chrono::milliseconds>(t2 - t1);
+  std::cout << "  codegen time = " << time_span.count() << " ms" << ((time_span.count() > 500) ? " LONG " : "") << std::endl;
 }
 
 //////////////////////////////////////////////////////////////////////////////

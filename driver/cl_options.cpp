@@ -98,6 +98,11 @@ static cl::opt<bool, true> verbose_cg("v-cg", cl::desc("Verbose codegen"),
                                       cl::ZeroOrMore,
                                       cl::location(global.params.verbose_cg));
 
+static cl::opt<bool, true>
+    verboseCompileTimings("vtimings", cl::desc("Verbose compile timings"),
+                          cl::ZeroOrMore,
+                          cl::location(global.params.verboseCompileTimings));
+
 static cl::opt<unsigned, true> errorLimit(
     "verrors",
     cl::desc("limit the number of error messages (0 means unlimited)"),

@@ -54,6 +54,11 @@ import ddmd.root.stringtable;
 import ddmd.target;
 import ddmd.tokens;
 
+version(IN_LLVM)
+{
+    import driver.report_timing;
+    import std.string;
+}
 
 /**
  * Normalize path by turning forward slashes into backslashes
@@ -1377,6 +1382,7 @@ extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules)
         global.params.objfiles.insert(0, fn);
     }
   }
+    printCurrentTime("Start reading files");
     // Read files
     /* Start by "reading" the dummy main.d file
      */
@@ -1416,7 +1422,10 @@ extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules)
             m.read(Loc());
         }
     }
+
+
     // Parse files
+    printCurrentTime("Start parsing");
     bool anydocfiles = false;
     size_t filecount = modules.dim;
     for (size_t filei = 0, modi = 0; filei < filecount; filei++, modi++)
@@ -1526,6 +1535,7 @@ extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules)
     for (size_t i = 0; i < modules.dim; i++)
     {
         Module m = modules[i];
+        auto ptsip = printTimeSpentInScope("  load imports, %s", fromStringz(m.toChars()));
         if (global.params.verbose)
             fprintf(global.stdmsg, "importall %s\n", m.toChars());
         m.importAll(null);
@@ -1537,9 +1547,11 @@ extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules)
     backend_init();
   }
     // Do semantic analysis
+    printCurrentTime("Start SemA");
     for (size_t i = 0; i < modules.dim; i++)
     {
         Module m = modules[i];
+        auto ptsip = printTimeSpentInScope("  semantic, %s", fromStringz(m.toChars()));
         if (global.params.verbose)
             fprintf(global.stdmsg, "semantic  %s\n", m.toChars());
         m.semantic(null);
@@ -1547,6 +1559,7 @@ extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules)
     if (global.errors)
         fatal();
     Module.dprogress = 1;
+    printCurrentTime("  start runDeferredSemantic");
     Module.runDeferredSemantic();
     if (Module.deferred.dim)
     {
@@ -1561,6 +1574,7 @@ extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules)
     for (size_t i = 0; i < modules.dim; i++)
     {
         Module m = modules[i];
+        auto ptsip = printTimeSpentInScope("  semantic2, %s", fromStringz(m.toChars()));
         if (global.params.verbose)
             fprintf(global.stdmsg, "semantic2 %s\n", m.toChars());
         m.semantic2(null);
@@ -1571,10 +1585,12 @@ extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules)
     for (size_t i = 0; i < modules.dim; i++)
     {
         Module m = modules[i];
+        auto ptsip = printTimeSpentInScope("  semantic3, %s", fromStringz(m.toChars()));
         if (global.params.verbose)
             fprintf(global.stdmsg, "semantic3 %s\n", m.toChars());
         m.semantic3(null);
     }
+    printCurrentTime("  start runDeferredSemantic3");
     Module.runDeferredSemantic3();
     if (global.errors)
         fatal();
@@ -1592,6 +1608,8 @@ extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules)
         }
     }
   }
+    printCurrentTime("Done SemA");
+
     // Do not attempt to generate output files if errors or warnings occurred
     if (global.errors || global.warnings)
         fatal();
