@@ -3683,7 +3683,7 @@ else
             goto Lyes;
         /* Look for case (5)
          */
-        if (closureVars.dim)
+        if (!IN_WEKA && closureVars.dim)
         {
             assert(type.ty == Tfunction);
             Type tret = (cast(TypeFunction)type).next;
