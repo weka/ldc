@@ -3203,6 +3203,7 @@ else
 
     final bool isNogc()
     {
+        //printf("isNogc() %s, inprocess: %d\n", toChars(), !!(flags & FUNCFLAGnogcInprocess));
         assert(type.ty == Tfunction);
         if (flags & FUNCFLAGnogcInprocess)
             setGC();
@@ -3222,6 +3223,13 @@ else
      */
     final bool setGC()
     {
+        //printf("setGC() %s\n", toChars());
+        if (flags & FUNCFLAGnogcInprocess && semanticRun < PASSsemantic3 && _scope)
+        {
+            semantic2(_scope);
+            semantic3(_scope);
+        }
+
         if (flags & FUNCFLAGnogcInprocess)
         {
             flags &= ~FUNCFLAGnogcInprocess;
