@@ -1594,7 +1594,7 @@ public:
                     if (token.value == TOKassign) // = CondExpression
                     {
                         nextToken();
-                        tp_defaultvalue = parseDefaultInitExp();
+                        tp_defaultvalue = parseAssignExp();
                     }
                     tp = new TemplateValueParameter(loc, tp_ident, tp_valtype, tp_specvalue, tp_defaultvalue);
                 }
@@ -2660,7 +2660,7 @@ public:
                         if (token.value == TOKassign) // = defaultArg
                         {
                             nextToken();
-                            ae = parseDefaultInitExp();
+                            ae = parseAssignExp();
                             hasdefault = 1;
                         }
                         else
@@ -2698,7 +2698,7 @@ public:
                         if (token.value == TOKassign) // = defaultArg
                         {
                             nextToken();
-                            ae = parseDefaultInitExp();
+                            ae = parseAssignExp();
                             hasdefault = 1;
                         }
                         else
@@ -5728,38 +5728,6 @@ public:
         }
     }
 
-    /*****************************************
-     * Parses default argument initializer expression that is an assign expression,
-     * with special handling for __FILE__, __LINE__, __MODULE__, __FUNCTION__, and __PRETTY_FUNCTION__.
-     */
-    Expression parseDefaultInitExp()
-    {
-        if (token.value == TOKfile || token.value == TOKline || token.value == TOKmodulestring || token.value == TOKfuncstring || token.value == TOKprettyfunc)
-        {
-            Token* t = peek(&token);
-            if (t.value == TOKcomma || t.value == TOKrparen)
-            {
-                Expression e = null;
-                if (token.value == TOKfile)
-                    e = new FileInitExp(token.loc);
-                else if (token.value == TOKline)
-                    e = new LineInitExp(token.loc);
-                else if (token.value == TOKmodulestring)
-                    e = new ModuleInitExp(token.loc);
-                else if (token.value == TOKfuncstring)
-                    e = new FuncInitExp(token.loc);
-                else if (token.value == TOKprettyfunc)
-                    e = new PrettyFuncInitExp(token.loc);
-                else
-                    assert(0);
-                nextToken();
-                return e;
-            }
-        }
-        Expression e = parseAssignExp();
-        return e;
-    }
-
     void check(Loc loc, TOK value)
     {
         if (token.value != value)
@@ -6648,24 +6616,23 @@ public:
             e = new NullExp(loc);
             nextToken();
             break;
+
+        /*****************************************
+         * Parses default argument initializer expression that is an assign expression,
+         * with special handling for __FILE__, __LINE__, __MODULE__, __FUNCTION__, and __PRETTY_FUNCTION__.
+         */
         case TOKfile:
-            {
-                const(char)* s = loc.filename ? loc.filename : mod.ident.toChars();
-                e = new StringExp(loc, cast(char*)s);
-                nextToken();
-                break;
-            }
+            e = new FileInitExp(loc);
+            nextToken();
+            break;
         case TOKline:
-            e = new IntegerExp(loc, loc.linnum, Type.tint32);
+            e = new LineInitExp(loc);
             nextToken();
             break;
         case TOKmodulestring:
-            {
-                const(char)* s = md ? md.toChars() : mod.toChars();
-                e = new StringExp(loc, cast(char*)s);
-                nextToken();
-                break;
-            }
+            e = new ModuleInitExp(loc);
+            nextToken();
+            break;
         case TOKfuncstring:
             e = new FuncInitExp(loc);
             nextToken();
@@ -6674,6 +6641,8 @@ public:
             e = new PrettyFuncInitExp(loc);
             nextToken();
             break;
+        /*****************************************/
+
         case TOKtrue:
             e = new IntegerExp(loc, 1, Type.tbool);
             nextToken();

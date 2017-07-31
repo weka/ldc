@@ -5173,9 +5173,9 @@ public:
         if (e)
         {
             e = e.syntaxCopy();
+            e = e.resolveLoc(instLoc, sc); // use the instantiated loc
             e = e.semantic(sc);
             e = resolveProperties(sc, e);
-            e = e.resolveLoc(instLoc, sc); // use the instantiated loc
             e = e.optimize(WANTvalue);
         }
         return e;

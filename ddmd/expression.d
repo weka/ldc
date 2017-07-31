@@ -7518,7 +7518,7 @@ public:
         return null;
     }
 
-    override final Expression resolveLoc(Loc loc, Scope* sc)
+    override Expression resolveLoc(Loc loc, Scope* sc)
     {
         e1 = e1.resolveLoc(loc, sc);
         return this;
@@ -7563,6 +7563,13 @@ public:
         e.e1 = e.e1.syntaxCopy();
         e.e2 = e.e2.syntaxCopy();
         return e;
+    }
+
+    override Expression resolveLoc(Loc loc, Scope* sc)
+    {
+        e1 = e1.resolveLoc(loc, sc);
+        e2 = e2.resolveLoc(loc, sc);
+        return this;
     }
 
     override abstract Expression semantic(Scope* sc);
@@ -7956,18 +7963,9 @@ public:
  */
 extern (C++) final class CompileExp : UnaExp
 {
-public:
-    extern (D) this(Loc loc, Expression e)
+private:
+    Expression normalize(Scope* sc)
     {
-        super(loc, TOKmixin, __traits(classInstanceSize, CompileExp), e);
-    }
-
-    override Expression semantic(Scope* sc)
-    {
-        static if (LOGSEMANTIC)
-        {
-            printf("CompileExp::semantic('%s')\n", toChars());
-        }
         sc = sc.startCTFE();
         e1 = e1.semantic(sc);
         e1 = resolveProperties(sc, e1);
@@ -8002,6 +8000,28 @@ public:
             error("incomplete mixin expression (%s)", se.toChars());
             return new ErrorExp();
         }
+        return e;
+    }
+
+public:
+    extern (D) this(Loc loc, Expression e)
+    {
+        super(loc, TOKmixin, __traits(classInstanceSize, CompileExp), e);
+    }
+
+    override final Expression resolveLoc(Loc loc, Scope* sc)
+    {
+        auto e = normalize(sc);
+        return e.resolveLoc(loc, sc);
+    }
+
+    override Expression semantic(Scope* sc)
+    {
+        static if (LOGSEMANTIC)
+        {
+            printf("CompileExp::semantic('%s')\n", toChars());
+        }
+        auto e = normalize(sc);
         return e.semantic(sc);
     }
 
@@ -9195,6 +9215,14 @@ public:
     override Expression syntaxCopy()
     {
         return new CallExp(loc, e1.syntaxCopy(), arraySyntaxCopy(arguments));
+    }
+
+    override final Expression resolveLoc(Loc loc, Scope* sc)
+    {
+        foreach(ref argument; *arguments) {
+            argument = argument.resolveLoc(loc, sc);
+        }
+        return super.resolveLoc(loc, sc);
     }
 
     override Expression semantic(Scope* sc)
@@ -15246,6 +15274,19 @@ public:
     {
         v.visit(this);
     }
+
+    abstract Type getType();
+    override final Expression semantic(Scope* sc)
+    {
+        // printf("DefaultInitExp.semantic with loc %s scope %p\n", loc.toChars(), sc);
+        if(sc.flags & SCOPEdefaultArg) {
+            // keep the position unresolved until callers resolve it
+            type = getType();
+            return this;
+        }
+        auto e = resolveLoc(loc, sc);
+        return e.semantic(sc);
+    }
 }
 
 /***********************************************************
@@ -15258,21 +15299,13 @@ public:
         super(loc, TOKfile, __traits(classInstanceSize, FileInitExp));
     }
 
-    override Expression semantic(Scope* sc)
-    {
-        //printf("FileInitExp::semantic()\n");
-        type = Type.tstring;
-        return this;
-    }
-
+    override final Type getType() { return Type.tstring; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
-        //printf("FileInitExp::resolve() %s\n", toChars());
+        // printf("FileInitExp::resolve() %s\n", toChars());
         const(char)* s = loc.filename ? loc.filename : sc._module.ident.toChars();
-        Expression e = new StringExp(loc, cast(char*)s);
-        e = e.semantic(sc);
-        e = e.castTo(sc, type);
-        return e;
+        return new StringExp(loc, cast(char*)s)
+            .semantic(sc);
     }
 
     override void accept(Visitor v)
@@ -15291,17 +15324,12 @@ public:
         super(loc, TOKline, __traits(classInstanceSize, LineInitExp));
     }
 
-    override Expression semantic(Scope* sc)
-    {
-        type = Type.tint32;
-        return this;
-    }
-
+    override final Type getType() { return Type.tint32; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
-        Expression e = new IntegerExp(loc, loc.linnum, Type.tint32);
-        e = e.castTo(sc, type);
-        return e;
+        // printf("LineInitExp::resolve() %s\n", toChars());
+        return new IntegerExp(loc, loc.linnum, Type.tint32)
+            .semantic(sc);
     }
 
     override void accept(Visitor v)
@@ -15320,24 +15348,17 @@ public:
         super(loc, TOKmodulestring, __traits(classInstanceSize, ModuleInitExp));
     }
 
-    override Expression semantic(Scope* sc)
-    {
-        //printf("ModuleInitExp::semantic()\n");
-        type = Type.tstring;
-        return this;
-    }
-
+    override final Type getType() { return Type.tstring; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
+        // printf("ModuleInitExp::resolve() %s\n", toChars());
         const(char)* s;
         if (sc.callsc)
             s = sc.callsc._module.toPrettyChars();
         else
             s = sc._module.toPrettyChars();
-        Expression e = new StringExp(loc, cast(char*)s);
-        e = e.semantic(sc);
-        e = e.castTo(sc, type);
-        return e;
+        return new StringExp(loc, cast(char*)s)
+            .semantic(sc);
     }
 
     override void accept(Visitor v)
@@ -15356,17 +15377,10 @@ public:
         super(loc, TOKfuncstring, __traits(classInstanceSize, FuncInitExp));
     }
 
-    override Expression semantic(Scope* sc)
-    {
-        //printf("FuncInitExp::semantic()\n");
-        type = Type.tstring;
-        if (sc.func)
-            return this.resolveLoc(Loc(), sc);
-        return this;
-    }
-
+    override final Type getType() { return Type.tstring; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
+        // printf("FuncInitExp::resolve() %s\n", toChars());
         const(char)* s;
         if (sc.callsc && sc.callsc.func)
             s = sc.callsc.func.Dsymbol.toPrettyChars();
@@ -15374,10 +15388,8 @@ public:
             s = sc.func.Dsymbol.toPrettyChars();
         else
             s = "";
-        Expression e = new StringExp(loc, cast(char*)s);
-        e = e.semantic(sc);
-        e = e.castTo(sc, type);
-        return e;
+        return new StringExp(loc, cast(char*)s)
+            .semantic(sc);
     }
 
     override void accept(Visitor v)
@@ -15396,17 +15408,10 @@ public:
         super(loc, TOKprettyfunc, __traits(classInstanceSize, PrettyFuncInitExp));
     }
 
-    override Expression semantic(Scope* sc)
-    {
-        //printf("PrettyFuncInitExp::semantic()\n");
-        type = Type.tstring;
-        if (sc.func)
-            return this.resolveLoc(Loc(), sc);
-        return this;
-    }
-
+    override final Type getType() { return Type.tstring; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
+        // printf("PrettyFuncInitExp::resolve() %s\n", toChars());
         FuncDeclaration fd;
         if (sc.callsc && sc.callsc.func)
             fd = sc.callsc.func;
@@ -15424,10 +15429,8 @@ public:
         {
             s = "";
         }
-        Expression e = new StringExp(loc, cast(char*)s);
-        e = e.semantic(sc);
-        e = e.castTo(sc, type);
-        return e;
+        return new StringExp(loc, cast(char*)s)
+            .semantic(sc);
     }
 
     override void accept(Visitor v)

@@ -104,6 +104,7 @@ enum SCOPEcontract      = 0x0060;   // [mask] we're inside contract code
 enum SCOPEctfe          = 0x0080;   // inside a ctfe-only expression
 enum SCOPEcompile       = 0x0100;   // inside __traits(compile)
 enum SCOPEignoresymbolvisibility    = 0x0200;   // ignore symbol visibility (Bugzilla 15907)
+enum SCOPEdefaultArg    = 0x0400;   // inside a default arg
 enum SCOPEfree          = 0x8000;   // is on free list
 
 enum SCOPEfullinst      = 0x10000;  // fully instantiate templates

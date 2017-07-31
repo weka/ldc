@@ -819,8 +819,11 @@ public:
         //printf("ExpInitializer::semantic(%s), type = %s\n", exp->toChars(), t->toChars());
         if (needInterpret)
             sc = sc.startCTFE();
+        sc = sc.push();
+        sc.flags |= SCOPEdefaultArg;
         exp = exp.semantic(sc);
         exp = resolveProperties(sc, exp);
+        sc = sc.pop();
         if (needInterpret)
             sc = sc.endCTFE();
         if (exp.op == TOKerror)
