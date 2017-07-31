@@ -15259,7 +15259,7 @@ public:
 
 /***********************************************************
  */
-extern (C++) class DefaultInitExp : Expression
+extern (C++) class LocationExp : Expression
 {
 public:
     TOK subop;      // which of the derived classes this is
@@ -15278,7 +15278,7 @@ public:
     abstract Type getType();
     override final Expression semantic(Scope* sc)
     {
-        // printf("DefaultInitExp.semantic with loc %s scope %p\n", loc.toChars(), sc);
+        // printf("LocationExp.semantic with loc %s scope %p\n", loc.toChars(), sc);
         if(sc.flags & SCOPEdefaultArg) {
             // keep the position unresolved until callers resolve it
             type = getType();
@@ -15291,18 +15291,18 @@ public:
 
 /***********************************************************
  */
-extern (C++) final class FileInitExp : DefaultInitExp
+extern (C++) final class FileLocationExp : LocationExp
 {
 public:
     extern (D) this(Loc loc)
     {
-        super(loc, TOKfile, __traits(classInstanceSize, FileInitExp));
+        super(loc, TOKfile, __traits(classInstanceSize, FileLocationExp));
     }
 
     override final Type getType() { return Type.tstring; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
-        // printf("FileInitExp::resolve() %s\n", toChars());
+        // printf("FileLocationExp::resolve() %s\n", toChars());
         const(char)* s = loc.filename ? loc.filename : sc._module.ident.toChars();
         return new StringExp(loc, cast(char*)s)
             .semantic(sc);
@@ -15316,18 +15316,18 @@ public:
 
 /***********************************************************
  */
-extern (C++) final class LineInitExp : DefaultInitExp
+extern (C++) final class LineLocationExp : LocationExp
 {
 public:
     extern (D) this(Loc loc)
     {
-        super(loc, TOKline, __traits(classInstanceSize, LineInitExp));
+        super(loc, TOKline, __traits(classInstanceSize, LineLocationExp));
     }
 
     override final Type getType() { return Type.tint32; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
-        // printf("LineInitExp::resolve() %s\n", toChars());
+        // printf("LineLocationExp::resolve() %s\n", toChars());
         return new IntegerExp(loc, loc.linnum, Type.tint32)
             .semantic(sc);
     }
@@ -15340,18 +15340,18 @@ public:
 
 /***********************************************************
  */
-extern (C++) final class ModuleInitExp : DefaultInitExp
+extern (C++) final class ModuleLocationExp : LocationExp
 {
 public:
     extern (D) this(Loc loc)
     {
-        super(loc, TOKmodulestring, __traits(classInstanceSize, ModuleInitExp));
+        super(loc, TOKmodulestring, __traits(classInstanceSize, ModuleLocationExp));
     }
 
     override final Type getType() { return Type.tstring; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
-        // printf("ModuleInitExp::resolve() %s\n", toChars());
+        // printf("ModuleLocationExp::resolve() %s\n", toChars());
         const(char)* s;
         if (sc.callsc)
             s = sc.callsc._module.toPrettyChars();
@@ -15369,18 +15369,18 @@ public:
 
 /***********************************************************
  */
-extern (C++) final class FuncInitExp : DefaultInitExp
+extern (C++) final class FuncLocationExp : LocationExp
 {
 public:
     extern (D) this(Loc loc)
     {
-        super(loc, TOKfuncstring, __traits(classInstanceSize, FuncInitExp));
+        super(loc, TOKfuncstring, __traits(classInstanceSize, FuncLocationExp));
     }
 
     override final Type getType() { return Type.tstring; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
-        // printf("FuncInitExp::resolve() %s\n", toChars());
+        // printf("FuncLocationExp::resolve() %s\n", toChars());
         const(char)* s;
         if (sc.callsc && sc.callsc.func)
             s = sc.callsc.func.Dsymbol.toPrettyChars();
@@ -15400,18 +15400,18 @@ public:
 
 /***********************************************************
  */
-extern (C++) final class PrettyFuncInitExp : DefaultInitExp
+extern (C++) final class PrettyFuncLocationExp : LocationExp
 {
 public:
     extern (D) this(Loc loc)
     {
-        super(loc, TOKprettyfunc, __traits(classInstanceSize, PrettyFuncInitExp));
+        super(loc, TOKprettyfunc, __traits(classInstanceSize, PrettyFuncLocationExp));
     }
 
     override final Type getType() { return Type.tstring; }
     override Expression resolveLoc(Loc loc, Scope* sc)
     {
-        // printf("PrettyFuncInitExp::resolve() %s\n", toChars());
+        // printf("PrettyFuncLocationExp::resolve() %s\n", toChars());
         FuncDeclaration fd;
         if (sc.callsc && sc.callsc.func)
             fd = sc.callsc.func;

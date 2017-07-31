@@ -6622,23 +6622,23 @@ public:
          * with special handling for __FILE__, __LINE__, __MODULE__, __FUNCTION__, and __PRETTY_FUNCTION__.
          */
         case TOKfile:
-            e = new FileInitExp(loc);
+            e = new FileLocationExp(loc);
             nextToken();
             break;
         case TOKline:
-            e = new LineInitExp(loc);
+            e = new LineLocationExp(loc);
             nextToken();
             break;
         case TOKmodulestring:
-            e = new ModuleInitExp(loc);
+            e = new ModuleLocationExp(loc);
             nextToken();
             break;
         case TOKfuncstring:
-            e = new FuncInitExp(loc);
+            e = new FuncLocationExp(loc);
             nextToken();
             break;
         case TOKprettyfunc:
-            e = new PrettyFuncInitExp(loc);
+            e = new PrettyFuncLocationExp(loc);
             nextToken();
             break;
         /*****************************************/

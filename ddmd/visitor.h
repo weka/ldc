@@ -272,12 +272,12 @@ class RemoveExp;
 class EqualExp;
 class IdentityExp;
 class CondExp;
-class DefaultInitExp;
-class FileInitExp;
-class LineInitExp;
-class ModuleInitExp;
-class FuncInitExp;
-class PrettyFuncInitExp;
+class LocationExp;
+class FileLocationExp;
+class LineLocationExp;
+class ModuleLocationExp;
+class FuncLocationExp;
+class PrettyFuncLocationExp;
 class ClassReferenceExp;
 class VoidInitExp;
 class ThrownExceptionExp;
@@ -559,12 +559,12 @@ public:
     virtual void visit(EqualExp *e) { visit((BinExp *)e); }
     virtual void visit(IdentityExp *e) { visit((BinExp *)e); }
     virtual void visit(CondExp *e) { visit((BinExp *)e); }
-    virtual void visit(DefaultInitExp *e) { visit((Expression *)e); }
-    virtual void visit(FileInitExp *e) { visit((DefaultInitExp *)e); }
-    virtual void visit(LineInitExp *e) { visit((DefaultInitExp *)e); }
-    virtual void visit(ModuleInitExp *e) { visit((DefaultInitExp *)e); }
-    virtual void visit(FuncInitExp *e) { visit((DefaultInitExp *)e); }
-    virtual void visit(PrettyFuncInitExp *e) { visit((DefaultInitExp *)e); }
+    virtual void visit(LocationExp *e) { visit((Expression *)e); }
+    virtual void visit(FileLocationExp *e) { visit((LocationExp *)e); }
+    virtual void visit(LineLocationExp *e) { visit((LocationExp *)e); }
+    virtual void visit(ModuleLocationExp *e) { visit((LocationExp *)e); }
+    virtual void visit(FuncLocationExp *e) { visit((LocationExp *)e); }
+    virtual void visit(PrettyFuncLocationExp *e) { visit((LocationExp *)e); }
     virtual void visit(ClassReferenceExp *e) { visit((Expression *)e); }
     virtual void visit(VoidInitExp *e) { visit((Expression *)e); }
     virtual void visit(ThrownExceptionExp *e) { visit((Expression *)e); }

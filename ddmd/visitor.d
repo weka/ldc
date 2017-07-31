@@ -1273,34 +1273,34 @@ public:
         visit(cast(BinExp)e);
     }
 
-    void visit(DefaultInitExp e)
+    void visit(LocationExp e)
     {
         visit(cast(Expression)e);
     }
 
-    void visit(FileInitExp e)
+    void visit(FileLocationExp e)
     {
-        visit(cast(DefaultInitExp)e);
+        visit(cast(LocationExp)e);
     }
 
-    void visit(LineInitExp e)
+    void visit(LineLocationExp e)
     {
-        visit(cast(DefaultInitExp)e);
+        visit(cast(LocationExp)e);
     }
 
-    void visit(ModuleInitExp e)
+    void visit(ModuleLocationExp e)
     {
-        visit(cast(DefaultInitExp)e);
+        visit(cast(LocationExp)e);
     }
 
-    void visit(FuncInitExp e)
+    void visit(FuncLocationExp e)
     {
-        visit(cast(DefaultInitExp)e);
+        visit(cast(LocationExp)e);
     }
 
-    void visit(PrettyFuncInitExp e)
+    void visit(PrettyFuncLocationExp e)
     {
-        visit(cast(DefaultInitExp)e);
+        visit(cast(LocationExp)e);
     }
 
     void visit(ClassReferenceExp e)

@@ -1522,55 +1522,55 @@ public:
 
 /****************************************************************/
 
-class DefaultInitExp : public Expression
+class LocationExp : public Expression
 {
 public:
     TOK subop;             // which of the derived classes this is
 
-    DefaultInitExp(Loc loc, TOK subop, int size);
+    LocationExp(Loc loc, TOK subop, int size);
     void accept(Visitor *v) { v->visit(this); }
 };
 
-class FileInitExp : public DefaultInitExp
+class FileLocationExp : public LocationExp
 {
 public:
-    FileInitExp(Loc loc);
+    FileLocationExp(Loc loc);
     Expression *semantic(Scope *sc);
     Expression *resolveLoc(Loc loc, Scope *sc);
     void accept(Visitor *v) { v->visit(this); }
 };
 
-class LineInitExp : public DefaultInitExp
+class LineLocationExp : public LocationExp
 {
 public:
-    LineInitExp(Loc loc);
+    LineLocationExp(Loc loc);
     Expression *semantic(Scope *sc);
     Expression *resolveLoc(Loc loc, Scope *sc);
     void accept(Visitor *v) { v->visit(this); }
 };
 
-class ModuleInitExp : public DefaultInitExp
+class ModuleLocationExp : public LocationExp
 {
 public:
-    ModuleInitExp(Loc loc);
+    ModuleLocationExp(Loc loc);
     Expression *semantic(Scope *sc);
     Expression *resolveLoc(Loc loc, Scope *sc);
     void accept(Visitor *v) { v->visit(this); }
 };
 
-class FuncInitExp : public DefaultInitExp
+class FuncLocationExp : public LocationExp
 {
 public:
-    FuncInitExp(Loc loc);
+    FuncLocationExp(Loc loc);
     Expression *semantic(Scope *sc);
     Expression *resolveLoc(Loc loc, Scope *sc);
     void accept(Visitor *v) { v->visit(this); }
 };
 
-class PrettyFuncInitExp : public DefaultInitExp
+class PrettyFuncLocationExp : public LocationExp
 {
 public:
-    PrettyFuncInitExp(Loc loc);
+    PrettyFuncLocationExp(Loc loc);
     Expression *semantic(Scope *sc);
     Expression *resolveLoc(Loc loc, Scope *sc);
     void accept(Visitor *v) { v->visit(this); }

@@ -2795,7 +2795,7 @@ public:
         expToBuffer(e.e2, PREC_cond);
     }
 
-    override void visit(DefaultInitExp e)
+    override void visit(LocationExp e)
     {
         buf.writestring(Token.toChars(e.subop));
     }
