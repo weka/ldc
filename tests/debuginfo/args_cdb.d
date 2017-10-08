@@ -91,7 +91,7 @@ int byValue(ubyte ub, ushort us, uint ui, ulong ul,
 // no-x86-NEXT: offset : 0x12 (displays 0)
 
 // CDB: ?? ti
-// CHECK: TypeInfo_Class
+// CHECK: object.TypeInfo_Class
 // CHECK-NEXT: m_init : byte[]
 }
 
@@ -149,7 +149,7 @@ int byPtr(ubyte* ub, ushort* us, uint* ui, ulong* ul,
 // CHECK: struct Interface
 // CHECK: offset : 0x12
 // CDB: ?? *ti
-// CHECK: struct TypeInfo_Class
+// CHECK: struct object.TypeInfo_Class
 // CHECK-NEXT: m_init : byte[]
 // shows bad member values
 // CDB: ?? *np
@@ -210,7 +210,7 @@ int byRef(ref ubyte ub, ref ushort us, ref uint ui, ref ulong ul,
 // CHECK: struct Interface
 // CHECK: offset : 0x12
 // CDB: ?? *ti
-// CHECK: struct TypeInfo_Class * {{0x[0-9a-f`]*}}
+// CHECK: struct object.TypeInfo_Class * {{0x[0-9a-f`]*}}
 // CHECK-NEXT: m_init : byte[]
 // CDB: ?? *np
 // CHECK: void * {{0x[0`]*}}

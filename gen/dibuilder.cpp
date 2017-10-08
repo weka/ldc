@@ -266,7 +266,7 @@ ldc::DIType ldc::DIBuilder::CreateEnumType(Type *type) {
     subscripts.push_back(Subscript);
   }
 
-  llvm::StringRef Name = te->toChars();
+  llvm::StringRef Name = te->sym->toPrettyChars(true);
   unsigned LineNumber = te->sym->loc.linnum;
   ldc::DIFile File(CreateFile(te->sym));
 
@@ -292,7 +292,7 @@ ldc::DIType ldc::DIBuilder::CreatePointerType(Type *type) {
   return DBuilder.createPointerType(CreateTypeDescription(nt, false),
                                     getTypeAllocSize(T) * 8, // size (bits)
                                     getABITypeAlign(T) * 8,  // align (bits)
-                                    type->toChars()          // name
+                                    type->toPrettyChars(true) // name
                                     );
 }
 
@@ -402,11 +402,11 @@ ldc::DIType ldc::DIBuilder::CreateMemberType(unsigned linnum, Type *type,
                                    );
 }
 
-void ldc::DIBuilder::AddFields(AggregateDeclaration *sd, ldc::DIFile file,
+void ldc::DIBuilder::AddFields(AggregateDeclaration *ad, ldc::DIFile file,
                                llvm::SmallVector<LLMetadata *, 16> &elems) {
-  size_t narr = sd->fields.dim;
+  size_t narr = ad->fields.dim;
   elems.reserve(narr);
-  for (auto vd : sd->fields) {
+  for (auto vd : ad->fields) {
     elems.push_back(CreateMemberType(vd->loc.linnum, vd->type, file,
                                      vd->toChars(), vd->offset,
                                      vd->prot().kind));
@@ -417,41 +417,45 @@ ldc::DIType ldc::DIBuilder::CreateCompositeType(Type *type) {
   Type *t = type->toBasetype();
   assert((t->ty == Tstruct || t->ty == Tclass) &&
          "Unsupported type for debug info in DIBuilder::CreateCompositeType");
-  AggregateDeclaration *sd;
+  AggregateDeclaration *ad;
   if (t->ty == Tstruct) {
     TypeStruct *ts = static_cast<TypeStruct *>(t);
-    sd = ts->sym;
+    ad = ts->sym;
   } else {
     TypeClass *tc = static_cast<TypeClass *>(t);
-    sd = tc->sym;
+    ad = tc->sym;
   }
-  assert(sd);
+  assert(ad);
 
   // Use the actual type associated with the declaration, ignoring any
   // const/wrappers.
-  LLType *T = DtoType(sd->type);
-  IrTypeAggr *ir = sd->type->ctype->isAggr();
+  LLType *T = DtoType(ad->type);
+  IrTypeAggr *ir = ad->type->ctype->isAggr();
   assert(ir);
 
   if (static_cast<llvm::MDNode *>(ir->diCompositeType) != nullptr) {
     return ir->diCompositeType;
   }
 
+  const llvm::StringRef name =
+      (ad->isClassDeclaration() && ad->isClassDeclaration()->isCPPinterface()
+           ? ad->ident->toChars()
+           : ad->toPrettyChars(true));
+
   // if we don't know the aggregate's size, we don't know enough about it
   // to provide debug info. probably a forward-declared struct?
-  if (sd->sizeok == SIZEOKnone) {
-    return DBuilder.createUnspecifiedType(sd->toChars());
+  if (ad->sizeok == SIZEOKnone) {
+    return DBuilder.createUnspecifiedType(name);
   }
 
   // elements
   llvm::SmallVector<LLMetadata *, 16> elems;
 
   // defaults
-  llvm::StringRef name = sd->toChars();
-  unsigned linnum = sd->loc.linnum;
+  unsigned linnum = ad->loc.linnum;
   ldc::DICompileUnit CU(GetCU());
   assert(CU && "Compilation unit missing or corrupted");
-  ldc::DIFile file = CreateFile(sd);
+  ldc::DIFile file = CreateFile(ad);
   ldc::DIType derivedFrom = getNullDIType();
 
   // set diCompositeType to handle recursive types properly
@@ -464,9 +468,9 @@ ldc::DIType ldc::DIBuilder::CreateCompositeType(Type *type) {
 #endif
       tag, name, CU, file, linnum);
 
-  if (!sd->isInterfaceDeclaration()) // plain interfaces don't have one
+  if (!ad->isInterfaceDeclaration()) // plain interfaces don't have one
   {
-    ClassDeclaration *classDecl = sd->isClassDeclaration();
+    ClassDeclaration *classDecl = ad->isClassDeclaration();
     if (classDecl && classDecl->baseClass) {
       derivedFrom = CreateCompositeType(classDecl->baseClass->getType());
       // needs a forward declaration to add inheritence information to elems
@@ -493,7 +497,7 @@ ldc::DIType ldc::DIBuilder::CreateCompositeType(Type *type) {
                                            );
       elems.push_back(dt);
     }
-    AddFields(sd, file, elems);
+    AddFields(ad, file, elems);
   }
 
   auto elemsArray = DBuilder.getOrCreateArray(elems);
@@ -552,7 +556,7 @@ ldc::DIType ldc::DIBuilder::CreateArrayType(Type *type) {
                        global.params.is64bit ? 8 : 4, PROTpublic)};
 
   return DBuilder.createStructType(GetCU(),
-                                   t->toChars(),            // Name
+                                   type->toPrettyChars(true), // Name
                                    file,                    // File
                                    0,                       // LineNo
                                    getTypeAllocSize(T) * 8, // size in bits
@@ -651,7 +655,7 @@ ldc::DIType ldc::DIBuilder::CreateDelegateType(Type *type) {
                        global.params.is64bit ? 8 : 4, PROTpublic)};
 
   return DBuilder.createStructType(CU,           // compile unit where defined
-                                   t->toChars(), // name
+                                   type->toPrettyChars(true), // name
                                    file,         // file where defined
                                    0,            // line number where defined
                                    getTypeAllocSize(T) * 8, // size in bits
@@ -675,8 +679,10 @@ bool isOpaqueEnumType(Type *type) {
 
 ldc::DIType ldc::DIBuilder::CreateTypeDescription(Type *type, bool derefclass) {
   // Check for opaque enum first, Bugzilla 13792
-  if (isOpaqueEnumType(type))
-    return DBuilder.createUnspecifiedType(type->toChars());
+  if (isOpaqueEnumType(type)) {
+    const auto ed = static_cast<TypeEnum *>(type)->sym;
+    return DBuilder.createUnspecifiedType(ed->toPrettyChars(true));
+  }
 
   Type *t = type->toBasetype();
   if (derefclass && t->ty == Tclass) {
@@ -688,7 +694,7 @@ ldc::DIType ldc::DIBuilder::CreateTypeDescription(Type *type, bool derefclass) {
 #if LDC_LLVM_VER >= 309
     return nullptr;
 #else
-    return DBuilder.createUnspecifiedType(t->toChars());
+    return DBuilder.createUnspecifiedType(type->toPrettyChars(true));
 #endif
   if (t->ty == Tnull) // display null as void*
     return DBuilder.createPointerType(CreateTypeDescription(Type::tvoid, false),
@@ -827,7 +833,7 @@ ldc::DISubprogram ldc::DIBuilder::EmitSubProgram(FuncDeclaration *fd) {
   // FIXME: duplicates?
   auto SP = DBuilder.createFunction(
       CU,                                 // context
-      fd->toPrettyChars(),                // name
+      fd->toPrettyChars(true),            // name
       getIrFunc(fd)->func->getName(),     // linkage name
       file,                               // file
       fd->loc.linnum,                     // line no
@@ -870,7 +876,7 @@ ldc::DISubprogram ldc::DIBuilder::EmitThunk(llvm::Function *Thunk,
   // Create subroutine type (thunk has same type as wrapped function)
   ldc::DISubroutineType DIFnType = CreateFunctionType(fd->type);
 
-  std::string name = fd->toPrettyChars();
+  std::string name = fd->toPrettyChars(true);
   name.append(".__thunk");
 
   // FIXME: duplicates?
