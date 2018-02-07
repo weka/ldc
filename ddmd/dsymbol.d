@@ -218,6 +218,8 @@ extern (C++) class Dsymbol : RootObject
     // (only use this with ddoc)
     UnitTestDeclaration ddocUnittest;
 
+    uint useCount;
+
     version(IN_LLVM)
     {
         // llvm stuff
@@ -254,6 +256,10 @@ extern (C++) class Dsymbol : RootObject
             deleteIrDsymbol(this.ir);
             this.ir = null;
         }
+    }
+
+    void incUsed() {
+        useCount++;
     }
 
     static Dsymbol create(Identifier ident)
@@ -2163,6 +2169,15 @@ extern (C++) final class ForwardingScopeDsymbol : ScopeDsymbol
 extern (C++) final class DsymbolTable : RootObject
 {
     AA* tab;
+
+    extern(D) int opApply(int delegate(const Identifier, Dsymbol) dlg) {
+        if(!tab) return 0;
+        foreach(void* ident, void** sym; *tab) {
+            int rc = dlg(cast(const(Identifier))ident, *cast(Dsymbol*)sym);
+            if(rc) return rc;
+        }
+        return 0;
+    }
 
     // Look up Identifier. Return Dsymbol if found, NULL if not.
     Dsymbol lookup(const Identifier ident)

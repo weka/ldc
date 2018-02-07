@@ -38,6 +38,17 @@ struct AA
     size_t nodes; // total number of aaA nodes
     aaA*[4] binit; // initial value of b[]
     aaA aafirst; // a lot of these AA's have only one entry
+
+    int opApply(int delegate(Key key, Value* value) dlg) {
+        if(!b) return 0;
+        foreach(size_t i; 0..b_length) {
+            for(auto kv = b[i]; kv; kv = kv.next) {
+                int rc = dlg(kv.key, &kv.value);
+                if(rc) return rc;
+            }
+        }
+        return 0;
+    }
 }
 
 /****************************************************

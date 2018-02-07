@@ -35,6 +35,18 @@ import ddmd.tokens;
 
 //version=LOGSEARCH;
 
+const(char)* toChars(PROTKIND prot) {
+    final switch(prot) {
+    case PROTundefined: return "undefined(prot)";
+    case PROTnone:      return "inaccessible";
+    case PROTprivate:   return "private";
+    case PROTpackage:   return "package";
+    case PROTprotected: return "protected";
+    case PROTpublic:    return "public";
+    case PROTexport:    return "export";
+    }
+}
+
 extern (C++) bool mergeFieldInit(Loc loc, ref uint fieldInit, uint fi, bool mustInit)
 {
     if (fi != fieldInit)
@@ -106,6 +118,7 @@ enum SCOPEctfe          = 0x0080;   /// inside a ctfe-only expression
 enum SCOPEcompile       = 0x0100;   /// inside __traits(compile)
 enum SCOPEignoresymbolvisibility    = 0x0200;   /// ignore symbol visibility
                                                 /// https://issues.dlang.org/show_bug.cgi?id=15907
+enum SCOPEwarnunused    = 0x0400;
 enum SCOPEfree          = 0x8000;   /// is on free list
 
 enum SCOPEfullinst      = 0x10000;  /// fully instantiate templates
@@ -251,7 +264,7 @@ version(IN_LLVM)
         s.nofree = 0;
         s.fieldinit = saveFieldInit();
         s.flags = (flags & (SCOPEcontract | SCOPEdebug | SCOPEctfe | SCOPEcompile | SCOPEconstraint |
-                            SCOPEnoaccesscheck | SCOPEignoresymbolvisibility));
+                            SCOPEnoaccesscheck | SCOPEignoresymbolvisibility | SCOPEwarnunused));
         s.lastdc = null;
         assert(&this != s);
         return s;
@@ -281,6 +294,24 @@ version(IN_LLVM)
                         enclosing.fieldinit[i] |= fieldinit[i];
                 }
                 freeFieldinit();
+            }
+            if((flags & SCOPEwarnunused) && scopesym && scopesym.symtab) {
+                foreach(const Identifier ident, Dsymbol sym; scopesym.symtab) {
+                    if(sym.loc.filename is null) continue;
+                    if(0 == sym.useCount) {
+                        final switch(sym.prot.kind) {
+                        case PROTexport, PROTpublic, PROTpackage, PROTprotected:
+                            if(!sym.parent.isFuncDeclaration) {
+                                continue;
+                            }
+                            break;
+                        case PROTnone, PROTundefined, PROTprivate:
+                            break;
+                        }
+                        warning(sym.loc, "unused %s variable: %s",
+                                sym.prot.kind.toChars(), ident.toChars());
+                    }
+                }
             }
         }
         if (!nofree)
@@ -443,6 +474,12 @@ else
         return minst ? minst : _module;
     }
 
+    extern (C++) Dsymbol search(Loc loc, Identifier ident, Dsymbol* pscopesym, int flags = IgnoreNone) {
+        auto res = _search(loc, ident, pscopesym, flags);
+        res.incUsed();
+        return res;
+    }
+
     /************************************
      * Perform unqualified name lookup by following the chain of scopes up
      * until found.
@@ -456,7 +493,7 @@ else
      * Returns:
      *  symbol if found, null if not
      */
-    extern (C++) Dsymbol search(Loc loc, Identifier ident, Dsymbol* pscopesym, int flags = IgnoreNone)
+    extern (C++) Dsymbol _search(Loc loc, Identifier ident, Dsymbol* pscopesym, int flags = IgnoreNone)
     {
         version (LOGSEARCH)
         {
@@ -489,7 +526,7 @@ else
                 assert(sc != sc.enclosing);
                 if (!sc.scopesym)
                     continue;
-                if (Dsymbol s = sc.scopesym.isModule())
+                if (Module s = sc.scopesym.isModule())
                 {
                     //printMsg("\tfound", s);
                     if (pscopesym)

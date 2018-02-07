@@ -1183,6 +1183,7 @@ else
         // This is so regardless of where in the syntax a module
         // gets imported, it is unaffected by context.
         Scope* sc = Scope.createGlobal(this); // create root scope
+        sc.flags |= SCOPEwarnunused;
         //printf("Module = %p\n", sc.scopesym);
         // Pass 3 semantic routines: do initializers and function bodies
         for (size_t i = 0; i < members.dim; i++)
@@ -1193,6 +1194,7 @@ else
 
             runDeferredSemantic2();
         }
+        sc.flags &= ~SCOPEwarnunused;
         if (userAttribDecl)
         {
             userAttribDecl.semantic3(sc);

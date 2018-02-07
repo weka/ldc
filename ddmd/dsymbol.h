@@ -177,6 +177,7 @@ public:
     DeprecatedDeclaration *depdecl; // customized deprecation message
     UserAttributeDeclaration *userAttribDecl;   // user defined attributes
     UnitTestDeclaration *ddocUnittest; // !=NULL means there's a ddoc unittest associated with this symbol (only use this with ddoc)
+    uint useCount;
 
 #if IN_LLVM
     // llvm stuff
