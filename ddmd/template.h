@@ -348,7 +348,7 @@ public:
     int compare(RootObject *o);
     hash_t hashCode();
 
-    bool needsCodegen();
+    bool needsCodegen(unsigned int depth = 0);
 
     // Internal
     bool findTempDecl(Scope *sc, WithScopeSymbol **pwithsym);

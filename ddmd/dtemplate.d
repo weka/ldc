@@ -6673,8 +6673,12 @@ if (IN_WEKA) {
      * Note: minst does not stabilize until semantic analysis is completed,
      * so don't call this function during semantic analysis to return precise result.
      */
-    final bool needsCodegen()
+    final bool needsCodegen(uint depth = 0)
     {
+        // Stopgap solution: return false when we recurse too deep
+        if (depth++ > 1000)
+            return false;
+
         // Now -allInst is just for the backward compatibility.
         if (global.params.allInst)
         {
@@ -6698,7 +6702,7 @@ if (IN_WEKA) {
                 // If the enclosing is also an instantiated function,
                 // we have to rely on the ancestor's needsCodegen() result.
                 if (TemplateInstance ti = enclosing.isInstantiated())
-                    return ti.needsCodegen();
+                    return ti.needsCodegen(depth);
 
                 // Bugzilla 13415: If and only if the enclosing scope needs codegen,
                 // this nested templates would also need code generation.
@@ -6720,14 +6724,14 @@ if (IN_WEKA) {
             this.tinst = null;
 
             // Determine necessity of tinst before tnext.
-            if (tinst && tinst.needsCodegen())
+            if (tinst && tinst.needsCodegen(depth))
             {
                 minst = tinst.minst; // cache result
                 assert(minst);
                 assert(minst.isRoot() || minst.rootImports());
                 return true;
             }
-            if (tnext && (tnext.needsCodegen() || tnext.minst))
+            if (tnext && (tnext.needsCodegen(depth) || tnext.minst))
             {
                 minst = tnext.minst; // cache result
                 assert(minst);
@@ -6746,13 +6750,13 @@ if (IN_WEKA) {
         {
             if (tinst)
             {
-                auto r = tinst.needsCodegen();
+                auto r = tinst.needsCodegen(depth);
                 minst = tinst.minst; // cache result
                 return r;
             }
             if (tnext)
             {
-                auto r = tnext.needsCodegen();
+                auto r = tnext.needsCodegen(depth);
                 minst = tnext.minst; // cache result
                 return r;
             }
@@ -6777,14 +6781,14 @@ if (IN_WEKA) {
             this.tnext = null;
             this.tinst = null;
 
-            if (tinst && tinst.needsCodegen())
+            if (tinst && tinst.needsCodegen(depth))
             {
                 minst = tinst.minst; // cache result
                 assert(minst);
                 assert(minst.isRoot() || minst.rootImports());
                 return true;
             }
-            if (tnext && tnext.needsCodegen())
+            if (tnext && tnext.needsCodegen(depth))
             {
                 minst = tnext.minst; // cache result
                 assert(minst);
@@ -6829,7 +6833,7 @@ if(!IN_WEKA)
             TemplateInstance tnext = this.tnext;
             this.tnext = null;
 
-            if (tnext && !tnext.needsCodegen() && tnext.minst)
+            if (tnext && !tnext.needsCodegen(depth) && tnext.minst)
             {
                 minst = tnext.minst; // cache result
                 assert(!minst.isRoot());
