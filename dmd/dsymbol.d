@@ -1362,6 +1362,7 @@ public:
             import dmd.access : symbolIsVisible;
             if (!s2 || !(flags & IgnoreSymbolVisibility) && !symbolIsVisible(this, s2))
                 continue;
+            fprintf(stderr, "%s SYMIMPORT %s\n", ss.loc.toChars(), ident.toChars());
             if (!s)
             {
                 s = s2;
