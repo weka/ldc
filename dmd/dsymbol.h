@@ -152,6 +152,18 @@ enum
 
 typedef int (*Dsymbol_apply_ft_t)(Dsymbol *, void *);
 
+struct ImportPoint
+{
+    Loc loc;
+    Prot protection;
+};
+
+class DimportScope : public ASTNode
+{
+    Array<ImportPoint> points;
+    Dsymbol *symbol;
+};
+
 class Dsymbol : public ASTNode
 {
 public:
@@ -308,7 +320,7 @@ public:
     unsigned endlinnum;         // the linnumber of the statement after the scope (0 if unknown)
 
 private:
-    Dsymbols *importedScopes;   // imported Dsymbol's
+    DimportScopes *importedScopes;   // imported Dsymbol's
     Prot::Kind *prots;            // array of PROTKIND, one for each import
 
     BitArray accessiblePackages, privateAccessiblePackages;
@@ -316,7 +328,7 @@ private:
 public:
     Dsymbol *syntaxCopy(Dsymbol *s);
     Dsymbol *search(const Loc &loc, Identifier *ident, int flags = SearchLocalsOnly);
-    virtual void importScope(Dsymbol *s, Prot protection);
+    virtual void importScope(Loc loc, Dsymbol *s, Prot protection);
     virtual bool isPackageAccessible(Package *p, Prot protection, int flags = 0);
     bool isforwardRef();
     static void multiplyDefined(const Loc &loc, Dsymbol *s1, Dsymbol *s2);
@@ -381,7 +393,7 @@ public:
 
     Dsymbol *symtabInsert(Dsymbol *s);
     Dsymbol *symtabLookup(Dsymbol *s, Identifier *id);
-    void importScope(Dsymbol *s, Prot protection);
+    void importScope(Loc loc, Dsymbol *s, Prot protection);
     const char *kind() const;
 
     ForwardingScopeDsymbol *isForwardingScopeDsymbol() { return this; }

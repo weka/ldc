@@ -16,6 +16,7 @@ import core.stdc.stdarg;
 import core.stdc.stdio;
 import core.stdc.string;
 import core.stdc.stdlib;
+import std.string: toStringz, fromStringz;
 
 import dmd.aggregate;
 import dmd.aliasthis;
@@ -52,6 +53,7 @@ import dmd.root.string;
 import dmd.statement;
 import dmd.tokens;
 import dmd.visitor;
+import dmd.root.array: Array;
 
 version (IN_LLVM)
 {
@@ -121,6 +123,28 @@ struct Ungag
     extern (C++) ~this()
     {
         global.gag = oldgag;
+    }
+}
+
+string toString(Prot.Kind kind) {
+    final switch(kind) {
+    case Prot.none: return "none";
+    case Prot.undefined: return "undefined";
+    case Prot.private: return "private";
+    case Prot.package: return "package";
+    case Prot.protected: return "protected";
+    case Prot.public: return "public";
+    case Prot.export: return "export";
+    }
+}
+
+string toString(Loc loc) {
+    if(loc == Loc()) return "no-loc";
+    import std.format;
+    if(loc.charnum > 0) {
+        return "%s(%s,%s)".format(loc.filename.fromStringz, loc.linnum, loc.charnum);
+    } else {
+        return "%s(%s)".format(loc.filename.fromStringz, loc.linnum);
     }
 }
 
@@ -1273,7 +1297,7 @@ extern (C++) class ScopeDsymbol : Dsymbol
 
 private:
     /// symbols whose members have been imported, i.e. imported modules and template mixins
-    Dsymbols* importedScopes;
+    Array!DimportScope* importedScopes;
     Prot.Kind* prots;            // array of Prot.Kind, one for each import
 
     import dmd.root.bitarray;
@@ -1340,8 +1364,9 @@ public:
             if ((flags & IgnorePrivateImports) && prots[i] == Prot.Kind.private_)
                 continue;
             int sflags = flags & (IgnoreErrors | IgnoreAmbiguous); // remember these in recursive searches
-            Dsymbol ss = (*importedScopes)[i];
-            //printf("\tscanning import '%s', prots = %d, isModule = %p, isImport = %p\n", ss.toChars(), prots[i], ss.isModule(), ss.isImport());
+            DimportScope theImport = (*importedScopes)[i];
+            Dsymbol ss = theImport.symbol;
+            //printf("\tscanning import @%p, '%s', prots = %d, isModule = %p, isImport = %p\n", ss, ss.toChars(), prots[i], ss.isModule(), ss.isImport());
 
             if (ss.isModule())
             {
@@ -1362,7 +1387,14 @@ public:
             import dmd.access : symbolIsVisible;
             if (!s2 || !(flags & IgnoreSymbolVisibility) && !symbolIsVisible(this, s2))
                 continue;
-            fprintf(stderr, "%s SYMIMPORT %s\n", ss.loc.toChars(), ident.toChars());
+            foreach(point; theImport.points) {
+                fprintf(stderr, "%s: %s %s SYMIMPORT %s : %s\n",
+                        loc.toString.toStringz,
+                        point.protection.kind.toString.toStringz,
+                        point.loc.toString.toStringz,
+                        theImport.symbol.toPrettyChars(),
+                        ident.toChars());
+            }
             if (!s)
             {
                 s = s2;
@@ -1504,28 +1536,37 @@ public:
         return os;
     }
 
-    void importScope(Dsymbol s, Prot protection)
+    void importScope(Loc loc, Dsymbol s, Prot protection)
     {
         //printf("%s.ScopeDsymbol::importScope(%s, %d)\n", toChars(), s.toChars(), protection);
         // No circular or redundant import's
         if (s != this)
         {
             if (!importedScopes)
-                importedScopes = new Dsymbols();
+                importedScopes = new typeof(*importedScopes)();
             else
             {
                 for (size_t i = 0; i < importedScopes.dim; i++)
                 {
-                    Dsymbol ss = (*importedScopes)[i];
-                    if (ss == s) // if already imported
+                    DimportScope theImport = (*importedScopes)[i];
+                    if (theImport.symbol == s) // if already imported
                     {
                         if (protection.kind > prots[i])
                             prots[i] = protection.kind; // upgrade access
+                        auto newPoint = ImportPoint(loc, protection);
+                        foreach(point; theImport.points) {
+                            if(point == newPoint) {
+                                // Already in
+                                return;
+                            }
+                        }
+                        theImport.points.push(newPoint);
                         return;
                     }
                 }
             }
-            importedScopes.push(s);
+            // printf("importedScopes.push(..%s (%s)..)\n", s.ident.toChars(), loc.toChars());
+            importedScopes.push(new DimportScope(loc, protection, s));
             prots = cast(Prot.Kind*)mem.xrealloc(prots, importedScopes.dim * (prots[0]).sizeof);
             prots[importedScopes.dim - 1] = protection.kind;
         }
@@ -1548,7 +1589,7 @@ public:
         {
             // only search visible scopes && imported modules should ignore private imports
             if (protection.kind <= prots[i] &&
-                ss.isScopeDsymbol.isPackageAccessible(p, protection, IgnorePrivateImports))
+                ss.symbol.isScopeDsymbol.isPackageAccessible(p, protection, IgnorePrivateImports))
                 return true;
         }
         return false;
@@ -1989,6 +2030,20 @@ extern (C++) final class ArrayScopeSymbol : ScopeDsymbol
     }
 }
 
+extern (C++) struct ImportPoint {
+    Loc loc;
+    Prot protection;
+}
+
+extern (C++) final class DimportScope {
+    Array!ImportPoint points;
+    Dsymbol symbol;
+    this(Loc loc, Prot protection, Dsymbol _symbol) {
+        this.points.push(ImportPoint(loc, protection));
+        this.symbol = _symbol;
+    }
+}
+
 /***********************************************************
  * Overload Sets
  */
@@ -2099,9 +2154,9 @@ extern (C++) final class ForwardingScopeDsymbol : ScopeDsymbol
         return forward.symtabLookup(s,id);
     }
 
-    override void importScope(Dsymbol s, Prot protection)
+    override void importScope(Loc loc, Dsymbol s, Prot protection)
     {
-        forward.importScope(s, protection);
+        forward.importScope(loc, s, protection);
     }
 
     override const(char)* kind()const{ return "local scope"; }

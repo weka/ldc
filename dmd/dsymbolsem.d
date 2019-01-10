@@ -1637,7 +1637,7 @@ version (IN_LLVM)
 
                 if (!imp.isstatic)
                 {
-                    scopesym.importScope(imp.mod, imp.protection);
+                    scopesym.importScope(imp.loc, imp.mod, imp.protection);
                 }
 
                 // Mark the imported packages as accessible from the current
@@ -3009,7 +3009,7 @@ version (IN_LLVM)
             ScopeDsymbol sds = sce.scopesym;
             if (sds)
             {
-                sds.importScope(tm, Prot(Prot.Kind.public_));
+                sds.importScope(tm.loc, tm, Prot(Prot.Kind.public_));
                 break;
             }
         }

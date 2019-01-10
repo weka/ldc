@@ -25,6 +25,8 @@ typedef Array<class ClassDeclaration *> ClassDeclarations;
 
 typedef Array<class Dsymbol *> Dsymbols;
 
+typedef Array<class DimportScope *> DimportScopes;
+
 typedef Array<class RootObject *> Objects;
 
 typedef Array<class DtorDeclaration *> DtorDeclarations;
