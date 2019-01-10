@@ -161,6 +161,7 @@ struct ImportPoint
 class DimportScope : public ASTNode
 {
     Array<ImportPoint> points;
+    uint32_t useCount;
     Dsymbol *symbol;
 };
 

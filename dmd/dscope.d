@@ -225,6 +225,9 @@ version (IN_LLVM)
             enclosing.ctorflow.OR(ctorflow);
         ctorflow.freeFieldinit();
 
+        if(scopesym) {
+            scopesym.warnUnusedImports();
+        }
         Scope* enc = enclosing;
         if (!nofree)
         {

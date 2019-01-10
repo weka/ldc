@@ -1318,6 +1318,24 @@ public:
         super(loc, ident);
     }
 
+    /// Called when the scope who owns this symbol dies
+    final void warnUnusedImports() {
+        if(semanticRun < PASSsemantic3) return;
+        if(!importedScopes) return;
+        foreach(i; 0..importedScopes.dim) {
+            auto sc = (*importedScopes)[i];
+            if(sc.useCount) continue;
+
+            foreach(ImportPoint point; sc.points) {
+                if(point.loc == Loc()) continue;
+                if(point.protection.kind <= PROTprivate) {
+                    fprintf(stderr, "%s: Unused open import %s",
+                            point.loc.toChars(), sc.symbol.toPrettyChars());
+                }
+            }
+        }
+    }
+
     override Dsymbol syntaxCopy(Dsymbol s)
     {
         //printf("ScopeDsymbol::syntaxCopy('%s')\n", toChars());
@@ -1387,6 +1405,7 @@ public:
             import dmd.access : symbolIsVisible;
             if (!s2 || !(flags & IgnoreSymbolVisibility) && !symbolIsVisible(this, s2))
                 continue;
+            theImport.useCount++;
             foreach(point; theImport.points) {
                 fprintf(stderr, "%s: %s %s SYMIMPORT %s : %s\n",
                         loc.toString.toStringz,
@@ -2037,6 +2056,7 @@ extern (C++) struct ImportPoint {
 
 extern (C++) final class DimportScope {
     Array!ImportPoint points;
+    uint useCount;
     Dsymbol symbol;
     this(Loc loc, Prot protection, Dsymbol _symbol) {
         this.points.push(ImportPoint(loc, protection));
