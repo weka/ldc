@@ -270,6 +270,9 @@ version(IN_LLVM)
         Scope* enc = enclosing;
         if (enclosing)
         {
+            if(scopesym) {
+                scopesym.warnUnusedImports();
+            }
             enclosing.callSuper |= callSuper;
             if (fieldinit)
             {

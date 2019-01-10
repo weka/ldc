@@ -173,6 +173,7 @@ struct ImportPoint
 class DimportScope : public RootObject
 {
     Array<ImportPoint> points;
+    uint32_t useCount;
     Dsymbol *symbol;
 };
 
