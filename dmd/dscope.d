@@ -348,7 +348,7 @@ version (IN_LLVM)
                 printf("\tscope %s\n", sc.scopesym.toChars());
             }
 
-            static void printMsg(string txt, Dsymbol s)
+            static void printMsg(string msg, Dsymbol s)
             {
                 printf("%.*s  %s.%s, kind = '%s'\n", cast(int)txt.length, txt.ptr,
                     s.parent ? s.parent.toChars() : "", s.toChars(), s.kind());
