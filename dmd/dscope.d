@@ -107,6 +107,7 @@ enum SCOPEctfe          = 0x0080;   /// inside a ctfe-only expression
 enum SCOPEcompile       = 0x0100;   /// inside __traits(compile)
 enum SCOPEignoresymbolvisibility    = 0x0200;   /// ignore symbol visibility
                                                 /// https://issues.dlang.org/show_bug.cgi?id=15907
+enum SCOPEcopied        = 0x0400;   /// Scope copied and re-uses same scopesym, don't warnUnused on scopesym upon pop
 enum SCOPEfree          = 0x8000;   /// is on free list
 
 enum SCOPEfullinst      = 0x10000;  /// fully instantiate templates
@@ -218,7 +219,7 @@ version(IN_LLVM)
         return sc;
     }
 
-    extern (C++) Scope* copy()
+    private final Scope* _copy()
     {
         Scope* sc = Scope.alloc();
         *sc = this;
@@ -229,9 +230,16 @@ version(IN_LLVM)
         return sc;
     }
 
+    extern (C++) Scope* copy()
+    {
+        auto sc = _copy();
+        sc.flags |= SCOPEcopied;
+        return sc;
+    }
+
     extern (C++) Scope* push()
     {
-        Scope* s = copy();
+        Scope* s = _copy();
         //printf("Scope::push(this = %p) new = %p\n", this, s);
         assert(!(flags & SCOPEfree));
         s.scopesym = null;
@@ -270,7 +278,7 @@ version(IN_LLVM)
         Scope* enc = enclosing;
         if (enclosing)
         {
-            if(scopesym) {
+            if(scopesym && !(flags & SCOPEcopied)) {
                 scopesym.warnUnusedImports();
             }
             enclosing.callSuper |= callSuper;
