@@ -168,12 +168,12 @@ struct ImportPoint
 {
     Loc loc;
     Prot protection;
+    uint32_t useCount;
 };
 
 class DimportScope : public RootObject
 {
     Array<ImportPoint> points;
-    uint32_t useCount;
     Dsymbol *symbol;
 };
 

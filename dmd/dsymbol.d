@@ -1350,12 +1350,12 @@ public:
         if(!importedScopes) return;
         foreach(i; 0..importedScopes.dim) {
             auto sc = (*importedScopes)[i];
-            if(sc.useCount) continue;
 
             foreach(ImportPoint point; sc.points) {
+                if(point.useCount > 0) continue;
                 if(point.loc == Loc()) continue;
                 if(point.protection.kind <= PROTprivate) {
-                    fprintf(stderr, "%s: Unused open import %s",
+                    fprintf(stderr, "%s: Unused open import %s\n",
                             point.loc.toChars(), sc.symbol.toPrettyChars());
                 }
             }
@@ -1399,6 +1399,9 @@ public:
             //printf(" look in imports\n");
             Dsymbol s = null;
             OverloadSet a = null;
+            bool isExported;
+            Dsymbol firstPrivateImportSymbol;
+            ImportPoint* firstPrivateImportPoint;
             // Look in imported modules
             for (size_t i = 0; i < importedScopes.dim; i++)
             {
@@ -1431,16 +1434,22 @@ public:
                 import dmd.access : symbolIsVisible;
                 if (!s2 || !(flags & IgnoreSymbolVisibility) && !symbolIsVisible(this, s2))
                     continue;
-                theImport.useCount++;
-                foreach(point; theImport.points) {
-                    if(point.protection.kind == PROTprivate) {
-                        fprintf(stderr, "%s: %s %s SYMIMPORT %s : %s\n",
-                                loc.toString.toStringz,
-                                point.protection.kind.toString.toStringz,
-                                point.loc.toString.toStringz,
-                                theImport.symbol.toPrettyChars(),
-                                ident.toChars());
-                        break;
+                if (!isExported && symbolIsVisible(this, s2) && s != s2) {
+                    ImportPoint* privateImport;
+                    foreach(ref point; theImport.points) {
+                        if(point.protection.kind == PROTKIND.PROTprivate) {
+                            privateImport = &point;
+                        } else if(point.protection.kind > PROTKIND.PROTprivate) {
+                            // If there's any public import and we "close" the import, we actually override the public
+                            // import and affect semantics, so only touch purely private open imports
+                            isExported = true;
+                            point.useCount++;
+                            break;
+                        }
+                    }
+                    if(!isExported && !firstPrivateImportPoint && privateImport) {
+                        firstPrivateImportPoint = privateImport;
+                        firstPrivateImportSymbol = s2;
                     }
                 }
                 if (!s)
@@ -1496,6 +1505,16 @@ public:
             }
             if (s)
             {
+                if(!isExported && firstPrivateImportPoint) {
+                    // Found it via no exported import, and have a private import to "blame" for this:
+                    firstPrivateImportPoint.useCount++;
+                    fprintf(stderr, "%s: %s %s SYMIMPORT %s : %s\n",
+                            loc.toString.toStringz,
+                            firstPrivateImportPoint.protection.kind.toString.toStringz,
+                            firstPrivateImportPoint.loc.toString.toStringz,
+                            firstPrivateImportSymbol.toPrettyChars(),
+                            ident.toChars());
+                }
                 /* Build special symbol if we had multiple finds
                  */
                 if (a)
@@ -2086,11 +2105,11 @@ extern (C++) final class ArrayScopeSymbol : ScopeDsymbol
 extern (C++) struct ImportPoint {
     Loc loc;
     Prot protection;
+    uint useCount;
 }
 
 extern (C++) final class DimportScope {
     Array!ImportPoint points;
-    uint useCount;
     Dsymbol symbol;
     this(Loc loc, Prot protection, Dsymbol _symbol) {
         this.points.push(ImportPoint(loc, protection));
