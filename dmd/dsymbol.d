@@ -236,6 +236,21 @@ enum PASS : int
     obj,            // toObjFile() run
 }
 
+string toString(PASS x) {
+    final switch(x) {
+    case PASSinit: return "init (initial state)";
+    case PASSsemantic: return "semantic (semantic() started)";
+    case PASSsemanticdone: return "semanticdone (semantic() done)";
+    case PASSsemantic2: return "semantic2 (semantic2() started)";
+    case PASSsemantic2done: return "semantic2done (semantic2() done)";
+    case PASSsemantic3: return "semantic3 (semantic3() started)";
+    case PASSsemantic3done: return "semantic3done (semantic3() done)";
+    case PASSinline: return "inline (inline started)";
+    case PASSinlinedone: return "inlinedone (inline done)";
+    case PASSobj: return "obj (toObjFile() run)";
+    }
+}
+
 // Search options
 enum : int
 {
@@ -1320,8 +1335,9 @@ public:
 
     /// Called when the scope who owns this symbol dies
     final void warnUnusedImports() {
-        if(semanticRun < PASSsemantic3) return;
+        if(semanticRun < PASS.PASSsemantic3) return;
         if(!importedScopes) return;
+        if(!getModule().isRoot()) return;
         foreach(i; 0..importedScopes.dim) {
             auto sc = (*importedScopes)[i];
 
@@ -1329,8 +1345,13 @@ public:
                 if(point.useCount > 0) continue;
                 if(point.loc == Loc()) continue;
                 if(point.protection.kind <= PROTprivate) {
-                    fprintf(stderr, "%s: Unused open import %s\n",
-                            point.loc.toChars(), sc.symbol.toPrettyChars());
+                    import std.stdio;
+                    stderr.writefln("%s: Unused open import %s (at %s:%s)",
+                                    point.loc.toString,
+                                    sc.symbol.toPrettyChars.fromStringz,
+                                    toPrettyChars().fromStringz,
+                                    semanticRun.toString);
+                    stderr.flush();
                 }
             }
         }
@@ -1513,12 +1534,17 @@ public:
                 if(!isExported && firstPrivateImportPoint) {
                     // Found it via no exported import, and have a private import to "blame" for this:
                     firstPrivateImportPoint.useCount++;
-                    fprintf(stderr, "%s: %s %s SYMIMPORT %s : %s\n",
-                            loc.toString.toStringz,
-                            firstPrivateImportPoint.protection.kind.toString.toStringz,
-                            firstPrivateImportPoint.loc.toString.toStringz,
-                            firstPrivateImportSymbol.toPrettyChars(),
-                            ident.toChars());
+                    import std.stdio;
+                    import std.string;
+                    import std.array;
+                    stderr.writefln(
+                        "%s: %s %s SYMIMPORT %s : %s",
+                        loc.toString,
+                        firstPrivateImportPoint.protection.kind.toString,
+                        firstPrivateImportPoint.loc.toString,
+                        firstPrivateImportSymbol.toPrettyChars().fromStringz.replace("\n", " ").array,
+                        ident.toChars().fromStringz);
+                    stderr.flush();
                 }
                 if (!s.isOverloadSet())
                     a = mergeOverloadSet(ident, a, s);
