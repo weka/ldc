@@ -156,12 +156,12 @@ struct ImportPoint
 {
     Loc loc;
     Prot protection;
+    uint32_t useCount;
 };
 
 class DimportScope : public ASTNode
 {
     Array<ImportPoint> points;
-    uint32_t useCount;
     Dsymbol *symbol;
 };
 
