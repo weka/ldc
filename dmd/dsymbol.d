@@ -1407,12 +1407,15 @@ public:
                 continue;
             theImport.useCount++;
             foreach(point; theImport.points) {
-                fprintf(stderr, "%s: %s %s SYMIMPORT %s : %s\n",
-                        loc.toString.toStringz,
-                        point.protection.kind.toString.toStringz,
-                        point.loc.toString.toStringz,
-                        theImport.symbol.toPrettyChars(),
-                        ident.toChars());
+                if(point.protection.kind == PROTprivate) {
+                    fprintf(stderr, "%s: %s %s SYMIMPORT %s : %s\n",
+                            loc.toString.toStringz,
+                            point.protection.kind.toString.toStringz,
+                            point.loc.toString.toStringz,
+                            theImport.symbol.toPrettyChars(),
+                            ident.toChars());
+                    break;
+                }
             }
             if (!s)
             {
