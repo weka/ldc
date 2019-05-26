@@ -59,6 +59,143 @@ import dmd.semantic3;
 import dmd.target;
 import dmd.utils;
 
+void writeTrace(ref Strings arguments)
+{
+    import dmd.trace;
+
+    static if (SYMBOL_TRACE)
+    {
+        // this is debug code we simply hope that we will not need more
+        // then 2G of log-buffer;
+        char* fileBuffer = cast(char*)malloc(int.max);
+        char* bufferPos = fileBuffer;
+
+        char[255] fileNameBuffer;
+        import core.stdc.time : ctime, time;
+        auto now = time(null);
+
+        auto timeString = ctime(&now);
+        // replace the ' ' by _ and '\n' or '\r' by '\0'
+        {
+            int len = 0;
+            char c = void;
+            for(;;)
+            {
+                c = timeString[len++];
+                // break on null, just to be safe;
+                if (!c)
+                    break;
+
+                if (c == ' ')
+                    timeString[len - 1] = '_';
+
+                if (c == '\r' || c == '\n')
+                {
+                    timeString[len - 1] = '\0';
+                    break;
+                }
+            }
+        }
+
+        sprintf(&fileNameBuffer[0], "symbol-%s.log.1".ptr, timeString);
+
+        printf("traced_symbols: %d\n", dsymbol_profile_array_count);
+
+        auto f = File(&fileNameBuffer[0]);
+        f._ref = 1;
+
+        bufferPos += sprintf(cast(char*) bufferPos, "//");
+        foreach(arg;arguments)
+        {
+            bufferPos += sprintf(bufferPos, "%s ", arg);
+        }
+        bufferPos += sprintf(cast(char*) bufferPos, "\n");
+
+        bufferPos += sprintf(cast(char*) bufferPos,
+            "%s|%s|%s|%s|%s|%s|%s|%s|%s|\n",
+            "inclusive ticks".ptr,
+            "name".ptr, "kind".ptr, "phase".ptr,
+            "location".ptr, "begin_ticks".ptr, "end_ticks".ptr,
+            "begin_mem".ptr, "end_mem".ptr
+        );
+
+        foreach(dp;dsymbol_profile_array[0 .. dsymbol_profile_array_count / 2])
+        {
+
+            Loc loc;
+            const (char)* name;
+
+            if (dp.sym !is null)
+            {
+                loc = dp.sym.loc;
+                name = dp.sym.toChars();
+            }
+            else if (dp.exp !is null)
+            {
+                loc = dp.exp.loc;
+                name = dp.exp.toChars();
+            }
+            else
+                continue; // we probably should assert here, but whaverever.
+
+            // Identifier id = dp.sym.ident ? dp.sym.ident : dp.sym.getIdent();
+
+            bufferPos += sprintf(cast(char*) bufferPos,
+                "%lld|%s|%s|%s|%s|%lld|%lld|%lld|%lld|\n",
+                dp.end_ticks - dp.begin_ticks,
+                name, &dp.kind[0], &dp.fn[0],
+                loc.toChars(), dp.begin_ticks, dp.end_ticks,
+                dp.begin_mem, dp.end_mem);
+        }
+
+        printf("trace_file_size: %dk\n ", (bufferPos - fileBuffer) / 1024);
+        f.setbuffer(fileBuffer, bufferPos - fileBuffer);
+        auto errorcode_write = f.write();
+
+        sprintf(&fileNameBuffer[0], "symbol-%s.log.2".ptr, timeString);
+
+        auto f2 = File(&fileNameBuffer[0]);
+        f2._ref = 1;
+        bufferPos = fileBuffer;
+
+        foreach(dp;dsymbol_profile_array[dsymbol_profile_array_count / 2
+            .. dsymbol_profile_array_count])
+        {
+
+            Loc loc;
+            const (char)* name;
+
+            if (dp.sym !is null)
+            {
+                loc = dp.sym.loc;
+                name = dp.sym.toChars();
+            }
+            else if (dp.exp !is null)
+            {
+                loc = dp.exp.loc;
+                name = dp.exp.toChars();
+            }
+            else
+                continue; // we probably should assert here, but whaverever.
+
+            // Identifier id = dp.sym.ident ? dp.sym.ident : dp.sym.getIdent();
+
+            bufferPos += sprintf(cast(char*) bufferPos,
+                "%lld|%s|%s|%s|%s|%lld|%lld|%lld|%lld|\n",
+                dp.end_ticks - dp.begin_ticks,
+                name, &dp.kind[0], &dp.fn[0],
+                loc.toChars(), dp.begin_ticks, dp.end_ticks,
+                dp.begin_mem, dp.end_mem);
+        }
+
+        f2.setbuffer(fileBuffer, bufferPos - fileBuffer);
+        errorcode_write = f2.write();
+
+
+        free(fileBuffer);
+    }
+}
+
 version (IN_LLVM)
 {
     import gen.semantic : extraLDCSpecificSemanticAnalysis;
@@ -387,12 +524,12 @@ private int tryMain(size_t argc, const(char)** argv)
     if (!global.params.obj || global.params.lib)
         global.params.link = false;
 
-    return mars_mainBody(files, libmodules);
+    return mars_mainBody(files, libmodules, arguments);
 }
 
 } // !IN_LLVM
 
-extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules)
+extern (C++) int mars_mainBody(ref Strings files, ref Strings libmodules, ref Strings arguments)
 {
 version (IN_LLVM)
 {
@@ -476,6 +613,10 @@ else
     Expression._init();
     Objc._init();
     builtin_init();
+
+    import dmd.trace : initTraceMemory;
+
+    initTraceMemory();
 
     version(CRuntime_Microsoft)
     {
@@ -822,6 +963,9 @@ version (IN_LLVM) {} else
             gendocfile(m);
         }
     }
+
+    writeTrace(arguments);
+
     if (global.params.vcg_ast)
     {
         import dmd.hdrgen;

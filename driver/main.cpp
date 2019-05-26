@@ -1063,7 +1063,12 @@ int cppmain(int argc, char **argv) {
   loadAllPlugins();
 
   Strings libmodules;
-  return mars_mainBody(files, libmodules);
+  Strings arguments;
+  for(int i = 0; i < argc; i++)
+  {
+    arguments.insert(i, argv[i]);
+  }
+  return mars_mainBody(files, libmodules, arguments);
 }
 
 void codegenModules(Modules &modules) {
