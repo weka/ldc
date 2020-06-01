@@ -1452,15 +1452,42 @@ private Expression compare_overload(BinExp e, Scope* sc, Identifier id, TOK* pop
         }
         return result;
     }
-    /*
-     * https://issues.dlang.org/show_bug.cgi?id=16657
-     * at this point, no matching opEquals was found for structs,
-     * so we should not follow the alias this comparison code.
-     */
-    if ((e.op == TOK.equal || e.op == TOK.notEqual) && ad1 == ad2)
-        return null;
+
+    bool isAliasThisPartialEquality() {
+        if (e.op != TOK.equal && e.op != TOK.notEqual) return false;
+        if (ad1 != ad2) return false;
+        if (ad1.fields.dim == 1 || (ad1.fields.dim == 2 && ad1.vthis)) {
+            auto var = ad1.aliasthis.sym.isVarDeclaration();
+            if (var && var.type == ad1.fields[0].type)
+                return false;
+
+            auto func = ad1.aliasthis.sym.isFuncDeclaration();
+            auto tf = cast(TypeFunction)(func.type);
+            if (tf.isref && ad1.fields[0].type == tf.next)
+                return false;
+        }
+        return true;
+    }
+
     Expression result = checkAliasThisForLhs(ad1, sc, e);
-    return result ? result : checkAliasThisForRhs(isAggregate(e.e2.type), sc, e);
+    if(result)
+    {
+        /*
+         * https://issues.dlang.org/show_bug.cgi?id=16657
+         * at this point, no matching opEquals was found for structs,
+         * so we should not follow the alias this comparison code.
+         */
+        if (isAliasThisPartialEquality()) {
+            e.deprecation(
+                "Cannot use `alias this` to partially compare `%s` of type `%s`. Use `%s`",
+                e.e1.toChars(), ad1.toChars(), (cast(BinExp)result).e1.toChars());
+            return null;
+        }
+        return result;
+    }
+
+    // TODO: Why not use ad2 in place of isAggregate(e.e2.type)?
+    return checkAliasThisForRhs(isAggregate(e.e2.type), sc, e);
 }
 
 /***********************************
