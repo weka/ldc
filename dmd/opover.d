@@ -1478,9 +1478,14 @@ private Expression compare_overload(BinExp e, Scope* sc, Identifier id, TOK* pop
          * so we should not follow the alias this comparison code.
          */
         if (isAliasThisPartialEquality()) {
-            e.deprecation(
-                "Cannot use `alias this` to partially compare `%s` of type `%s`. Use `%s`",
-                e.e1.toChars(), ad1.toChars(), (cast(BinExp)result).e1.toChars());
+            static string[] ignoreList = ["IP4", "MMapRegion", "NBBox"];
+            auto str = ad1.toString();
+            import std.algorithm;
+            if (!ignoreList.canFind(ignoreList)) {
+                e.deprecation(
+                    "Cannot use `alias this` to partially compare `%s` of type `%s`. Use `%s`",
+                    e.e1.toChars(), str.ptr, (cast(BinExp)result).e1.toChars());
+            }
             return null;
         }
         return result;
