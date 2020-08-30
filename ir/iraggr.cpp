@@ -16,6 +16,7 @@
 #include "dmd/mtype.h"
 #include "dmd/target.h"
 #include "gen/irstate.h"
+#include "gen/linkage.h"
 #include "gen/llvm.h"
 #include "gen/llvmhelpers.h"
 #include "gen/logger.h"
@@ -62,6 +63,7 @@ LLConstant *&IrAggr::getInitSymbol() {
   auto initGlobal = declareGlobal(aggrdecl->loc, gIR->module, getLLStructType(),
                                   irMangle, /*isConstant=*/true);
   initGlobal->setAlignment(LLMaybeAlign(DtoAlignment(type)));
+  initGlobal->setLinkage(llvm::GlobalValue::ExternalWeakLinkage);
 
   init = initGlobal;
 
