@@ -144,7 +144,7 @@ public:
       IrStruct *ir = getIrAggr(decl);
 
       // Define the __initZ symbol.
-      if (!decl->zeroInit) {
+      if (!decl->zeroInit && !decl->inNonRoot()) {
         auto &initZ = ir->getInitSymbol();
         auto initGlobal = llvm::cast<LLGlobalVariable>(initZ);
         initZ = irs->setGlobalVarInitializer(initGlobal, ir->getDefaultInit());

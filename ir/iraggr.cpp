@@ -63,7 +63,6 @@ LLConstant *&IrAggr::getInitSymbol() {
   auto initGlobal = declareGlobal(aggrdecl->loc, gIR->module, getLLStructType(),
                                   irMangle, /*isConstant=*/true);
   initGlobal->setAlignment(LLMaybeAlign(DtoAlignment(type)));
-  initGlobal->setLinkage(llvm::GlobalValue::ExternalWeakLinkage);
 
   init = initGlobal;
 
