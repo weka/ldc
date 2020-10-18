@@ -1,6 +1,5 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * Stores command line options and contains other miscellaneous declarations.
  *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
@@ -189,11 +188,10 @@ extern (C++) struct Param
     bool useTypeInfo = true;     // generate runtime type information
     bool useExceptions = true;   // support exception handling
     bool noSharedAccess;         // read/write access to shared memory objects
+    bool inMeansScopeConst; // `in` means `scope const`
     bool betterC;           // be a "better C" compiler; no dependency on D runtime
     bool addMain;           // add a default main() function
     bool allInst;           // generate code for all template instantiations
-    bool check10378;        // check for issues transitioning to 10738 @@@DEPRECATED@@@ Remove in 2020-05 or later
-    bool bug10378;          // use pre- https://issues.dlang.org/show_bug.cgi?id=10378 search strategy  @@@DEPRECATED@@@ Remove in 2020-05 or later
     bool fix16997;          // fix integral promotions for unary + - ~ operators
                             // https://issues.dlang.org/show_bug.cgi?id=16997
     bool fixAliasThis;      // if the current scope has an alias this, check it before searching upper scopes
@@ -317,6 +315,7 @@ version (IN_LLVM)
 
     // LDC stuff
     OUTPUTFLAG output_ll;
+    OUTPUTFLAG output_mlir;
     OUTPUTFLAG output_bc;
     OUTPUTFLAG output_s;
     OUTPUTFLAG output_o;
@@ -362,6 +361,7 @@ extern (C++) struct Global
 version (IN_LLVM)
 {
     const(char)[] ll_ext;
+    const(char)[] mlir_ext;
     const(char)[] bc_ext;
     const(char)[] s_ext;
     const(char)[] ldc_version;
@@ -527,6 +527,7 @@ else
             vendor = "LDC";
             obj_ext = "o";
             ll_ext  = "ll";
+            mlir_ext = "mlir";
             bc_ext  = "bc";
             s_ext   = "s";
 

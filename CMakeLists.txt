@@ -110,10 +110,10 @@ include(GetLinuxDistribution)
 #
 
 # Version information
-set(LDC_VERSION "1.21.0") # May be overridden by git hash tag
+set(LDC_VERSION "1.22.0") # May be overridden by git hash tag
 set(DMDFE_MAJOR_VERSION   2)
 set(DMDFE_MINOR_VERSION   0)
-set(DMDFE_PATCH_VERSION   91)
+set(DMDFE_PATCH_VERSION   92)
 set(DMDFE_FIX_LEVEL       1)
 
 set(DMD_VERSION ${DMDFE_MAJOR_VERSION}.${DMDFE_MINOR_VERSION}${DMDFE_PATCH_VERSION})
@@ -507,15 +507,6 @@ if(LDC_WITH_LLD)
     append("-DLDC_WITH_LLD" LDC_CXXFLAGS)
 endif()
 message(STATUS "Building LDC with integrated LLD: ${LDC_WITH_LLD} (LDC_WITH_LLD=${LDC_WITH_LLD})")
-
-#
-# Enable building with riscv-llvm, for full RISC-V support.
-#
-option(RISCV_LLVM_DEV "full RISC-V support with riscv-llvm")
-mark_as_advanced(RISCV_LLVM_DEV)
-if(RISCV_LLVM_DEV)
-    append("-DRISCV_LLVM_DEV" LDC_CXXFLAGS)
-endif()
 
 # if llvm was built with assertions we have to do the same
 # as there are some headers with differing behavior based on NDEBUG
@@ -934,11 +925,6 @@ if(${BUILD_SHARED})
     install(TARGETS ${LDC_LIB} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib${LIB_SUFFIX})
 endif()
 install(FILES ${PROJECT_BINARY_DIR}/bin/${LDC_EXE}_install.conf DESTINATION ${CONF_INST_DIR} RENAME ${LDC_EXE}.conf)
-
-if(MSVC)
-    file(COPY vcbuild/ DESTINATION ${PROJECT_BINARY_DIR}/bin FILES_MATCHING PATTERN "*.bat")
-    install(DIRECTORY vcbuild/ DESTINATION ${CMAKE_INSTALL_PREFIX}/bin FILES_MATCHING PATTERN "*.bat")
-endif()
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     if(NOT DEFINED BASH_COMPLETION_COMPLETIONSDIR)

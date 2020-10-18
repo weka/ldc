@@ -160,6 +160,7 @@ class StructDeclaration : public AggregateDeclaration
 public:
     bool zeroInit;              // !=0 if initialize with 0 fill
     bool hasIdentityAssign;     // true if has identity opAssign
+    bool hasBlitAssign;         // true if opAssign is a blit
     bool hasIdentityEquals;     // true if has identity opEquals
     bool hasNoFields;           // has no fields
     FuncDeclarations postblits; // Array of postblit functions
@@ -176,9 +177,8 @@ public:
     structalign_t alignment;    // alignment applied outside of the struct
     StructPOD ispod;            // if struct is POD
 
-    // For 64 bit Efl function call/return ABI
-    Type *arg1type;
-    Type *arg2type;
+    // ABI-specific type(s) if the struct can be passed in registers
+    TypeTuple *argTypes;
 
     // Even if struct is defined as non-root symbol, some built-in operations
     // (e.g. TypeidExp, NewExp, ArrayLiteralExp, etc) request its TypeInfo.
@@ -196,6 +196,9 @@ public:
 
     StructDeclaration *isStructDeclaration() { return this; }
     void accept(Visitor *v) { v->visit(this); }
+
+    unsigned numArgTypes() const;
+    Type *argType(unsigned index);
 };
 
 class UnionDeclaration : public StructDeclaration

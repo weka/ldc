@@ -1,6 +1,7 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * Defines a package and module.
+ *
+ * Specification: $(LINK2 https://dlang.org/spec/module.html, Modules)
  *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
@@ -549,6 +550,8 @@ version (IN_LLVM)
             objExt = global.ll_ext;
         else if (global.params.output_s)
             objExt = global.s_ext;
+        else if (global.params.output_mlir)
+            objExt = global.mlir_ext;
 
         if (objExt)
             objfile = setOutfilename(global.params.objname, global.params.objdir, filename, objExt);

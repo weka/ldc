@@ -1,6 +1,7 @@
 /**
- * Compiler implementation of the
- * $(LINK2 http://www.dlang.org, D programming language).
+ * The entry point for CTFE.
+ *
+ * Specification: ($LINK2 https://dlang.org/spec/function.html#interpretation, Compile Time Function Execution (CTFE))
  *
  * Copyright:   Copyright (C) 1999-2020 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 http://www.digitalmars.com, Walter Bright)
@@ -2673,7 +2674,7 @@ public:
             return ae;
         }
         assert(argnum == arguments.dim - 1);
-        if (elemType.ty == Tchar || elemType.ty == Twchar || elemType.ty == Tdchar)
+        if (elemType.ty.isSomeChar)
         {
             const ch = cast(dchar)elemType.defaultInitLiteral(loc).toInteger();
             const sz = cast(ubyte)elemType.size();
@@ -3666,7 +3667,6 @@ public:
         VarDeclaration vd = null;
         Expression* payload = null; // dead-store to prevent spurious warning
         Expression oldval;
-        int from;
 
         if (auto ve = e1.isVarExp())
         {
@@ -6041,6 +6041,13 @@ public:
 
     override void visit(DotVarExp e)
     {
+        void notImplementedYet()
+        {
+            e.error("`%s.%s` is not yet implemented at compile time", e.e1.toChars(), e.var.toChars());
+            result = CTFEExp.cantexp;
+            return;
+        }
+
         debug (LOG)
         {
             printf("%s DotVarExp::interpret() %s, goal = %d\n", e.loc.toChars(), e.toChars(), goal);
@@ -6079,21 +6086,37 @@ public:
             result = CTFEExp.cantexp;
             return;
         }
-        if (ex.op != TOK.structLiteral && ex.op != TOK.classReference)
-        {
-            e.error("`%s.%s` is not yet implemented at compile time", e.e1.toChars(), e.var.toChars());
-            result = CTFEExp.cantexp;
-            return;
-        }
 
         StructLiteralExp se;
         int i;
+
+        if (ex.op != TOK.structLiteral && ex.op != TOK.classReference && ex.op != TOK.typeid_)
+        {
+            return notImplementedYet();
+        }
 
         // We can't use getField, because it makes a copy
         if (ex.op == TOK.classReference)
         {
             se = (cast(ClassReferenceExp)ex).value;
             i = (cast(ClassReferenceExp)ex).findFieldIndexByName(v);
+        }
+        else if (ex.op == TOK.typeid_)
+        {
+            if (v.ident == Identifier.idPool("name"))
+            {
+                if (auto t = isType(ex.isTypeidExp().obj))
+                {
+                    auto sym = t.toDsymbol(null);
+                    if (auto ident = (sym ? sym.ident : null))
+                    {
+                        result = new StringExp(e.loc, ident.toString());
+                        result.expressionSemantic(null);
+                        return ;
+                    }
+                }
+            }
+            return notImplementedYet();
         }
         else
         {
@@ -6107,11 +6130,14 @@ public:
             return;
         }
 
+        // https://issues.dlang.org/show_bug.cgi?id=19897
+        // https://issues.dlang.org/show_bug.cgi?id=20710
+        // Zero-elements fields don't have an initializer. See: scrubArray function
+        if ((*se.elements)[i] is null)
+            (*se.elements)[i] = voidInitLiteral(e.type, v).copy();
+
         if (goal == ctfeNeedLvalue)
         {
-            Expression ev = (*se.elements)[i];
-            if (!ev || ev.op == TOK.void_)
-                (*se.elements)[i] = voidInitLiteral(e.type, v).copy();
             // just return the (simplified) dotvar expression as a CTFE reference
             if (e.e1 == ex)
                 result = e;
@@ -6127,16 +6153,9 @@ public:
         result = (*se.elements)[i];
         if (!result)
         {
-            // https://issues.dlang.org/show_bug.cgi?id=19897
-            // Zero-length fields don't have an initializer.
-            if (v.type.size() == 0)
-                result = voidInitLiteral(e.type, v).copy();
-            else
-            {
-                e.error("Internal Compiler Error: null field `%s`", v.toChars());
-                result = CTFEExp.cantexp;
-                return;
-            }
+            e.error("Internal Compiler Error: null field `%s`", v.toChars());
+            result = CTFEExp.cantexp;
+            return;
         }
         if (auto vie = result.isVoidInitExp())
         {

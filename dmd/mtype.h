@@ -47,11 +47,8 @@ typedef struct TYPE type;
 
 void semanticTypeInfo(Scope *sc, Type *t);
 
-#if IN_LLVM
-// in typesem.d:
-Type *typeSemantic(Type *t, Loc loc, Scope *sc);
+Type *typeSemantic(Type *t, const Loc &loc, Scope *sc);
 Type *merge(Type *type);
-#endif
 
 enum ENUMTY
 {
@@ -198,7 +195,6 @@ public:
     static Type *tstring;               // immutable(char)[]
     static Type *twstring;              // immutable(wchar)[]
     static Type *tdstring;              // immutable(dchar)[]
-    static Type *tvalist;               // va_list alias
     static Type *terror;                // for error recovery
     static Type *tnull;                 // for null type
 
@@ -258,7 +254,6 @@ public:
     virtual bool iscomplex();
     virtual bool isscalar();
     virtual bool isunsigned();
-    virtual bool ischar();
     virtual bool isscope();
     virtual bool isString();
     virtual bool isAssignable();
@@ -404,7 +399,6 @@ public:
     bool iscomplex() /*const*/;
     bool isscalar() /*const*/;
     bool isunsigned() /*const*/;
-    bool ischar() /*const*/;
     MATCH implicitConvTo(Type *to);
     bool isZeroInit(const Loc &loc) /*const*/;
 
@@ -743,6 +737,7 @@ class TypeStruct : public Type
 public:
     StructDeclaration *sym;
     AliasThisRec att;
+    bool inuse;
 
     static TypeStruct *create(StructDeclaration *sym);
     const char *kind();
@@ -785,7 +780,6 @@ public:
     bool iscomplex();
     bool isscalar();
     bool isunsigned();
-    bool ischar();
     bool isBoolean();
     bool isString();
     bool isAssignable();
@@ -830,6 +824,9 @@ public:
 class TypeTuple : public Type
 {
 public:
+    // 'logically immutable' cached global - don't modify (neither pointer nor pointee)!
+    static TypeTuple *empty;
+
     Parameters *arguments;      // types making up the tuple
 
     static TypeTuple *create(Parameters *arguments);
