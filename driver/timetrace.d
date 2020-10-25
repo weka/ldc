@@ -21,8 +21,18 @@ static if (LLVM_VERSION_MAJOR >= 9)
     // Forward declarations of LLVM Support functions
     extern(C++, llvm)
     {
-        extern __gshared void* TimeTraceProfilerInstance;
         void timeTraceProfilerEnd();
+
+        static if (LLVM_VERSION_MAJOR < 11)
+        {
+            extern __gshared void* TimeTraceProfilerInstance;
+            auto getTimeTraceProfilerInstance() { return TimeTraceProfilerInstance; }
+        }
+        else
+        {
+            // No need to detail the return type (not part of C++ mangling).
+            void* getTimeTraceProfilerInstance();
+        }
     }
 
     // Forward declaration of LDC D-->C++ support function
@@ -33,9 +43,9 @@ static if (LLVM_VERSION_MAJOR >= 9)
     bool timeTraceProfilerEnabled() {
         version (LDC) {
             import ldc.intrinsics: llvm_expect;
-            return llvm_expect(TimeTraceProfilerInstance !is null, false);
+            return llvm_expect(getTimeTraceProfilerInstance() !is null, false);
         } else {
-            return TimeTraceProfilerInstance !is null;
+            return getTimeTraceProfilerInstance() !is null;
         }
     }
 
