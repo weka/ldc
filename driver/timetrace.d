@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Compilation time tracing, --ftime-trace.
-// Supported from LLVM 9.
+// Supported from LLVM 10.
 //
 //===----------------------------------------------------------------------===//
 
@@ -16,7 +16,7 @@ module driver.timetrace;
 
 import driver.ldc_version;
 
-static if (LLVM_VERSION_MAJOR >= 9)
+static if (LLVM_VERSION_MAJOR >= 10)
 {
     // Forward declarations of LLVM Support functions
     extern(C++, llvm)

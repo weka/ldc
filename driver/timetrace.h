@@ -8,13 +8,18 @@
 //===----------------------------------------------------------------------===//
 //
 // Compilation time tracing, --ftime-trace.
-// Supported from LLVM 9.
+// Supported from LLVM 10. (LLVM 9 supports time tracing, but without
+// granularity check which makes profiles way too large)
 //
 //===----------------------------------------------------------------------===//
 
 #pragma once
 
-#if LDC_LLVM_VER >= 900
+#if LDC_LLVM_VER >= 1000
+#define LDC_WITH_TIMETRACER 1
+#endif
+
+#if LDC_WITH_TIMETRACER
 
 #include "llvm/Support/TimeProfiler.h"
 
@@ -57,7 +62,7 @@ struct TimeTraceScope {
 void timeTraceProfilerBegin(size_t name_length, const char *name_ptr,
                             size_t detail_length, const char *detail_ptr);
 
-#else // LDC_LLVM_VER >= 900
+#else // LDC_WITH_TIMETRACER
 
 // Provide dummy implementations when not supporting time tracing.
 inline void initializeTimeTracer() {}
@@ -79,4 +84,4 @@ inline void timeTraceProfilerBegin(size_t name_length, const char *name_ptr,
                                    size_t detail_length,
                                    const char *detail_ptr) {}
 
-#endif // LDC_LLVM_VER >= 900
+#endif // LDC_WITH_TIMETRACER

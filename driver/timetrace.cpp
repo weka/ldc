@@ -8,13 +8,12 @@
 //===----------------------------------------------------------------------===//
 //
 // Compilation time tracing support implementation, --ftime-trace.
-// Supported from LLVM 9.
 //
 //===----------------------------------------------------------------------===//
 
 #include "driver/timetrace.h"
 
-#if LDC_LLVM_VER >= 900
+#if LDC_WITH_TIMETRACER
 
 #include "dmd/errors.h"
 #include "driver/cl_options.h"
