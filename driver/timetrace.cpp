@@ -36,7 +36,7 @@ void writeTimeTraceProfile() {
   if (llvm::timeTraceProfilerEnabled()) {
     std::string filename = opts::fTimeTraceFile;
     if (filename.empty()) {
-      filename = global.params.objfiles[0] ? "out" : global.params.objfiles[0];
+      filename = global.params.objfiles[0] ? global.params.objfiles[0] : "out";
       filename += ".time-trace";
     }
 
