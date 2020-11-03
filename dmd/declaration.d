@@ -89,14 +89,14 @@ bool modifyFieldVar(Loc loc, Scope* sc, VarDeclaration var, Expression e1)
         if (s)
             fd = s.isFuncDeclaration();
         if (fd &&
-            ((var.isField() && (fd.isCtorDeclaration() || fd.isPostBlitDeclaration())) ||
+            ((var.isField() && (fd.isCtorDeclaration() || (fd.isPostBlitDeclaration() && !IN_WEKA))) ||
              (!var.isField() && fd.isStaticCtorDeclaration())) &&
             fd.toParentDecl() == var.toParent2() &&
             (!e1 || e1.op == TOK.this_))
         {
             bool result = true;
 
-            if (!fd.isPostBlitDeclaration())
+            if (IN_WEKA || !fd.isPostBlitDeclaration())
             {
                 var.ctorinit = true;
                 //printf("setting ctorinit\n");
