@@ -6678,6 +6678,17 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             return;
         }
 
+        auto innerType = exp.e1.type;
+        switch (innerType.toBasetype.ty) {
+        case Tuns8:
+        case Tuns16:
+        case Tuns32:
+        case Tuns64:
+        case Tuns128:
+            printf("%s: Negating an expression of type %s\n", exp.loc.toChars(), innerType.toPrettyChars());
+            break;
+        default: break;
+        }
         fix16997(sc, exp);
         exp.type = exp.e1.type;
         Type tb = exp.type.toBasetype();
