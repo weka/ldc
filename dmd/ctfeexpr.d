@@ -1816,7 +1816,9 @@ bool isCtfeValueValid(Expression newval)
             return tb.isscalar();
 
         case TOK.null_:
-            return tb.ty == Tnull    ||
+            return (tb.ty >= Tint8 &&
+                    tb.ty <= Tuns64) ||
+                   tb.ty == Tnull    ||
                    tb.ty == Tpointer ||
                    tb.ty == Tarray   ||
                    tb.ty == Taarray  ||
