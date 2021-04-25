@@ -137,7 +137,10 @@ extern(C++) final class SemanticTimeTraceVisitor(SemaVisitor) : Visitor
 
     override void visit(UserAttributeDeclaration uad) { semavisitor.visit(uad); }
 
-    override void visit(StaticAssert sa) { semavisitor.visit(sa); }
+    override void visit(StaticAssert sa) {
+        auto timeScope = TimeTraceScope(text(pretext ~ "Static assert"), text(sa.toPrettyChars(), ", loc: ", sa.loc.toChars()));
+        semavisitor.visit(sa);
+    }
 
     override void visit(DebugSymbol ds) { semavisitor.visit(ds); }
 

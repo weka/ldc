@@ -6299,6 +6299,9 @@ Expression interpret(UnionExp* pue, Expression e, InterState* istate, CTFEGoal g
 {
     if (!e)
         return null;
+    import std.conv: text;
+    import driver.timetrace: TimeTraceScope;
+    auto timeScope = TimeTraceScope(text("CTFE ", e.toChars()), text("loc: ", e.loc.toChars()));
     scope Interpreter v = new Interpreter(pue, istate, goal);
     e.accept(v);
     Expression ex = v.result;

@@ -1524,7 +1524,7 @@ extern (C++) /* IN_LLVM abstract */ class Expression : ASTNode
         }
 
         error("read-modify-write operations are not allowed for `shared` variables");
-        errorSupplemental("Use `core.atomic.atomicOp!\"%s\"(%s, %s)` instead",
+        errorSupplemental("Use 'core.atomic.atomicOp!\"%s\"(%s, %s)' instead",
                           Token.toChars(rmwOp), toChars(), ex ? ex.toChars() : "1");
         return true;
     }
