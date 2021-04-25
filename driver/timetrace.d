@@ -57,11 +57,11 @@ static if (LLVM_VERSION_MAJOR >= 10)
         @disable this();
         @disable this(this);
 
-        this(string name) {
+        this(lazy string name) {
             if (timeTraceProfilerEnabled())
                 timeTraceProfilerBegin(name.length, name.ptr, 0, null);
         }
-        this(string name, lazy string detail) {
+        this(lazy string name, lazy string detail) {
             if (timeTraceProfilerEnabled())
                 timeTraceProfilerBegin(name.length, name.ptr, detail.length, detail.ptr);
         }
@@ -80,8 +80,8 @@ else
         @disable this();
         @disable this(this);
 
-        this(string name) { }
-        this(string name, lazy string detail) { }
+        this(lazy string name) { }
+        this(lazy string name, lazy string detail) { }
 
         ~this() { }
     }
