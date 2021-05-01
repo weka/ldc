@@ -416,7 +416,7 @@ Expression op_overload(Expression e, Scope* sc, TOK* pop = null)
                         // @@@DEPRECATED_2.098@@@.
                         // Deprecated in 2.088
                         // Make an error in 2.098
-                        e.deprecation("`%s` is deprecated.  Use `opUnary(string op)() if (op == \"%s\")` instead.", id.toChars(), Token.toChars(e.op));
+                        e.deprecation(q{`%s` is deprecated.  Use `opUnary(string op)() if (op == "%s")` instead.}, id.toChars(), Token.toChars(e.op));
                         // Rewrite +e1 as e1.add()
                         result = build_overload(e.loc, sc, e.e1, null, fd);
                         return;

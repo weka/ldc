@@ -416,7 +416,9 @@ extern (C++) abstract class Type : ASTNode
 
     TypeInfoDeclaration vtinfo;     // TypeInfo object for this Type
 
-    type* ctype;                    // for back end
+    type* ctype;                      // for back end
+    void* isIsolated;
+    static assert(isIsolated.sizeof == (cast(void*)null).sizeof);
 
     extern (C++) __gshared Type tvoid;
     extern (C++) __gshared Type tint8;

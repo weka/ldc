@@ -6828,7 +6828,7 @@ final class Parser(AST) : Lexer
         check(token.loc, value);
     }
 
-    private void check(TOK value, const(char)* string)
+    private void check(TOK value, lazy const(char)* string)
     {
         if (token.value != value)
             error("found `%s` when expecting `%s` following %s", token.toChars(), Token.toChars(value), string);

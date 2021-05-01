@@ -1554,9 +1554,15 @@ version (IN_LLVM)
      */
     extern (D) final bool isTypeIsolated(Type t)
     {
+        auto isIsolatedDict = cast(bool[void*]*)&t.isIsolated;
+        auto isIsolatedP = cast(void*)this in *isIsolatedDict;
+        if(isIsolatedP !is null) return *isIsolatedP;
+
         StringTable!Type parentTypes;
         parentTypes._init();
-        return isTypeIsolated(t, parentTypes);
+        bool isIsolated = isTypeIsolated(t, parentTypes);
+        (*isIsolatedDict)[cast(void*)this] = isIsolated;
+        return isIsolated;
     }
 
     ///ditto

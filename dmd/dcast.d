@@ -833,12 +833,13 @@ MATCH implicitConvTo(Expression e, Type t)
             /* Allow the result of strongly pure functions to
              * convert to immutable
              */
-            if (e.f && e.f.isReturnIsolated() &&
+            if (e.f &&
                 (!global.params.vsafe ||        // lots of legacy code breaks with the following purity check
                  e.f.isPure() >= PURE.strong ||
                  // Special case exemption for Object.dup() which we assume is implemented correctly
                  e.f.ident == Id.dup &&
                  e.f.toParent2() == ClassDeclaration.object.toParent())
+                && e.f.isReturnIsolated()
                )
             {
                 result = e.type.immutableOf().implicitConvTo(t);

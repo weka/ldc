@@ -149,6 +149,7 @@ public:
     TypeInfoDeclaration *vtinfo;        // TypeInfo object for this Type
 
     type *ctype;        // for back end
+    void *isIsolated;   // bool[FuncDeclaration] in D side
 
     static Type *tvoid;
     static Type *tint8;
