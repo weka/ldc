@@ -51,13 +51,43 @@ static if (__VERSION__ < 2092)
         va_end(ap);
     }
 else
-    pragma(printf) extern (C++) void error(const ref Loc loc, const(char)* format, ...)
+    pragma(printf) extern (C++) void varargs_error(const ref Loc loc, const(char)* format, ...) nothrow
     {
         va_list ap;
         va_start(ap, format);
         verror(loc, format, ap);
         va_end(ap);
     }
+
+string genMixin(Args...)()
+{
+    import std.conv;
+    string str;
+    foreach (i; 0..Args.length) {
+        str ~= "args[" ~ to!string(i) ~ "],";
+    }
+    return str;
+}
+
+void error(Args...)(const ref Loc loc, const(char)* format, lazy Args args) nothrow
+{
+    import std.exception: assumeWontThrow;
+    enum argString = genMixin!Args();
+    if (!global.gag)
+        mixin("assumeWontThrow(varargs_error(loc, format, " ~ argString ~ "));");
+    else
+        varargs_error(loc, "some error");
+}
+void error(Args...)(const(char)* filename, uint linnum, uint charnum, const(char)* format, lazy Args args) nothrow
+{
+    import std.exception;
+    enum argString = genMixin!Args();
+    if (!global.gag)
+        mixin("assumeWontThrow(varargs_error(filename, linnum, charnum, " ~ argString ~ "));");
+    else
+        varargs_error(filename, linnum, charnum, loc, "some error");
+}
+
 
 /**
  * Same as above, but takes a filename and line information arguments as separate parameters.
@@ -78,7 +108,7 @@ static if (__VERSION__ < 2092)
         va_end(ap);
     }
 else
-    pragma(printf) extern (C++) void error(const(char)* filename, uint linnum, uint charnum, const(char)* format, ...)
+    pragma(printf) extern (C++) void varargs_error(const(char)* filename, uint linnum, uint charnum, const(char)* format, ...)
     {
         const loc = Loc(filename, linnum, charnum);
         va_list ap;

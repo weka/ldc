@@ -91,7 +91,7 @@ public:
     DYNCAST dyncast() const { return DYNCAST_EXPRESSION; }
 
     const char *toChars() const;
-    void error(const char *format, ...) const;
+    void error(const char *format, ...) const { }
     void warning(const char *format, ...) const;
     void deprecation(const char *format, ...) const;
 

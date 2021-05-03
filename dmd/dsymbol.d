@@ -396,15 +396,24 @@ version (IN_LLVM)
     }
     else
     {
-        pragma(printf) final void error(const ref Loc loc, const(char)* format, ...)
+        pragma(printf) final void varg_error(const ref Loc loc, const(char)* format, ...)
         {
             va_list ap;
             va_start(ap, format);
             .verror(loc, format, ap, kind(), prettyFormatHelper().ptr);
             va_end(ap);
         }
+extern(D) final void error(Args...)(const ref Loc loc, const(char)* format, lazy Args args)
+{
+    import std.exception: assumeWontThrow;
+    enum argString = genMixin!Args();
+    if (!global.gag)
+        mixin("assumeWontThrow(varg_error(loc, format, " ~ argString ~ "));");
+    else
+        varg_error(loc, "some error");
+}
 
-        pragma(printf) final void error(const(char)* format, ...)
+        pragma(printf) final void varg_error(const(char)* format, ...)
         {
             va_list ap;
             va_start(ap, format);
@@ -412,6 +421,15 @@ version (IN_LLVM)
             .verror(loc, format, ap, kind(), prettyFormatHelper().ptr);
             va_end(ap);
         }
+extern(D) final void error(Args...)(const(char)* format, lazy Args args)
+{
+    import std.exception: assumeWontThrow;
+    enum argString = genMixin!Args();
+    if (!global.gag)
+        mixin("assumeWontThrow(varg_error(format, " ~ argString ~ "));");
+    else
+        varg_error("some error");
+}
 
         pragma(printf) final void deprecation(const ref Loc loc, const(char)* format, ...)
         {

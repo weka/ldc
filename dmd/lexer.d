@@ -2287,21 +2287,39 @@ class Lexer
         return scanloc;
     }
 
-    final void error(const(char)* format, ...)
+    final void varg_error(const(char)* format, ...)
     {
         va_list args;
         va_start(args, format);
         .verror(token.loc, format, args);
         va_end(args);
     }
+final void error(Args...)(const(char)* format, lazy Args args) nothrow
+{
+    import std.exception: assumeWontThrow;
+    enum argString = genMixin!Args();
+    if (!global.gag)
+        mixin("assumeWontThrow(varg_error(format, " ~ argString ~ "));");
+    else
+        varg_error("some error");
+}
 
-    final void error(const ref Loc loc, const(char)* format, ...)
+    final void varg_error(const ref Loc loc, const(char)* format, ...)
     {
         va_list args;
         va_start(args, format);
         .verror(loc, format, args);
         va_end(args);
     }
+final void error(Args...)(const ref Loc loc, const(char)* format, lazy Args args) nothrow
+{
+    import std.exception: assumeWontThrow;
+    enum argString = genMixin!Args();
+    if (!global.gag)
+        mixin("assumeWontThrow(varg_error(loc, format, " ~ argString ~ "));");
+    else
+        varg_error(loc, "some error");
+}
 
     final void deprecation(const(char)* format, ...)
     {

@@ -781,7 +781,7 @@ extern (C++) /* IN_LLVM abstract */ class Expression : ASTNode
     }
     else
     {
-        pragma(printf) final void error(const(char)* format, ...) const
+        pragma(printf) final void varg_error(const(char)* format, ...) const
         {
             if (type != Type.terror)
             {
@@ -791,6 +791,19 @@ extern (C++) /* IN_LLVM abstract */ class Expression : ASTNode
                 va_end(ap);
             }
         }
+extern(D) final void error(Args...)(const(char)* format, lazy Args args) const
+{
+    import std.exception: assumeWontThrow;
+    enum argString = genMixin!Args();
+    if (type != Type.terror)
+    {
+        if (!global.gag)
+            mixin("assumeWontThrow(varg_error(format, " ~ argString ~ "));");
+        else
+            varg_error("some error");
+    }
+}
+
 
         pragma(printf) final void errorSupplemental(const(char)* format, ...)
         {

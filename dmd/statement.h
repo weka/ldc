@@ -119,7 +119,7 @@ public:
 
     const char *toChars() const;
 
-    void error(const char *format, ...);
+    void error(const char *format, ...) {}
     void warning(const char *format, ...);
     void deprecation(const char *format, ...);
     virtual Statement *getRelatedLabeled() { return this; }
