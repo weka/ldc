@@ -188,7 +188,7 @@ version (IN_LLVM)
     extern (C++) Scope* copy()
     {
         auto sc = _copy();
-        sc.flags |= SCOPEcopied;
+        sc.flags |= SCOPE.copied;
         return sc;
     }
 
@@ -233,7 +233,7 @@ version (IN_LLVM)
             enclosing.ctorflow.OR(ctorflow);
         ctorflow.freeFieldinit();
 
-        if(scopesym && !(flags & SCOPEcopied)) {
+        if(scopesym && !(flags & SCOPE.copied)) {
             scopesym.warnUnusedImports();
         }
         Scope* enc = enclosing;

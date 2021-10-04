@@ -128,18 +128,19 @@ struct Ungag
 
 string toString(Prot.Kind kind) {
     final switch(kind) {
-    case Prot.none: return "none";
-    case Prot.undefined: return "undefined";
-    case Prot.private: return "private";
-    case Prot.package: return "package";
-    case Prot.protected: return "protected";
-    case Prot.public: return "public";
-    case Prot.export: return "export";
+    case Prot.Kind.none: return "none";
+    case Prot.Kind.undefined: return "undefined";
+    case Prot.Kind.private_: return "private";
+    case Prot.Kind.package_: return "package";
+    case Prot.Kind.protected_: return "protected";
+    case Prot.Kind.public_: return "public";
+    case Prot.Kind.export_: return "export";
     }
 }
 
 string toString(Loc loc) {
-    if(loc == Loc()) return "no-loc";
+    Loc zero;
+    if(loc == zero) return "no-loc";
     import std.format;
     if(loc.charnum > 0) {
         return "%s(%s,%s)".format(loc.filename.fromStringz, loc.linnum, loc.charnum);
@@ -238,16 +239,16 @@ enum PASS : int
 
 string toString(PASS x) {
     final switch(x) {
-    case PASSinit: return "init (initial state)";
-    case PASSsemantic: return "semantic (semantic() started)";
-    case PASSsemanticdone: return "semanticdone (semantic() done)";
-    case PASSsemantic2: return "semantic2 (semantic2() started)";
-    case PASSsemantic2done: return "semantic2done (semantic2() done)";
-    case PASSsemantic3: return "semantic3 (semantic3() started)";
-    case PASSsemantic3done: return "semantic3done (semantic3() done)";
-    case PASSinline: return "inline (inline started)";
-    case PASSinlinedone: return "inlinedone (inline done)";
-    case PASSobj: return "obj (toObjFile() run)";
+    case PASS.init: return "init (initial state)";
+    case PASS.semantic: return "semantic (semantic() started)";
+    case PASS.semanticdone: return "semanticdone (semantic() done)";
+    case PASS.semantic2: return "semantic2 (semantic2() started)";
+    case PASS.semantic2done: return "semantic2done (semantic2() done)";
+    case PASS.semantic3: return "semantic3 (semantic3() started)";
+    case PASS.semantic3done: return "semantic3done (semantic3() done)";
+    case PASS.inline: return "inline (inline started)";
+    case PASS.inlinedone: return "inlinedone (inline done)";
+    case PASS.obj: return "obj (toObjFile() run)";
     }
 }
 
@@ -1335,7 +1336,7 @@ public:
 
     /// Called when the scope who owns this symbol dies
     final void warnUnusedImports() {
-        if(semanticRun < PASS.PASSsemantic3) return;
+        if(semanticRun < PASS.semantic3) return;
         if(!importedScopes) return;
         if(!getModule().isRoot()) return;
         foreach(i; 0..importedScopes.dim) {
@@ -1343,8 +1344,9 @@ public:
 
             foreach(ImportPoint point; sc.points) {
                 if(point.useCount > 0) continue;
-                if(point.loc == Loc()) continue;
-                if(point.protection.kind <= PROTprivate) {
+                Loc zero;
+                if(point.loc == zero) continue;
+                if(point.protection.kind <= Prot.Kind.private_) {
                     import std.stdio;
                     stderr.writefln("%s: Unused open import %s (at %s:%s)",
                                     point.loc.toString,
@@ -1432,9 +1434,9 @@ public:
             if (!isExported && symbolIsVisible(this, s2) && s != s2) {
                 ImportPoint* privateImport;
                 foreach(ref point; theImport.points) {
-                    if(point.protection.kind == PROTKIND.PROTprivate) {
+                    if(point.protection.kind == Prot.Kind.private_) {
                         privateImport = &point;
-                    } else if(point.protection.kind > PROTKIND.PROTprivate) {
+                    } else if(point.protection.kind > Prot.Kind.private_) {
                         // If there's any public import and we "close" the import, we actually override the public
                         // import and affect semantics, so only touch purely private open imports
                         isExported = true;
