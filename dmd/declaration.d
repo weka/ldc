@@ -1756,7 +1756,7 @@ extern (C++) class TypeInfoDeclaration : VarDeclaration
     {
         super(Loc.initial, Type.dtypeinfo.type, tinfo.getTypeInfoIdent(), null);
         this.tinfo = tinfo;
-        storage_class = STC.static_ | STC.gshared;
+        storage_class = STC.static_ | STC.gshared | STC.immutable_;
         visibility = Visibility(Visibility.Kind.public_);
         linkage = LINK.c;
         alignment = target.ptrsize;
