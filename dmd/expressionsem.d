@@ -484,7 +484,7 @@ private Expression resolveUFCS(Scope* sc, CallExp ce)
     {
         Identifier ident = die.ident;
 
-        Expression ex = die.semanticX(sc);
+        Expression ex = die.dotIdSemanticPropX(sc);
         if (ex != die)
         {
             ce.e1 = ex;
@@ -533,7 +533,7 @@ private Expression resolveUFCS(Scope* sc, CallExp ce)
         }
         else
         {
-            if (Expression ey = die.semanticY(sc, 1))
+            if (Expression ey = die.dotIdSemanticProp(sc, 1))
             {
                 if (ey.op == EXP.error)
                     return ey;
@@ -604,7 +604,7 @@ private Expression resolveUFCS(Scope* sc, CallExp ce)
     }
     else if (auto dti = ce.e1.isDotTemplateInstanceExp())
     {
-        if (Expression ey = dti.semanticY(sc, 1))
+        if (Expression ey = dti.dotTemplateSemanticProp(sc, 1))
         {
             ce.e1 = ey;
             return null;
@@ -6471,7 +6471,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             return;
         }
 
-        Expression e = exp.semanticY(sc, 1);
+        Expression e = exp.dotIdSemanticProp(sc, 1);
 
         if (e && isDotOpDispatch(e))
         {
@@ -6694,7 +6694,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             return;
         }
         // Indicate we need to resolve by UFCS.
-        Expression e = exp.semanticY(sc, 1);
+        Expression e = exp.dotTemplateSemanticProp(sc, 1);
         if (!e)
             e = resolveUFCSProperties(sc, exp);
         if (e is exp)
@@ -8858,7 +8858,7 @@ version (IN_LLVM)
              */
             if (auto dti = e1x.isDotTemplateInstanceExp())
             {
-                Expression e = dti.semanticY(sc, 1);
+                Expression e = dti.dotTemplateSemanticProp(sc, 1);
                 if (!e)
                 {
                     return setResult(resolveUFCSProperties(sc, e1x, exp.e2));
@@ -8873,7 +8873,7 @@ version (IN_LLVM)
             }
             else if (auto die = e1x.isDotIdExp())
             {
-                Expression e = die.semanticY(sc, 1);
+                Expression e = die.dotIdSemanticProp(sc, 1);
                 if (e && isDotOpDispatch(e))
                 {
                     /* https://issues.dlang.org/show_bug.cgi?id=19687
@@ -12257,9 +12257,9 @@ extern (C++) Expression expressionSemantic(Expression e, Scope* sc)
     return v.result;
 }
 
-Expression semanticX(DotIdExp exp, Scope* sc)
+Expression dotIdSemanticPropX(DotIdExp exp, Scope* sc)
 {
-    //printf("DotIdExp::semanticX(this = %p, '%s')\n", this, toChars());
+    //printf("DotIdExp::dotIdSemanticPropX(this = %p, '%s')\n", this, toChars());
     if (Expression ex = unaSemantic(exp, sc))
         return ex;
 
@@ -12366,7 +12366,7 @@ Expression semanticX(DotIdExp exp, Scope* sc)
  * Returns:
  *      resolved expression, null if error
  */
-Expression semanticY(DotIdExp exp, Scope* sc, int flag)
+Expression dotIdSemanticProp(DotIdExp exp, Scope* sc, int flag)
 {
     //printf("DotIdExp::semanticY(this = %p, '%s')\n", exp, exp.toChars());
 
@@ -12398,7 +12398,7 @@ Expression semanticY(DotIdExp exp, Scope* sc, int flag)
     }
 
     {
-        Expression e = semanticX(exp, sc);
+        Expression e = dotIdSemanticPropX(exp, sc);
         if (e != exp)
             return e;
     }
@@ -12689,7 +12689,7 @@ Expression semanticY(DotIdExp exp, Scope* sc, int flag)
 
 // Resolve e1.ident!tiargs without seeing UFCS.
 // If flag == 1, stop "not a property" error and return NULL.
-Expression semanticY(DotTemplateInstanceExp exp, Scope* sc, int flag)
+Expression dotTemplateSemanticProp(DotTemplateInstanceExp exp, Scope* sc, int flag)
 {
     static if (LOGSEMANTIC)
     {
@@ -12713,7 +12713,7 @@ Expression semanticY(DotTemplateInstanceExp exp, Scope* sc, int flag)
 
     auto die = new DotIdExp(exp.loc, e1, exp.ti.name);
 
-    Expression e = die.semanticX(sc);
+    Expression e = die.dotIdSemanticPropX(sc);
     if (e == die)
     {
         exp.e1 = die.e1; // take back
@@ -12726,7 +12726,7 @@ Expression semanticY(DotTemplateInstanceExp exp, Scope* sc, int flag)
             if (flag)
                 return null;
         }
-        e = die.semanticY(sc, flag);
+        e = die.dotIdSemanticProp(sc, flag);
         if (flag)
         {
             if (!e ||
