@@ -615,6 +615,9 @@ private Expression resolveUFCS(Scope* sc, CallExp ce)
     else
         return null;
 
+    if (checkVariablePurity(eleft, sc))
+        return ErrorExp.get();
+
     // Rewrite
     ce.e1 = e;
     if (!ce.arguments)
@@ -648,6 +651,9 @@ private Expression resolveUFCSProperties(Scope* sc, Expression e1, Expression e2
 
     if (e is null)
         return null;
+
+    if (checkVariablePurity(eleft, sc))
+        return ErrorExp.get();
 
     // Rewrite
     if (e2)
@@ -1319,14 +1325,6 @@ private Expression resolvePropertiesX(Scope* sc, Expression e1, Expression e2 = 
         if (e2)
             goto Leprop;
     }
-    if (auto ve = e1.isVarExp())
-    {
-        if (auto v = ve.var.isVarDeclaration())
-        {
-            if (ve.checkPurity(sc, v))
-                return ErrorExp.get();
-        }
-    }
     if (e2)
         return null;
 
@@ -1371,7 +1369,7 @@ extern (C++) Expression resolveProperties(Scope* sc, Expression e)
 {
     //printf("resolveProperties(%s)\n", e.toChars());
     e = resolvePropertiesX(sc, e);
-    if (e.checkRightThis(sc))
+    if (e.checkVariablePurity(sc) || e.checkRightThis(sc))
         return ErrorExp.get();
     return e;
 }
@@ -6532,6 +6530,9 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
 
         exp.e1 = exp.e1.expressionSemantic(sc);
 
+        if (checkVariablePurity(exp.e1, sc))
+            return setError();
+
         if (auto tup = exp.var.isTupleDeclaration())
         {
             /* Replace:
@@ -8915,7 +8916,7 @@ version (IN_LLVM)
             if (Expression e = resolvePropertiesX(sc, e1x, exp.e2))
                 return setResult(e);
 
-            if (e1x.checkRightThis(sc))
+            if (e1x.checkVariablePurity(sc) || e1x.checkRightThis(sc))
             {
                 return setError();
             }
@@ -12307,12 +12308,6 @@ Expression dotIdSemanticPropX(DotIdExp exp, Scope* sc)
         }
     }
 
-    if (exp.e1.isVarExp() && exp.e1.type.toBasetype().isTypeSArray() && exp.ident == Id.length)
-    {
-        // bypass checkPurity
-        return exp.e1.type.dotExp(sc, exp.e1, exp.ident, exp.noderef ? DotExpFlag.noDeref : 0);
-    }
-
     if (!exp.e1.isDotExp())
     {
         exp.e1 = resolvePropertiesX(sc, exp.e1);
@@ -13110,6 +13105,18 @@ private bool checkFunctionAttributes(Expression exp, Scope* sc, FuncDeclaration 
     }
 }
 
+private bool checkVariablePurity(Expression exp, Scope* sc)
+{
+    if (auto dve = exp.isDotVarExp())
+        return checkVariablePurity(dve.e1, sc);
+
+    if (auto ve = exp.isVarExp())
+    {
+        if (auto v = ve.var.isVarDeclaration())
+            return ve.checkPurity(sc, v);
+    }
+    return false;
+}
 /*******************************
  * Helper function for `getRightThis()`.
  * Gets `this` of the next outer aggregate.

@@ -1289,20 +1289,6 @@ extern (C++) /* IN_LLVM abstract */ class Expression : ASTNode
         if (v.storage_class & STC.manifest)
             return false; // ...or manifest constants
 
-        // accessing empty structs is pure
-        if (v.type.ty == Tstruct)
-        {
-            StructDeclaration sd = (cast(TypeStruct)v.type).sym;
-            if (sd.members) // not opaque
-            {
-                if (sd.semanticRun >= PASS.semanticdone)
-                    sd.determineSize(v.loc);
-
-                if (sd.hasNoFields)
-                    return false;
-            }
-        }
-
         bool err = false;
         if (v.isDataseg())
         {
