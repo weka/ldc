@@ -6364,7 +6364,7 @@ version (IN_LLVM)
 // instance pointing back to 'this', so there the symbol corresponding to 'tnext'
 // would again not be emitted. By commenting out this block, we are always
 // emitting non-speculative instantiations directly from root nodes.
-if(!IN_WEKA)
+if(true || !IN_WEKA)
 {
                     if (!needsCodegen)
                     {
