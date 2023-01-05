@@ -6323,30 +6323,39 @@ version (IN_LLVM)
              *    which doesn't import any root modules.
              */
 
-            // If the ancestor isn't speculative,
-            // 1. do codegen if the ancestor needs it
-            // 2. elide codegen if the ancestor doesn't need it (non-root instantiation of ancestor incl. subtree)
-            if (tinst)
+            static bool needsCodegenRootOnly(TemplateInstance tithis, TemplateInstance tinst, ref TemplateInstance tnext)
             {
-                const needsCodegen = tinst.needsCodegen(); // sets tinst.minst
-                if (tinst.minst) // not speculative
+                // If the ancestor isn't speculative,
+                // 1. do codegen if the ancestor needs it
+                // 2. elide codegen if the ancestor doesn't need it (non-root instantiation of ancestor incl. subtree)
+                if (tinst)
                 {
-                    minst = tinst.minst; // cache result
-                    return needsCodegen;
+                    const needsCodegen = tinst.needsCodegen(); // sets tinst.minst
+                    if (tinst.minst) // not speculative
+                    {
+                        //minst = tinst.minst; // cache result
+                        tithis.minst = tinst.minst; // cache result
+                        tnext = null;               // stop checking siblings
+                        return needsCodegen;
+                    }
                 }
+
+                // Elide codegen if `this` doesn't need it.
+                if (tithis.minst && !tithis.minst.isRoot() && !tithis.minst.rootImports())
+                    return false;
+
+                return true;
             }
 
-            // Elide codegen if `this` doesn't need it.
-            if (minst && !minst.isRoot() && !minst.rootImports())
-                return false;
+            if (!needsCodegenRootOnly(this, tinst, tnext))
+                 return false;
 
             // Elide codegen if a (non-speculative) sibling doesn't need it.
-            if (tnext)
+            for (; tnext; tnext = tnext.tnext)
             {
-                const needsCodegen = tnext.needsCodegen(); // sets tnext.minst
+                const needsCodegen = needsCodegenRootOnly(tnext, tnext.tinst, tnext.tnext); // sets tnext.minst
                 if (tnext.minst) // not speculative
                 {
-                    minst = tnext.minst; // cache result
 
 // JOHAN TODO: This check is old, perhaps now it works for Weka linking?
 // This breaks compiling wekanode. The issue is that while it looks like 'tnext'
@@ -6368,6 +6377,10 @@ if(!IN_WEKA)
                         minst = tnext.minst; // cache result from non-speculative sibling
                         return true;
                     }
+}
+else
+{
+                    minst = tnext.minst; // cache result
 }
                 }
             }
