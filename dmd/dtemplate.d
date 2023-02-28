@@ -6258,7 +6258,7 @@ version (IN_LLVM)
         TemplateInstance tnext = this.tnext;
         TemplateInstance tinst = this.tinst;
         this.tnext = null;
-        this.tinst = null;
+        //this.tinst = null;
 
         if (errors || (inst && inst.isDiscardable()))
         {
