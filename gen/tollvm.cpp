@@ -273,13 +273,7 @@ bool needsCOMDAT() {
    * using /Gy with the MS compiler.
    * https://docs.microsoft.com/en-us/cpp/build/reference/opt-optimizations?view=vs-2019
    */
-#if IN_WEKA
-  return global.params.targetTriple->isOSBinFormatCOFF() ||
-         (global.params.enableWekaMods &&
-          global.params.targetTriple->isOSBinFormatELF());
-#else
   return global.params.targetTriple->isOSBinFormatCOFF();
-#endif
 }
 
 void setLinkage(LinkageWithCOMDAT lwc, llvm::GlobalObject *obj) {
