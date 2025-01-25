@@ -72,6 +72,10 @@ runs:
         if [[ '${{ github.ref }}' = refs/tags/* ]]; then
           assertsSuffix=""
         fi
+        # -withAsserts package does not exist for LLVM 14 and macOS arm64
+        if [[ "$version-${{ runner.os }}-$arch" = 14.0.3-macOS-arm64 ]]; then
+          assertsSuffix=""
+        fi
 
         if [[ '${{ runner.os }}' == Windows ]]; then
           curl -fL --retry 3 --max-time 300 -o llvm.7z \

@@ -2,12 +2,13 @@ name: Merge x86_64 & arm64 packages to universal one
 runs:
   using: composite
   steps:
-    - name: Download OSX x86_64 artifact
+
+    - name: Download x86_64 artifact
       uses: actions/download-artifact@v4
       with:
         name: osx-x86_64
         path: artifacts/
-    - name: Download OSX arm64 artifact
+    - name: Download arm64 artifact
       uses: actions/download-artifact@v4
       with:
         name: osx-arm64
