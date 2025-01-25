@@ -4,12 +4,12 @@ runs:
   steps:
 
     - name: Download x64 artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: windows-x64
         path: artifacts/
     - name: Download x86 artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: windows-x86
         path: artifacts/
