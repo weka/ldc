@@ -1,0 +1,53 @@
+name: "Linux: Cross-compile ARM64 libraries & copy to install dir"
+runs:
+  using: composite
+  steps:
+
+    - name: Install Cross-Compile Support (ARM64)
+      uses: cyberjunk/gha-ubuntu-cross@v5
+      with:
+        arch: arm64
+
+          #    - name: Install libx11-dev for ARM64
+          #run: sudo apt-get install libx11-dev:arm64
+
+    - shell: bash
+      run: |
+        set -eux
+        cd ..
+
+        # keep using our own lld as a linker
+        sudo rm /usr/bin/aarch64-linux-gnu-ld
+        sudo ln -sf /usr/bin/ld /usr
+
+        arch='aarch64'
+        triple="$arch-linux-gnu"
+
+        export CC=clang
+        ./installed/bin/ldc-build-runtime --ninja \
+          --buildDir="build-libs-$arch" \
+          --dFlags="-mtriple=$triple -gcc=clang" \
+          --cFlags="--target=$triple" \
+          --linkerFlags="--target=$triple" \
+          --ldcSrcDir="$PWD/ldc"
+
+        mkdir "installed/lib-$arch"
+        cp -rv "build-libs-$arch"/lib/* "installed/lib-$arch/"
+
+        section="
+        \"($arch|arm64).*-linux-gnu\":
+        {
+            switches = [
+                \"-defaultlib=phobos2-ldc,druntime-ldc\",
+                \"--mcpu=neoverse-n1\",
+                \"-mattr=+crc\",
+                \"-gcc=$arch-linux-gnu-gcc\",
+                \"-linker=gold\",
+            ];
+            lib-dirs = [
+                \"%%ldcbinarypath%%/../lib-$arch\",
+            ];
+            rpath = \"%%ldcbinarypath%%/../lib-$arch\";
+        };"
+        echo "$section" >> installed/etc/ldc2.conf
+        cat installed/etc/ldc2.conf

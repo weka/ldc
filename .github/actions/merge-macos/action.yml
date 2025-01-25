@@ -13,28 +13,37 @@ runs:
       with:
         name: osx-arm64
         path: artifacts/
+    - name: Download Linux x86_64 artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-x86_64
+        path: artifacts/
 
     - name: Extract & merge artifacts
       shell: bash
       run: |
         set -euxo pipefail
 
-        mkdir ldc2-{x86_64,arm64}
-        tar -xf artifacts/ldc2-*-x86_64.tar.xz --strip 1 -C ldc2-x86_64
-        tar -xf artifacts/ldc2-*-arm64.tar.xz  --strip 1 -C ldc2-arm64
+        mkdir ldc2-osx-{x86_64,arm64}
+        mkdir ldc2-linux-x86_64
+        tar -xf artifacts/ldc2-*-osx-x86_64.tar.xz --strip 1 -C ldc2-osx-x86_64
+        tar -xf artifacts/ldc2-*-osx-arm64.tar.xz  --strip 1 -C ldc2-osx-arm64
+        tar -xf artifacts/ldc2-*-linux-x86_64.tar.xz --strip 1 -C ldc2-linux-x86_64
 
-        cp -R ldc2-x86_64 ldc2-universal
+        cp -R ldc2-osx-x86_64 ldc2-universal
         cd ldc2-universal
 
         # rename/copy lib dirs
         mv lib                            lib-x86_64
-        cp -R ../ldc2-arm64/lib           lib-arm64
+        cp -R ../ldc2-osx-arm64/lib       lib-arm64
         # cp -R ../ldc2-arm64/lib-ios-arm64 ./
+        cp -R ../ldc2-linux-x86_64/lib          lib-linux-x86_64
+        cp -R ../ldc2-linux-x86_64/lib-aarch64  lib-linux-arm64
 
         # merge executables to universal ones
         for exe in bin/*; do
           rm $exe
-          lipo -create -output $exe ../ldc2-x86_64/$exe ../ldc2-arm64/$exe
+          lipo -create -output $exe ../ldc2-osx-x86_64/$exe ../ldc2-osx-arm64/$exe
         done
 
         # ios_triple_suffix=$(grep -o -E '\-apple-ios[0-9\.]+' etc/ldc2.conf | head -n1)
@@ -83,6 +92,34 @@ runs:
                 \"%%ldcbinarypath%%/../lib-arm64\",
             ];
             rpath = \"%%ldcbinarypath%%/../lib-arm64\";
+        };
+
+        \"(aarch64\\|arm64).\\*-linux-gnu\":
+        {
+            switches = [
+                \"-defaultlib=phobos2-ldc,druntime-ldc\",
+                \"--mcpu=neoverse-n1\",
+                \"-mattr=+crc\",
+                \"-gcc=aarch64-linux-gnu-gcc\",
+                \"-linker=gold\",
+            ];
+            lib-dirs = [
+                \"%%ldcbinarypath%%/../lib-linux-arm64\",
+            ];
+            rpath = \"%%ldcbinarypath%%/../lib-linux-arm64\";
+        };
+
+        \"(x86_64\\|amd64).\\*-linux-gnu\":
+        {
+            switches = [
+                \"-defaultlib=phobos2-ldc,druntime-ldc\",
+                \"-gcc=x86_64-linux-gnu-gcc\",
+                \"-linker=gold\",
+            ];
+            lib-dirs = [
+                \"%%ldcbinarypath%%/../lib-linux-x86_64\",
+            ];
+            rpath = \"%%ldcbinarypath%%/../lib-linux-x86_64\";
         };"
 
         perl -0777 -pi -e "s|\\ndefault:\\n.+?\\n\\};|$sections|s" etc/ldc2.conf
