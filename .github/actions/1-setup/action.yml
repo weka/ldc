@@ -73,7 +73,7 @@ runs:
           assertsSuffix=""
         fi
         # -withAsserts package does not exist for LLVM 14 and OSX arm64
-        if [[ '$version-$os-$arch' = 14.0.3-osx-arm64 ]]; then
+        if [[ "$version-$os-$arch" = 14.0.3-osx-arm64 ]]; then
           assertsSuffix=""
         fi
 
