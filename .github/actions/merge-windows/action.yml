@@ -100,7 +100,7 @@ runs:
           packaging\windows_installer.iss
 
     - name: Upload multilib package & installer
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: windows-multilib
         path: newArtifacts/
