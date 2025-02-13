@@ -647,6 +647,8 @@ public:
     bool isInOutQual() const;
     void isInOutQual(bool v);
     bool iswild() const;
+    bool isCtonly() const;
+    void isCtonly(bool v);
 
     void accept(Visitor *v) { v->visit(this); }
 };

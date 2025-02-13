@@ -4240,6 +4240,7 @@ extern (C++) final class TypeFunction : TypeNext
         bool isInOutQual;      /// inout on the qualifier
         bool isctor;           /// the function is a constructor
         bool isreturnscope;    /// `this` is returned by value
+        bool isCtonly;         /// is compile time only (@__ctfe)
     }
 
     import dmd.common.bitfields : generateBitFields;
@@ -4270,6 +4271,8 @@ extern (C++) final class TypeFunction : TypeNext
             this.isproperty = true;
         if (stc & STC.live)
             this.islive = true;
+        if (stc & STC.ctonly)
+            this.isCtonly = true;
 
         if (stc & STC.ref_)
             this.isref = true;
@@ -4324,6 +4327,7 @@ extern (C++) final class TypeFunction : TypeNext
         t.trust = trust;
         t.fargs = fargs;
         t.isctor = isctor;
+        t.isCtonly = isCtonly;
         return t;
     }
 
@@ -7189,6 +7193,8 @@ void attributesApply(const TypeFunction tf, void delegate(string) dg, TRUSTforma
         dg("scope");
     if (tf.islive)
         dg("@live");
+    if (tf.isCtonly)
+        dg("@__ctfe");
 
     TRUST trustAttrib = tf.trust;
 

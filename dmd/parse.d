@@ -9318,6 +9318,7 @@ LagainStc:
                (ident == Id.live)     ? STC.live     :
                (ident == Id.future)   ? STC.future   :
                (ident == Id.disable)  ? STC.disable  :
+               (ident == Id.ctfe)     ? STC.ctonly   :
                0;
     }
 
