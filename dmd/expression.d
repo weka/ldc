@@ -1471,6 +1471,25 @@ extern (C++) /* IN_LLVM abstract */ class Expression : ASTNode
         return false;
     }
 
+    /*********************************************
+     * Calling function f.
+     * Check the @__ctfe attribute, i.e. we can only call @__ctfe functions
+     * from either other @__ctfe functions or ctfe.
+     * Returns true if error occurs.
+     */
+    bool checkCtonly(FuncDeclaration f, ref Loc loc, Scope* sc)
+    {
+        if (!f.type.toTypeFunction().isCtonly()) return false;
+        if (sc.flags & SCOPE.ctfe) return false;
+        if (!sc.func) {
+            error("cannot call @__ctfe function `%s` from non-CTFE context", f.toPrettyChars());
+            return true;
+        }
+        if (sc.func.type.toTypeFunction().isCtonly()) return false;
+        error("cannot call @__ctfe function `%s` from non-@__ctfe function `%s`", f.toPrettyChars(), sc.func.toPrettyChars());
+        return true;
+    }
+
     /********************************************
      * Check that the postblit is callable if t is an array of structs.
      * Returns true if error happens.
@@ -3731,6 +3750,13 @@ extern (C++) final class VarExp : SymbolExp
         {
             error("cannot modify operator `$`");
             return ErrorExp.get();
+        }
+        if (auto fd = var.isFuncDeclaration()) {
+            auto fty = fd.type.toTypeFunction();
+            if (fty.isCtonly()) {
+                error("cannot take address of CTFE-only function `%s`", var.toChars());
+                return ErrorExp.get();
+            }
         }
         return this;
     }

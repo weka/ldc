@@ -13106,6 +13106,7 @@ private bool checkFunctionAttributes(Expression exp, Scope* sc, FuncDeclaration 
         error |= checkPurity(sc, f);
         error |= checkSafety(sc, f);
         error |= checkNogc(sc, f);
+        error |= checkCtonly(f, exp.loc, sc);
         return error;
     }
 }
