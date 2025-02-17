@@ -4205,6 +4205,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             return; // semantic() already run
         }
 
+        bool fIsAliasParam = false;
         Objects* tiargs = null; // initial list of template arguments
         Expression ethis = null;
         Type tthis = null;
@@ -4255,6 +4256,18 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             return;
         }
 
+        // That's a hacky way to check if exp.e1 is an alias template parameter.
+        // I found that such aliases have parent == null, but I'm not sure if
+        // this guarantees that it's a template parameter.
+        if (IdentifierExp ie = exp.e1.isIdentifierExp()) {
+            Dsymbol parentSc;
+            Dsymbol s = sc.search(ie.loc, ie.ident, &parentSc);
+            if (s) {
+                if (auto ae = s.isAliasDeclaration()) {
+                    if (!ae.parent) fIsAliasParam = true;
+                }
+            }
+        }
         /* This recognizes:
          *  foo!(tiargs)(funcargs)
          */
@@ -4710,7 +4723,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             }
 
             if (!exp.ignoreAttributes)
-                checkFunctionAttributes(exp, sc, exp.f);
+                checkFunctionAttributes(exp, sc, exp.f, fIsAliasParam);
             checkAccess(exp.loc, sc, ue.e1, exp.f);
             if (!exp.f.needThis())
             {
@@ -4835,7 +4848,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             if (!exp.f || exp.f.errors)
                 return setError();
 
-            checkFunctionAttributes(exp, sc, exp.f);
+            checkFunctionAttributes(exp, sc, exp.f, fIsAliasParam);
             checkAccess(exp.loc, sc, null, exp.f);
 
             exp.e1 = new DotVarExp(exp.e1.loc, exp.e1, exp.f, false);
@@ -5082,7 +5095,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
                 }
             }
 
-            checkFunctionAttributes(exp, sc, exp.f);
+            checkFunctionAttributes(exp, sc, exp.f, fIsAliasParam);
             checkAccess(exp.loc, sc, null, exp.f);
             if (exp.f.checkNestedReference(sc, exp.loc))
                 return setError();
@@ -13097,7 +13110,7 @@ private bool checkAddressCall(Scope* sc, CallExp ce, const(char)* action)
  *  f   = function to be checked
  * Returns: `true` if error occur.
  */
-private bool checkFunctionAttributes(Expression exp, Scope* sc, FuncDeclaration f)
+private bool checkFunctionAttributes(Expression exp, Scope* sc, FuncDeclaration f, bool fIsAliasParam = false)
 {
     with(exp)
     {
@@ -13106,7 +13119,7 @@ private bool checkFunctionAttributes(Expression exp, Scope* sc, FuncDeclaration 
         error |= checkPurity(sc, f);
         error |= checkSafety(sc, f);
         error |= checkNogc(sc, f);
-        error |= checkCtonly(f, exp.loc, sc);
+        error |= checkCtonly(f, exp.loc, sc, fIsAliasParam);
         return error;
     }
 }

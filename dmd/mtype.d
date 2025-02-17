@@ -4241,6 +4241,7 @@ extern (C++) final class TypeFunction : TypeNext
         bool isctor;           /// the function is a constructor
         bool isreturnscope;    /// `this` is returned by value
         bool isCtonly;         /// is compile time only (@__ctfe)
+        bool isCtonlyInferred; /// was compile time only inferred
     }
 
     import dmd.common.bitfields : generateBitFields;
@@ -4251,6 +4252,7 @@ extern (C++) final class TypeFunction : TypeNext
     PURE purity = PURE.impure;
     byte inuse;
     Expressions* fargs;         // function arguments
+    FuncDeclaration ctOnlyInferReason = null;
 
     extern (D) this(ParameterList pl, Type treturn, LINK linkage, StorageClass stc = 0)
     {

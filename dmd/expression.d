@@ -1477,16 +1477,52 @@ extern (C++) /* IN_LLVM abstract */ class Expression : ASTNode
      * from either other @__ctfe functions or ctfe.
      * Returns true if error occurs.
      */
-    bool checkCtonly(FuncDeclaration f, ref Loc loc, Scope* sc)
+    bool checkCtonly(FuncDeclaration f, ref Loc loc, Scope* sc, bool fIsAliasParam)
     {
-        if (!f.type.toTypeFunction().isCtonly()) return false;
+        auto fTy = f.type.toTypeFunction();
+        if (!fTy) {
+            warning("callee `%s` is not a function?", f.toPrettyChars());
+            return false;
+        }
+        if (!fTy.isCtonly()) return false;
         if (sc.flags & SCOPE.ctfe) return false;
-        if (!sc.func) {
+        auto caller = sc.func;
+        if (!caller) {
             error("cannot call @__ctfe function `%s` from non-CTFE context", f.toPrettyChars());
             return true;
         }
-        if (sc.func.type.toTypeFunction().isCtonly()) return false;
+        auto callerTy = caller.type.toTypeFunction();
+        if (!callerTy) {
+            warning("caller `%s` is not a function?", caller.toPrettyChars());
+            return false;
+        }
+        if (callerTy.isCtonly()) return false;
+        if (fIsAliasParam && caller.isInstantiated()) {
+            // message(loc, "restricting %s to be @__ctfe, since it calls @__ctfe function %s it got via an alias parameter",
+            //         caller.toPrettyChars(), f.toPrettyChars());
+            callerTy.isCtonly = true;
+            callerTy.isCtonlyInferred = true;
+            callerTy.ctOnlyInferReason = f;
+            return false;
+        }
+        if (fTy.isCtonlyInferred()) {
+            if (caller.isInstantiated()) {
+                // Propagate inferred @__ctfe to all templated functions.
+                // This is not great: should instead check that the original infer reason
+                // is in template parameters, or in parameters of parameters and so on...
+                // message(loc, "propagating @__ctfe to %s, since it calls function %s that was inferred to be @__ctfe",
+                //        caller.toPrettyChars(), f.toPrettyChars());
+                callerTy.isCtonly = true;
+                callerTy.isCtonlyInferred = true;
+                callerTy.ctOnlyInferReason = fTy.ctOnlyInferReason;
+                return false;
+            }
+        }
         error("cannot call @__ctfe function `%s` from non-@__ctfe function `%s`", f.toPrettyChars(), sc.func.toPrettyChars());
+        if (fTy.isCtonlyInferred()) {
+            errorSupplemental("`%s` was inferred to be @__ctfe because it (transitively) calls `%s`",
+                f.toPrettyChars(), fTy.ctOnlyInferReason.toPrettyChars());
+        }
         return true;
     }
 
