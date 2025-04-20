@@ -89,6 +89,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           ln -s $(dirname $(dirname $(which ldmd2))) ../bootstrap-ldc
+          ../bootstrap-ldc/bin/ldmd2 --version
           if [[ '${{ matrix.arch }}' == 'x86_64' ]]; then
             # work around a v1.35.0 bug - need to rename libLTO-ldc.dylib to make it loadable
             mv ../bootstrap-ldc/lib-x86_64/libLTO-ldc.dylib ../bootstrap-ldc/lib-x86_64/libLTO.dylib
