@@ -21,7 +21,7 @@ jobs:
         include:
 
           - job_name: Linux x86_64
-            os: ubuntu-20.04
+            os: ubuntu-22.04
             arch: x86_64
             bootstrap_cmake_flags: -DBUILD_LTO_LIBS=ON
             # To improve portability of the generated binaries, link the C++ standard library statically.
