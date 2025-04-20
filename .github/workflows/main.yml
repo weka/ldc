@@ -83,11 +83,19 @@ jobs:
         with:
           cmake_flags: ${{ matrix.bootstrap_cmake_flags }}
           arch: ${{ matrix.arch }}
-      # FIXME: on macOS arm64, LLVM 18 (from LDC) and LLVM 17 (from Xcode 16) seem incompatible,
-      #        leading to sporadic 'libc++abi: Pure virtual function called!' compiler crashes
-      - name: 'macOS 15: Use host LDC (with Xcode-compatible LLVM version) as bootstrap LDC'
-        if: matrix.os == 'macos-15'
-        run: ln -s $(dirname $(dirname $(which ldmd2))) ../bootstrap-ldc
+      # FIXME: on macOS, mixing newer LLVM from bootstrap LDC with older LLVM from Xcode clang is problematic,
+      #        leading to sporadic 'libc++abi: Pure virtual function called!' compiler crashes etc.
+      - name: 'macOS: Use host LDC (with Xcode-compatible LLVM version) as bootstrap LDC'
+        if: runner.os == 'macOS'
+        run: |
+          ln -s $(dirname $(dirname $(which ldmd2))) ../bootstrap-ldc
+          if [[ '${{ matrix.arch }}' == 'x86_64' ]]; then
+            # work around a v1.35.0 bug - need to rename libLTO-ldc.dylib to make it loadable
+            mv ../bootstrap-ldc/lib-x86_64/libLTO-ldc.dylib ../bootstrap-ldc/lib-x86_64/libLTO.dylib
+          else
+            # use Xcode v16 on arm64
+            sudo xcode-select -switch /Applications/Xcode_16.1.app
+          fi
       - name: Build LDC with PGO instrumentation & gather profile from compiling default libs
         if: matrix.with_pgo
         uses: ./.github/actions/2a-build-pgo
