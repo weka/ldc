@@ -516,6 +516,8 @@ version (IN_LLVM)
     if (global.errors)
         removeHdrFilesAndFail(params, modules);
 
+    if (params.doHdrGenerationOnly) return 0;
+
     // load all unconditional imports for better symbol resolving
     foreach (m; modules)
     {

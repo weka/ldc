@@ -293,6 +293,10 @@ cl::opt<bool>
     hdrKeepAllBodies("Hkeep-all-bodies", cl::ZeroOrMore,
                      cl::desc("Keep all function bodies in .di files"));
 
+static cl::opt<bool, true>
+    doHdrGenOnly("Honly", cl::desc("Generate 'header' file and exit"), cl::ZeroOrMore,
+            cl::location(global.params.doHdrGenerationOnly));
+
 // C++ header generation options
 
 // `-HC[=silent|verbose]` parser. Required for defaulting to `silent`.

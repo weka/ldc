@@ -355,7 +355,8 @@ void parseCommandLine(Strings &sourceFiles) {
   global.params.hdrdir = opts::fromPathString(hdrDir);
   global.params.hdrname = opts::fromPathString(hdrFile);
   global.params.doHdrGeneration |=
-      global.params.hdrdir.length || global.params.hdrname.length;
+      global.params.hdrdir.length || global.params.hdrname.length ||
+      global.params.doHdrGenerationOnly;
 
   global.params.cxxhdrdir = opts::fromPathString(cxxHdrDir);
   global.params.cxxhdrname = opts::fromPathString(cxxHdrFile);

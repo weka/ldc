@@ -257,6 +257,7 @@ extern (C++) struct Param
     Array!(const(char)*) ddocfiles;     // macro include files for Ddoc
 
     bool doHdrGeneration;               // process embedded documentation comments
+    bool doHdrGenerationOnly;           // generate 'header' file and exit
     const(char)[] hdrdir;                // write 'header' file to docdir directory
     const(char)[] hdrname;               // write 'header' file to docname
     bool hdrStripPlainFunctions = true; // strip the bodies of plain (non-template) functions
