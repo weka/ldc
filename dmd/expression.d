@@ -3838,6 +3838,8 @@ extern (C++) final class FuncExp : Expression
                 s = "__funcliteral";
 
             DsymbolTable symtab;
+            string parentMangle;
+            import dmd.dmangle : mangleExact, mangleToBuffer;
             if (FuncDeclaration func = sc.parent.isFuncDeclaration())
             {
                 if (func.localsymtab is null)
@@ -3847,6 +3849,7 @@ extern (C++) final class FuncExp : Expression
                     func.localsymtab = new DsymbolTable();
                 }
                 symtab = func.localsymtab;
+                parentMangle = cast(string) mangleExact(func).toDString();
             }
             else
             {
@@ -3859,9 +3862,13 @@ extern (C++) final class FuncExp : Expression
                     sds.symtab = new DsymbolTable();
                 }
                 symtab = sds.symtab;
+
+                OutBuffer buf;
+                mangleToBuffer(sds, &buf);
+                parentMangle = buf.extractSlice();
             }
             assert(symtab);
-            Identifier id = Identifier.generateIdWithLoc(s, loc, cast(string) toDString(sc.parent.toPrettyChars()));
+            Identifier id = Identifier.generateIdWithLoc(s, loc, parentMangle);
             fd.ident = id;
             if (td)
                 td.ident = id;
