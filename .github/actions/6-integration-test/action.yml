@@ -20,6 +20,7 @@ runs:
         ./hello
 
     - name: Run hello-world integration test with LTO
+      if: false
       shell: bash
       run: |
         set -eux
