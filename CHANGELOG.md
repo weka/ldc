@@ -22,6 +22,85 @@
 #### Platform support
 - Supports LLVM 15 - 18. Support for LLVM 11 - 14 was dropped. The CLI options `-passmanager` and `-opaque-pointers` were removed.
 
+# LDC 1.41.0 (2025-06-07)
+
+#### Big news
+- Frontend, druntime and Phobos are at version [2.111.0+](https://dlang.org/changelog/2.111.0.html). (#4877, #4910, #4918, #4941)
+- Support for [LLVM 20](https://releases.llvm.org/20.1.0/docs/ReleaseNotes.html). The prebuilt packages use v20.1.5. (#4843, #4911, #4935)
+  - The dynamic-compile (JIT) feature has regressed with LLVM 20. Use LLVM 18 or 19 for that feature.
+- Keep frame pointers by default with `-O` for some targets, notably AArch64 (except Windows), x86_64 (except Windows and glibc Linux), Windows x86, and Android. This fixes druntime backtraces with optimized code (incl. prebuilt druntime/Phobos). (#4889)
+- The prebuilt (non-musl) Linux packages are now generated on Ubuntu 22.04; the minimum glibc version has accordingly been raised from v2.31 to v2.35. (#4893)
+- druntime: Optimize `core.int128` via inline IR/assembly. (#4892)
+- Follow clang wrt. unwind tables emission, enabling them for most popular targets. (#4888)
+- ldc2.conf: Arrays can now be appended to via the `~=` operator. (#4848, #4856)
+- New `--installWithSuffix` command-line option for the `ldc-build-runtime` tool, to simplify copying the libraries to an existing LDC installation. (#4870)
+- CMake changes (for building LDC itself):
+  - Minimum CMake version bumped to v3.16. (#4898)
+  - macOS: Fix weird linker error when running CMake the first time. (#3901, #4926)
+  - Reworked integration of the LLVM compiler-rt libraries. Package maintainers may want to see [docs/compiler_rt.md](https://github.com/ldc-developers/ldc/blob/master/docs/compiler_rt.md). (#4665)
+  - Somewhat simplify separate compiler and runtime builds, incl. cross-compiling LDC itself. (#4872)
+
+#### Platform support
+- Supports LLVM 15 - 20.
+- RISC-V: Fiber context switching is now implemented natively. (#4867)
+
+#### Bug fixes
+- Prebuilt macOS packages: Fix `ldmd2` and other bundled executables crashing on macOS v15.4. (#4899, #4912)
+- ImportC: Run C preprocessor in C11 mode. (#4933)
+- ImportC Windows: Disable clang headers when C-preprocessing with `clang-cl`. (#4934)
+- Fix ICE on invalid constant address-of expressions. (#4938, #4939)
+- Allow Unicode in fully qualified label names. (#4927, #4929)
+
+# LDC 1.40.1 (2025-03-20)
+
+#### Big news
+- Frontend and druntime bumped to version [2.110.0](https://dlang.org/changelog/2.110.0.html) final. (#4854, #4868)
+- LLVM for prebuilt packages bumped to v19.1.7. (#4822)
+- New prebuilt package for Alpine Linux x86_64 with musl libc. It's currently generated on Alpine v3.21, using its default LLVM 19. Most bundled executables are fully static and can be run on ~all distros. (#4826, #4862)
+- Revived dynamic-compile (JIT) functionality (formerly unsupported since LLVM 12), supporting LLVM 18+ now. (#4774)
+- ldc2.conf: `%%ldcversion%%` placeholder added, allowing to refer to version-specific directories.
+- Windows: The prebuilt packages now bundle an official libcurl build (from https://curl.se/windows/), currently v8.12.1. The static library (`curl_a.lib`) isn't available anymore. When bundling this `libcurl.dll` with your binaries, make sure to include `curl-ca-bundle.crt` too (in the same directory as the DLL), to prevent 'SSL peer certificate or SSH remote key was not OK' exceptions. (#4855, #4875)
+
+#### Platform support
+- Supports LLVM 15 - 19.
+- Initial compiler and runtime support for ppc64 and ppc64le systems that use IEEE 754R 128-bit floating-point as the default 128-bit floating-point format. (#4833, #4840)
+- Initial support for Windows on ARM64. The prebuilt Windows multilib package/installer bundles prebuilt arm64 druntime and Phobos; cross-compiling works out of the box via `-mtriple=aarch64-windows-msvc`, but you currently need to set up a suited MSVC arm64 build environment before yourself (e.g., by running `vsdevcmd.bat -arch=arm64 -host_arch=x64`). (#4835, #4846)
+
+#### Bug fixes
+- Prebuilt macOS universal package: Fix automatic bundled `libLTO.dylib` usage when linking with LTO. (#4857)
+- Building multi-file D applications with control-flow protection will no longer cause LDC to throw an internal compiler error. (#4828)
+
+# LDC 1.40.0 (2024-12-15)
+
+#### Big news
+- Frontend, druntime and Phobos are at version [2.110.0](https://dlang.org/changelog/2.110.0.html). (#4707, #4737, #4749, #4768, #4784, #4792, #4798)
+- Support for [LLVM 19](https://releases.llvm.org/19.1.0/docs/ReleaseNotes.html). The prebuilt packages use v19.1.3 (incl. macOS arm64). (#4712, #4735, #4763, #4772)
+- Objective-C: The compiler now properly supports Objective-C classes and protocols, as well as swift stub classes (via the `@swift` UDA). (#4777)
+- Android: NDK for prebuilt package bumped from r26d to r27c. (#4711, #4772)
+- ldc2.conf: `%%ldcconfigpath%%` placeholder added - specifies the directory where current configuration file is located. (#4717)
+- Add support for building against a system copy of zlib through `-DPHOBOS_SYSTEM_ZLIB=ON`. (#4742)
+- Emscripten: The compiler now mimicks a musl Linux platform wrt. extra predefined versions (`linux`, `Posix`, `CRuntime_Musl`, `CppRuntime_LLVM`). (#4750)
+
+#### Platform support
+- Supports LLVM 15 - 19.
+
+#### Bug fixes
+- Fix potentially corrupt IR layouts for bit fields. (#4646, #4708)
+- Fix potentially corrupt IR layouts for explicitly under-aligned aggregates, a regression introduced in LDC v1.31. (#4734, #4736)
+- ELF: Emit (most) instantiated symbols in COMDATs for proper link-time culling. (#3589, #4748)
+- Support scalar right-hand-sides when bit-shifting vectors. (#3606, #4781)
+- Fix LLVM data layout for the SPIR-V target used in D-Compute on LLVM 19+. (#4772)
+
+# LDC 1.39.0 (2024-07-04)
+
+#### Big news
+- Frontend, druntime and Phobos are at version [2.109.1](https://dlang.org/changelog/2.109.0.html). (#4660, #4692)
+- LLVM for prebuilt packages bumped to v18.1.6 (except for macOS arm64). (#4678)
+- Added CI testing of Alpine Linux with musl libc (including some bug fixes). Removed the libunwind dependency when linking with musl libc. (#4650, #4691)
+
+#### Platform support
+- Supports LLVM 15 - 18. Support for LLVM 11 - 14 was dropped. The CLI options `-passmanager` and `-opaque-pointers` were removed.
+
 # LDC 1.38.0 (2024-05-11)
 
 #### Big news
@@ -923,7 +1002,7 @@
 - Misc. debuginfo issues, incl. adaptations to internal LLVM 5.0 changes: (#2315)
   - `ref` parameters and closure parameters declared with wrong address and hence potentially showing garbage.
   - Win64: parameters > 64 bit passed by value showing garbage.
-  - Win64: debuginfos for closure and nested variables now finally available starting with LLVM 5.0. 
+  - Win64: debuginfos for closure and nested variables now finally available starting with LLVM 5.0.
 - LLVM error `Global variable initializer type does not match global variable type!` for `T.init` with explicit initializers for dominated members in nested unions. (#2108)
 - Inconsistent handling of lvalue slicees wrt. visible side-effects of slice lower/upper bound expressions. (#1433)
 - Misc. dcompute issues. (#2195, #2215)

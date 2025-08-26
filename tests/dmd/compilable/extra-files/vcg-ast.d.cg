@@ -70,13 +70,13 @@ class C : Object
 			{
 			}
 			{
-				const ref const(int) r = __result;
+				ref const const(int) r = __result;
 				{
 				}
 			}
 			assert(true);
 			{
-				const ref const(int) r = __result;
+				ref const const(int) r = __result;
 				assert(true);
 			}
 		}
@@ -100,6 +100,12 @@ void main()
 	values();
 	return 0;
 }
+import imports.vcg_ast_import;
+template imported()
+{
+	import imported = imports.vcg_ast_import;
+}
+alias myImport = vcg_ast_import;
 R!int
 {
 	struct _R
@@ -137,14 +143,24 @@ mixin _d_cmain!();
 		}
 	}
 }
+imported!()
+{
+	import object;
+	struct O
+	{
+		invariant
+		{
+		}
+		invariant
+		{
+			__invariant0();
+		}
+	}
+
+}
 RTInfo!(C)
 {
 	enum immutable(void)* RTInfo = null;
-
-}
-NoPointersBitmapPayload!1$?:32=u|64=LU$
-{
-	enum $?:32=uint|64=ulong$[1] NoPointersBitmapPayload = [0$?:32=u|64=LU$];
 
 }
 values!(__c_wchar_t)
@@ -161,4 +177,3 @@ RTInfo!(_R)
 	enum immutable(void)* RTInfo = null;
 
 }
-

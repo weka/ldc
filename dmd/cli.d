@@ -5,12 +5,12 @@
  * However, this file will be used to generate the
  * $(LINK2 https://dlang.org/dmd-linux.html, online documentation) and MAN pages.
  *
- * Copyright:   Copyright (C) 1999-2024 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
- * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/cli.d, _cli.d)
+ * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/cli.d, _cli.d)
  * Documentation:  https://dlang.org/phobos/dmd_cli.html
- * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/cli.d
+ * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/compiler/src/dmd/cli.d
  */
 module dmd.cli;
 
@@ -365,6 +365,8 @@ dmd -cov -unittest myprog.d
                     Sets `__traits(getTargetInfo, \"cppStd\")` to `201703`)
                 $(LI $(I c++20): Use C++20 name mangling,
                     Sets `__traits(getTargetInfo, \"cppStd\")` to `202002`)
+                $(LI $(I c++23): Use C++23 name mangling,
+                    Sets `__traits(getTargetInfo, \"cppStd\")` to `202302`)
             )",
         ),
         Option("extern-std=[h|help|?]",
@@ -380,6 +382,27 @@ dmd -cov -unittest myprog.d
         Option("fPIE",
             "generate position independent executables",
             cast(TargetOS) (TargetOS.all & ~(TargetOS.Windows | TargetOS.OSX))
+        ),
+        Option("ftime-trace",
+            "turn on compile time profiler, generate JSON file with results",
+            "Per function, the time to analyze it, call it from CTFE, generate code for it etc. will be measured,
+            and events with a time longer than 500 microseconds (adjustable with `-ftime-trace-granularity`)
+            will be recorded.
+            The profiling result is output in the Chrome Trace Event Format,
+            $(LINK2 https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview, described here).
+            This can be turned into a more readable text file with the included tool `timetrace2txt`, or inspected
+            with an interactive viewer such as $(LINK2 https://ui.perfetto.dev/, Perfetto)."
+        ),
+        Option("ftime-trace-granularity=",
+            "Minimum time granularity (in microseconds) traced by time profiler (default: 500)",
+            "Measured events shorter than the specified time will be discarded from the output.
+            Set it too high, and interesting events may not show up in the output.
+            Set too low, and the profiler overhead will be larger, and the output will be cluttered with tiny events."
+        ),
+        Option("ftime-trace-file=<filename>",
+            "specify output file for -ftime-trace",
+            "By default, the output name is the same as the first object file name, but with the `.time-trace` extension appended.
+            A different filename can be chosen with this option, including a path relative to the current directory or an absolute path."
         ),
         Option("g",
             "add symbolic debug info",
@@ -472,6 +495,26 @@ dmd -cov -unittest myprog.d
 
              $(P Note that multiple `-i=...` options are allowed, each one adds a pattern.)}"
         ),
+        Option("identifiers=<table>",
+            "Specify the non-ASCII tables for D identifiers",
+            `Set the identifier table to use for the non-ASCII values.
+                $(UL
+                    $(LI $(I UAX31): UAX31)
+                    $(LI $(I c99): C99)
+                    $(LI $(I c11): C11)
+                    $(LI $(I all): All, the least restrictive set, which comes with all others (default))
+                )`
+        ),
+        Option("identifiers-importc=<table>",
+            "Specify the non-ASCII tables for ImportC identifiers",
+            `Set the identifier table to use for the non-ASCII values.
+                $(UL
+                    $(LI $(I UAX31): UAX31)
+                    $(LI $(I c99): C99)
+                    $(LI $(I c11): C11 (default))
+                    $(LI $(I all): All, the least restrictive set, which comes with all others)
+                )`
+        ),
         Option("ignore",
             "deprecated flag, unsupported pragmas are always ignored now"
         ),
@@ -520,12 +563,6 @@ dmd -cov -unittest myprog.d
         ),
         Option("m32mscoff",
             "generate 32 bit code and write MS-COFF object files (deprecated use -m32)",
-            TargetOS.Windows
-        ),
-        Option("m32omf",
-            "(deprecated) generate 32 bit code and write OMF object files",
-            `$(WINDOWS Compile a 32 bit executable. The generated object code is in OMF and is meant to be used with the
-               $(LINK2 http://www.digitalmars.com/download/freecompiler.html, Digital Mars C/C++ compiler)).`,
             TargetOS.Windows
         ),
         Option("m64",
@@ -661,6 +698,12 @@ dmd -cov -unittest myprog.d
             off when generating an object, interface, or Ddoc file
             name. $(SWLINK -op) will leave it on.`,
         ),
+        Option("oq",
+            "Write object files with fully qualified file names",
+            `When compiling pkg/app.d, the resulting object file name will be pkg_app.obj
+            instead of app.o. This helps to prevent name conflicts when compiling multiple
+            packages in the same directory with the $(SWLINK -od) flag.`,
+        ),
         Option("os=<os>",
             "sets target operating system to <os>",
             `Set the target operating system as other than the host.
@@ -678,7 +721,7 @@ dmd -cov -unittest myprog.d
         Option("P=<preprocessorflag>",
             "pass preprocessorflag to C preprocessor",
             `Pass $(I preprocessorflag) to
-            $(WINDOWS sppn.exe or cl.exe)
+            $(WINDOWS cl.exe)
             $(UNIX cpp)`,
         ),
         Option("preview=<name>",
@@ -761,12 +804,11 @@ dmd -cov -unittest myprog.d
                `darwin` or `osx` for MacOS, `dragonfly` or `dragonflybsd` for DragonflyBSD,
                `freebsd`, `openbsd`, `linux`, `solaris` or `windows` for their respective operating systems.
                $(I cenv) is the C runtime environment and is optional: `musl` for musl-libc,
-               `msvc` for the MSVC runtime (the default for windows with this option),
-               `bionic` for the Andriod libc, `digital_mars` for the Digital Mars runtime for Windows
-               `gnu` or `glibc` for the GCC C runtime, `newlib` or `uclibc` for their respective C runtimes.
-               ($ I cppenv) is the C++ runtime environment: `clang` for the LLVM C++ runtime
-               `gcc` for GCC's C++ runtime, `msvc` for microsoft's MSVC C++ runtime (the default for windows with this switch),
-               `sun` for Sun's C++ runtime and `digital_mars` for the Digital Mars C++ runtime for windows.
+               `msvc` for the MSVC runtime, `bionic` for the Andriod libc, `gnu` or `glibc`
+               for the GCC C runtime, `newlib` or `uclibc` for their respective C runtimes.
+               ($ I cppenv) is the C++ runtime environment: `clang` for the LLVM C++ runtime,
+               `gcc` for GCC's C++ runtime, `msvc` for microsoft's MSVC C++ runtime,
+               `sun` for Sun's C++ runtime.
                "
         ),
         Option("transition=<name>",
@@ -791,23 +833,29 @@ dmd -cov -unittest myprog.d
         Option("vcolumns",
             "print character (column) numbers in diagnostics"
         ),
-        Option("verror-style=[digitalmars|gnu]",
+        Option("verror-style=[digitalmars|gnu|sarif]",
             "set the style for file/line number annotations on compiler messages",
             `Set the style for file/line number annotations on compiler messages,
             where:
             $(DL
             $(DT digitalmars)$(DD 'file(line[,column]): message'. This is the default.)
             $(DT gnu)$(DD 'file:line[:column]: message', conforming to the GNU standard used by gcc and clang.)
+            $(DT sarif)$(DD 'Generates JSON output conforming to the SARIF (Static Analysis Results Interchange Format) standard, useful for integration with tools like GitHub and other SARIF readers.')
             )`,
         ),
         Option("verror-supplements=<num>",
             "limit the number of supplemental messages for each error (0 means unlimited)"
         ),
         Option("verrors=<num>",
-            "limit the number of error messages (0 means unlimited)"
+            "limit the number of error/deprecation messages (0 means unlimited)"
         ),
-        Option("verrors=context",
-            "show error messages with the context of the erroring source line"
+        Option("verrors=[context|simple]",
+            "set the verbosity of error messages",
+            `Set the verbosity of error messages:
+            $(DL
+            $(DT context)$(DD Show error messages with the context of the erroring source line (including caret).)
+            $(DT simple)$(DD Show error messages without the context of the erroring source line.)
+            )`,
         ),
         Option("verrors=spec",
             "show errors from speculative compiles such as __traits(compiles,...)"
@@ -879,6 +927,7 @@ dmd -cov -unittest myprog.d
         string name; /// name of the feature
         string paramName; // internal transition parameter name
         string helpText; // detailed description of the feature
+        string link; // link for more info
         bool documented = true; // whether this option should be shown in the documentation
         bool deprecated_; /// whether the feature is still in use
     }
@@ -888,7 +937,7 @@ dmd -cov -unittest myprog.d
         Feature("field", "v.field",
             "list all non-mutable fields which occupy an object instance"),
         Feature("complex", "v.complex",
-            "give deprecation messages about all usages of complex or imaginary types", true, true),
+            "give deprecation messages about all usages of complex or imaginary types", "", true, true),
         Feature("tls", "v.tls",
             "list all variables going into thread local storage"),
         Feature("in", "v.vin",
@@ -897,45 +946,67 @@ dmd -cov -unittest myprog.d
 
     /// Returns all available reverts
     static immutable reverts = [
-        Feature("dip25", "useDIP25", "revert DIP25 changes https://github.com/dlang/DIPs/blob/master/DIPs/archive/DIP25.md", true, true),
+        Feature("dip25", "useDIP25", "revert DIP25 changes",
+        "https://github.com/dlang/DIPs/blob/master/DIPs/archive/DIP25.md", true, true),
         Feature("dip1000", "useDIP1000",
-                "revert DIP1000 changes https://github.com/dlang/DIPs/blob/master/DIPs/other/DIP1000.md (Scoped Pointers)"),
+                "revert DIP1000 changes (Scoped Pointers)",
+                "https://github.com/dlang/DIPs/blob/master/DIPs/other/DIP1000.md"),
         Feature("intpromote", "fix16997", "revert integral promotions for unary + - ~ operators"),
         Feature("dtorfields", "dtorFields", "don't destruct fields of partially constructed objects"),
     ];
 
     /// Returns all available previews
     static immutable previews = [
+        // Note: generally changelog entries should be added to the spec
         Feature("dip25", "useDIP25",
-            "implement https://github.com/dlang/DIPs/blob/master/DIPs/archive/DIP25.md (Sealed references)", true, true),
+            "implement Sealed References DIP",
+            "https://github.com/dlang/DIPs/blob/master/DIPs/archive/DIP25.md", true, true),
         Feature("dip1000", "useDIP1000",
-            "implement https://github.com/dlang/DIPs/blob/master/DIPs/other/DIP1000.md (Scoped Pointers)"),
+            "implement Scoped Pointers DIP",
+            "https://github.com/dlang/DIPs/blob/master/DIPs/other/DIP1000.md"),
         Feature("dip1008", "ehnogc",
-            "implement https://github.com/dlang/DIPs/blob/master/DIPs/other/DIP1008.md (@nogc Throwable)"),
+            "implement @nogc Throwable DIP",
+            "https://github.com/dlang/DIPs/blob/master/DIPs/other/DIP1008.md"),
         Feature("dip1021", "useDIP1021",
-            "implement https://github.com/dlang/DIPs/blob/master/DIPs/accepted/DIP1021.md (Mutable function arguments)"),
-        Feature("bitfields", "bitfields", "add bitfields https://github.com/dlang/dlang.org/pull/3190"),
-        Feature("fieldwise", "fieldwise", "use fieldwise comparisons for struct equality"),
+            "implement Mutable Function Arguments DIP",
+            "https://github.com/dlang/DIPs/blob/master/DIPs/accepted/DIP1021.md"),
+        Feature("bitfields", "bitfields", "add C-like bitfields",
+            "https://github.com/dlang/dlang.org/pull/3190"),
+        Feature("fieldwise", "fieldwise", "use fieldwise comparisons for struct equality",
+            "https://dlang.org/changelog/2.085.0.html#no-cmpsb"),
         Feature("fixAliasThis", "fixAliasThis",
-            "when a symbol is resolved, check alias this scope before going to upper scopes"),
+            "when a symbol is resolved, check alias this scope before going to upper scopes",
+            "https://github.com/dlang/dmd/pull/8885"),
         Feature("intpromote", "fix16997",
-            "fix integral promotions for unary + - ~ operators", false, true),
+            "fix integral promotions for unary + - ~ operators",
+            "https://dlang.org/changelog/2.078.0.html#fix16997", false, true),
         Feature("dtorfields", "dtorFields",
-            "destruct fields of partially constructed objects", false, false),
+            "destruct fields of partially constructed objects",
+            "https://dlang.org/changelog/2.098.0.html#dtorfileds", false, false),
         Feature("rvaluerefparam", "rvalueRefParam",
-            "enable rvalue arguments to ref parameters"),
+            "enable rvalue arguments to ref parameters",
+            "https://gist.github.com/andralex/e5405a5d773f07f73196c05f8339435a"),
+        Feature("safer", "safer",
+            "more safety checks by default",
+            "https://github.com/WalterBright/documents/blob/38f0a846726b571f8108f6e63e5e217b91421c86/safer.md", true, false),
         Feature("nosharedaccess", "noSharedAccess",
-            "disable access to shared memory objects"),
+            "disable access to shared memory objects",
+            "https://dlang.org/spec/const3.html#shared"),
         Feature("in", "previewIn",
-            "`in` on parameters means `scope const [ref]` and accepts rvalues"),
+            "`in` on parameters means `scope const [ref]` and accepts rvalues",
+            "https://dlang.org/spec/function.html#in-params"),
         Feature("inclusiveincontracts", "inclusiveInContracts",
-            "'in' contracts of overridden methods must be a superset of parent contract"),
+            "'in' contracts of overridden methods must be a superset of parent contract",
+            "https://dlang.org/changelog/2.095.0.html#inclusive-incontracts"),
         Feature("shortenedMethods", "shortenedMethods",
-            "allow use of => for methods and top-level functions in addition to lambdas", false, true),
+            "allow use of => for methods and top-level functions in addition to lambdas",
+            "https://dlang.org/spec/function.html#ShortenedFunctionBody", false, true),
         Feature("fixImmutableConv", "fixImmutableConv",
-            "disallow unsound immutable conversions that were formerly incorrectly permitted"),
+            "disallow `void[]` data from holding immutable data",
+            "https://dlang.org/changelog/2.101.0.html#dmd.fix-immutable-conv, https://issues.dlang.org/show_bug.cgi?id=17148"),
         Feature("systemVariables", "systemVariables",
-            "disable access to variables marked '@system' from @safe code"),
+            "disable access to variables marked '@system' from @safe code",
+            "https://dlang.org/spec/attribute.html#system-variables"),
     ];
 }
 
@@ -1016,6 +1087,8 @@ version (IN_LLVM) {} else
             buf ~= t.helpText;
             if (t.deprecated_)
                 buf ~= " [DEPRECATED]";
+            if (t.link.length)
+                buf ~= " (" ~ t.link ~ ")";
             buf ~= "\n";
         }
         return buf;
@@ -1063,6 +1136,7 @@ version (IN_LLVM) {} else
   =c++14                Sets `__traits(getTargetInfo, \"cppStd\")` to `201402`
   =c++17                Sets `__traits(getTargetInfo, \"cppStd\")` to `201703`
   =c++20                Sets `__traits(getTargetInfo, \"cppStd\")` to `202002`
+  =c++23                Sets `__traits(getTargetInfo, \"cppStd\")` to `202302`
 ";
 
     /// Options supported by -HC

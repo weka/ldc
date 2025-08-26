@@ -66,6 +66,7 @@ llvm::Function *buildForwarderFunction(
   llvm::Function *fn = llvm::Function::Create(
       fnTy, llvm::GlobalValue::InternalLinkage, irMangle, &gIR->module);
   fn->setCallingConv(gABI->callingConv(LINK::d));
+  gABI->setUnwindTableKind(fn);
 
   // Emit the body, consisting of...
   const auto bb = llvm::BasicBlock::Create(gIR->context(), "", fn);
@@ -160,30 +161,26 @@ llvm::Function *buildOrderIndependentModuleCtor(Module *m) {
 
 /// Builds the (constant) data content for the importedModules[] array.
 llvm::Constant *buildImportedModules(Module *m, size_t &count) {
-  const auto moduleInfoPtrTy = DtoPtrToType(getModuleInfoType());
-
   std::vector<LLConstant *> importInits;
   for (auto mod : m->aimports) {
     if (!mod->needModuleInfo() || mod == m) {
       continue;
     }
 
-    importInits.push_back(
-        DtoBitCast(getIrModule(mod)->moduleInfoSymbol(), moduleInfoPtrTy));
+    importInits.push_back(getIrModule(mod)->moduleInfoSymbol());
   }
   count = importInits.size();
 
   if (importInits.empty())
     return nullptr;
 
-  const auto type = llvm::ArrayType::get(moduleInfoPtrTy, importInits.size());
+  const auto type =
+      llvm::ArrayType::get(getOpaquePtrType(), importInits.size());
   return LLConstantArray::get(type, importInits);
 }
 
 /// Builds the (constant) data content for the localClasses[] array.
 llvm::Constant *buildLocalClasses(Module *m, size_t &count) {
-  const auto classinfoTy = DtoType(getClassInfoType());
-
   ClassDeclarations aclasses;
   getLocalClasses(m, aclasses);
 
@@ -205,15 +202,15 @@ llvm::Constant *buildLocalClasses(Module *m, size_t &count) {
     }
 
     IF_LOG Logger::println("class: %s", cd->toPrettyChars());
-    classInfoRefs.push_back(
-        DtoBitCast(getIrAggr(cd)->getClassInfoSymbol(), classinfoTy));
+    classInfoRefs.push_back(getIrAggr(cd)->getClassInfoSymbol());
   }
   count = classInfoRefs.size();
 
   if (classInfoRefs.empty())
     return nullptr;
 
-  const auto type = llvm::ArrayType::get(classinfoTy, classInfoRefs.size());
+  const auto type =
+      llvm::ArrayType::get(getOpaquePtrType(), classInfoRefs.size());
   return LLConstantArray::get(type, classInfoRefs);
 }
 }

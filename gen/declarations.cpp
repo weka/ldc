@@ -109,6 +109,12 @@ public:
       m->accept(this);
     }
 
+    // Objective-C protocols don't have TypeInfo.
+    if (decl->classKind == ClassKind::objc) {
+      gIR->objc.getProtocol(decl);
+      return;
+    }
+
     // Emit TypeInfo.
     IrClass *ir = getIrAggr(decl);
     if (!ir->suppressTypeInfo()) {
@@ -203,6 +209,12 @@ public:
 
     for (auto m : *decl->members) {
       m->accept(this);
+    }
+
+    // Objective-C class structure is initialized by calling getClassRef.
+    if (decl->classKind == ClassKind::objc) {
+      gIR->objc.getClass(decl);
+      return;
     }
 
     IrClass *ir = getIrAggr(decl);
@@ -370,7 +382,7 @@ public:
   //////////////////////////////////////////////////////////////////////////
 
   void visit(AttribDeclaration *decl) override {
-    Dsymbols *d = decl->include(nullptr);
+    Dsymbols *d = include(decl, nullptr);
 
     if (d) {
       for (auto s : *d) {

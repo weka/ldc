@@ -1,24 +1,25 @@
 /**
  * Break down a D type into basic (register) types for the AArch64 ABI.
  *
- * Copyright:   Copyright (C) 1999-2024 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
  * Authors:     Martin Kinkelin
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
- * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/argtypes_aarch64.d, _argtypes_aarch64.d)
+ * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/argtypes_aarch64.d, _argtypes_aarch64.d)
  * Documentation:  https://dlang.org/phobos/dmd_argtypes_aarch64.html
- * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/argtypes_aarch64.d
+ * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/compiler/src/dmd/argtypes_aarch64.d
  */
 
 module dmd.argtypes_aarch64;
 
 import dmd.astenums;
 import dmd.mtype;
+import dmd.typesem;
 
 /****************************************************
  * This breaks a type down into 'simpler' types that can be passed to a function
  * in registers, and returned in registers.
  * This is the implementation for the AAPCS64 ABI, based on
- * https://github.com/ARM-software/abi-aa/blob/master/aapcs64/aapcs64.rst.
+ * $(LINK https://github.com/ARM-software/abi-aa/blob/master/aapcs64/aapcs64.rst).
  * Params:
  *      t = type to break down
  * Returns:
@@ -37,7 +38,7 @@ TypeTuple toArgTypes_aarch64(Type t)
         return null;
 
     Type tb = t.toBasetype();
-    const isAggregate = tb.ty == Tstruct || tb.ty == Tsarray || tb.ty == Tarray || tb.ty == Tdelegate || tb.iscomplex();
+    const isAggregate = tb.ty == Tstruct || tb.isStaticOrDynamicArray() || tb.ty == Tdelegate || tb.isComplex();
     if (!isAggregate)
         return new TypeTuple(t);
 
@@ -87,7 +88,7 @@ TypeTuple toArgTypes_aarch64(Type t)
 bool isHFVA(Type t, int maxNumElements = 4, Type* rewriteType = null)
 {
     t = t.toBasetype();
-    if ((t.ty != Tstruct && t.ty != Tsarray && !t.iscomplex()) || !isPOD(t))
+    if ((t.ty != Tstruct && t.ty != Tsarray && !t.isComplex()) || !isPOD(t))
         return false;
 
     Type fundamentalType;
@@ -164,12 +165,12 @@ size_t getNestedHFVA(Type t, ref Type fundamentalType)
         thisFundamentalType = t;
         N = 1;
     }
-    else if (t.isfloating()) // incl. imaginary and complex
+    else if (t.isFloating()) // incl. imaginary and complex
     {
         auto ftSize = t.size();
         N = 1;
 
-        if (t.iscomplex())
+        if (t.isComplex())
         {
             ftSize /= 2;
             N = 2;

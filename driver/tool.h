@@ -40,7 +40,7 @@ std::vector<const char *> getFullArgs(const char *tool,
                                       const std::vector<std::string> &args,
                                       bool printVerbose);
 
-int executeToolAndWait(const Loc &loc, const std::string &tool,
+int executeToolAndWait(Loc loc, const std::string &tool,
                        const std::vector<std::string> &args,
                        bool verbose = false);
 
@@ -57,6 +57,10 @@ struct MsvcEnvironmentScope {
   bool setup(bool forPreprocessingOnly = false);
 
   ~MsvcEnvironmentScope();
+
+  // Tries to return the absolute path to a VC tool, falling back to the file
+  // name.
+  std::string tryResolveToolPath(const char *fileName) const;
 
 private:
   // for each changed env var: name & original value

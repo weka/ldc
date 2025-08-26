@@ -1,4 +1,4 @@
-/* Copyright (C) 2011-2024 by The D Language Foundation, All Rights Reserved
+/* Copyright (C) 2011-2025 by The D Language Foundation, All Rights Reserved
  * written by Walter Bright
  * https://www.digitalmars.com
  * Distributed under the Boost Software License, Version 1.0.
@@ -33,7 +33,7 @@ struct Array
   public:
     Array()
     {
-        data.ptr = NULL;
+        data.ptr = nullptr;
         length = 0;
         data.length = 0;
     }
@@ -93,7 +93,7 @@ struct Array
                 if (nentries <= SMALLARRAYCAP)
                 {
                     data.length = SMALLARRAYCAP;
-                    data.ptr = SMALLARRAYCAP ? &smallarray[0] : NULL;
+                    data.ptr = SMALLARRAYCAP ? &smallarray[0] : nullptr;
                 }
                 else
                 {

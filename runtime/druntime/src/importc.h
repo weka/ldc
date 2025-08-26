@@ -9,6 +9,13 @@
  */
 
 /**********************
+ * Silence noisy warnings for this file
+ */
+#ifdef __GNUC__
+#pragma GCC system_header
+#endif
+
+/**********************
  * For special casing ImportC code.
  */
 #define __IMPORTC__ 1
@@ -34,6 +41,7 @@
 #define __alignof _Alignof
 #define __vector_size__ vector_size
 #define __typeof typeof
+#define __typeof__ typeof
 
 /********************
  * Clang nullability extension used by macOS headers.
@@ -70,12 +78,18 @@ typedef unsigned long long __uint64_t;
  * Obsolete detritus
  */
 #define __cdecl
+#define __pascal
+
+/*********************
+ * DMC-specific extensions, https://digitalmars.com/ctg/pointers16.html
+ */
+#ifdef __DMC__
 #define __ss
 #define __cs
 #define __far
 #define __near
 #define __handle
-#define __pascal
+#endif
 
 /****************************
  * __extension__ is a GNU C extension. It suppresses warnings
@@ -85,7 +99,7 @@ typedef unsigned long long __uint64_t;
 
 #define __builtin_isnan(x) isnan(x)
 #define __builtin_isfinite(x) finite(x)
-// IN_LLVM: replaced by symbol in __builtins.di
+// IN_LLVM: replaced by symbol in __importc_builtins.di
 //#define __builtin_alloca(x) alloca(x)
 
 /********************************
@@ -153,13 +167,19 @@ typedef unsigned long long __uint64_t;
 /***************************
  * C11 6.10.8.3 Conditional feature macros
  */
+#if !(defined(_MSC_VER) && defined(__STDC_NO_VLA__)) // pre-defined to 1 by MS when using /std:cXX and causing warning C4117
 #define __STDC_NO_VLA__ 1
+#endif
 
-#if linux  // Microsoft won't allow the following macro
+#define _Float16 float
+#ifdef __linux__  // Microsoft won't allow the following macro
 // Ubuntu's assert.h uses this
 #define __PRETTY_FUNCTION__ __func__
 
-#ifndef __aarch64__
+#ifndef __clang__
+// Glibc with clang gets upset when some _Float* is defined:
+// /usr/include/bits/floatn-common.h(214): Error: illegal combination of type specifiers
+// typedef float float;
 #define _Float32 float
 #define _Float32x double
 #define _Float64 double

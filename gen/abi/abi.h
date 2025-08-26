@@ -19,6 +19,7 @@
 #include "dmd/globals.h"
 #include "gen/dvalue.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/Support/CodeGen.h" // for UWTableKind
 #include <vector>
 
 class Type;
@@ -33,6 +34,7 @@ namespace llvm {
 class Type;
 class Value;
 class FunctionType;
+class Function;
 }
 
 /// Transforms function arguments and return values.
@@ -70,6 +72,7 @@ protected:
 
 // interface called by codegen
 struct TargetABI {
+public:
   virtual ~TargetABI() = default;
 
   /// Returns the ABI for the target we're compiling for
@@ -109,12 +112,17 @@ struct TargetABI {
     return name;
   }
 
-  /// Returns true if all functions require the LLVM uwtable attribute.
-  virtual bool needsUnwindTables() {
-    // Condensed logic of Clang implementations of
-    // `clang::ToolChain::IsUnwindTablesDefault()` based on early Clang 5.0.
-    return global.params.targetTriple->getArch() == llvm::Triple::x86_64 ||
-           global.params.targetTriple->getOS() == llvm::Triple::NetBSD;
+  /// Returns the default unwind-table kind for all functions.
+  /// Analogous to clang's ToolChain::getDefaultUnwindTableLevel().
+  virtual llvm::UWTableKind defaultUnwindTableKind() {
+    return llvm::UWTableKind::None;
+  }
+
+  void setUnwindTableKind(llvm::Function *fn);
+
+  /// Returns true if the target is darwin-based.
+  bool isDarwin() {
+    return global.params.targetTriple->isOSDarwin();
   }
 
   /// Returns true if the D function uses sret (struct return).
@@ -126,7 +134,7 @@ struct TargetABI {
   /// caller.
   /// The address is passed as additional function parameter using the StructRet
   /// attribute.
-  virtual bool returnInArg(TypeFunction *tf, bool needsThis) = 0;
+  virtual bool returnInArg(TypeFunction *tf, bool needsThis);
 
   /// Returns true if the specified parameter type (a POD) should be passed by
   /// ref for `in` params with -preview=in.
@@ -141,16 +149,16 @@ struct TargetABI {
   /// parameter.
   /// The LL caller needs to pass a pointer to the original argument (the memcpy
   /// source).
-  virtual bool passByVal(TypeFunction *tf, Type *t) = 0;
+  virtual bool passByVal(TypeFunction *tf, Type *t);
 
   /// Returns true if the 'this' argument is to be passed before the 'sret'
   /// argument.
   virtual bool passThisBeforeSret(TypeFunction *tf) { return false; }
 
   /// Called to give ABI the chance to rewrite the types
-  virtual void rewriteFunctionType(IrFuncTy &fty) = 0;
+  virtual void rewriteFunctionType(IrFuncTy &fty);
   virtual void rewriteVarargs(IrFuncTy &fty, std::vector<IrFuncTyArg *> &args);
-  virtual void rewriteArgument(IrFuncTy &fty, IrFuncTyArg &arg) {}
+  virtual void rewriteArgument(IrFuncTy &fty, IrFuncTyArg &arg);
 
   /// Prepares a va_start intrinsic call by transforming the D argument (of type
   /// va_list) to a low-level value (of type i8*) to be passed to LLVM's
@@ -171,7 +179,7 @@ struct TargetABI {
   virtual Type *vaListType();
 
   /// Returns Objective-C message send function
-  virtual const char *objcMsgSendFunc(Type *ret, IrFuncTy &fty);
+  virtual const char *objcMsgSendFunc(Type *ret, IrFuncTy &fty, bool directcall);
 
   /***** Static Helpers *****/
 

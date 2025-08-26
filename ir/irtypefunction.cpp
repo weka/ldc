@@ -55,8 +55,8 @@ IrTypeDelegate *IrTypeDelegate::get(Type *t) {
   IrFuncTy irFty(tf);
   llvm::Type *ltf =
       DtoFunctionType(tf, irFty, nullptr, pointerTo(Type::tvoid));
-  llvm::Type *fptr = ltf->getPointerTo(gDataLayout->getProgramAddressSpace());
-  llvm::Type *types[] = {getVoidPtrType(), fptr};
+  llvm::Type *fptr = LLPointerType::get(ltf, gDataLayout->getProgramAddressSpace());
+  llvm::Type *types[] = {getOpaquePtrType(), fptr};
   LLStructType *lt = LLStructType::get(gIR->context(), types, false);
 
   // Could have already built the type as part of a struct forward reference,

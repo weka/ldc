@@ -346,7 +346,7 @@ auto tlsOldTerminateHandler() nothrow @assumeUsed
 
 void msvc_eh_terminate() nothrow @naked
 {
-    version (Win32)
+    version (X86)
     {
         __asm(
            `call __D3ldc7eh_msvc21tlsUncaughtExceptionsFNbZk
@@ -380,7 +380,7 @@ void msvc_eh_terminate() nothrow @naked
             "~{memory},~{flags},~{ebp},~{esp},~{eax}"
         );
     }
-    else
+    else version (X86_64)
     {
         __asm(
            `push %rbx                      // align stack for better debuggability
@@ -458,6 +458,8 @@ void msvc_eh_terminate() nothrow @naked
             mov $$0xccc348c48348c033, %rbx // xor eax,eax; add rsp,48h; ret; int 3
             cmp 0x2d(%rax), %rbx           // (libcmtd.lib, 14.23.x.x)
             je L_retVC14_23_libcmtd
+            cmp 0x2e(%rax), %rbx           // (libcmtd.lib/vcruntime140d.lib, 14.40.x.x)
+            je L_retVC14_40_libcmtd
 
             jmp L_term
 
@@ -473,6 +475,10 @@ void msvc_eh_terminate() nothrow @naked
 
         L_retVC14_23_libcmtd:              // libcmtd.lib/vcruntime140d.dll 14.23.28105
             lea 0x2f(%rax), %rax
+            jmp L_rbxRestored              // rbx not saved
+
+        L_retVC14_40_libcmtd:              // libcmtd.lib/vcruntime140d.dll 14.40.33810
+            lea 0x30(%rax), %rax
             jmp L_rbxRestored              // rbx not saved
 
         L_retVC14_14:                      // (vcruntime140.dll 14.14.x.y)
@@ -533,6 +539,31 @@ void msvc_eh_terminate() nothrow @naked
             ret`,
             "~{memory},~{flags},~{rbp},~{rsp},~{rax},~{rbx},~{rdx}"
         );
+    }
+    else version (AArch64)
+    {
+        asm pure nothrow @nogc
+        {`
+            bl _D3ldc7eh_msvc21tlsUncaughtExceptionsFNbZm
+            cmp w0, #0
+            ble 1f
+
+            // hacking into the call chain to return EXCEPTION_EXECUTE_HANDLER
+            //  as the return value of __FrameUnwindFilter so that
+            // __FrameUnwindToState continues with the next unwind block
+            ldr x0, [fp] // __FrameUnwindFilter's fp
+            mov sp, x0
+            mov w0, #1   // return EXCEPTION_EXECUTE_HANDLER
+            ldp fp,lr,[sp],#16
+            ldp x19,x20,[sp],#0x10
+            autibsp      // uses lr,sp and x19 as input to hash
+            ret
+
+        1:
+            ldp fp,lr,[sp],#16
+            ret`
+            : : : "x0", "x19", "x20";
+        }
     }
 }
 

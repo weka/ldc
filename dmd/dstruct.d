@@ -3,12 +3,12 @@
  *
  * Specification: $(LINK2 https://dlang.org/spec/struct.html, Structs, Unions)
  *
- * Copyright:   Copyright (C) 1999-2024 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
- * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/dstruct.d, _dstruct.d)
+ * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/dstruct.d, _dstruct.d)
  * Documentation:  https://dlang.org/phobos/dmd_dstruct.html
- * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/dstruct.d
+ * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/compiler/src/dmd/dstruct.d
  */
 
 module dmd.dstruct;
@@ -23,11 +23,12 @@ import dmd.declaration;
 import dmd.dmodule;
 import dmd.dscope;
 import dmd.dsymbol;
-import dmd.dsymbolsem;
+import dmd.dsymbolsem : search, setFieldOffset;
 import dmd.dtemplate;
 import dmd.errors;
 import dmd.expression;
 import dmd.func;
+import dmd.funcsem;
 import dmd.globals;
 import dmd.id;
 import dmd.identifier;
@@ -36,7 +37,7 @@ import dmd.mtype;
 import dmd.opover;
 import dmd.target;
 import dmd.tokens;
-import dmd.typesem;
+import dmd.typesem : isZeroInit, merge, size, hasPointers;
 import dmd.typinf;
 import dmd.visitor;
 
@@ -63,132 +64,6 @@ FuncDeclaration search_toString(StructDeclaration sd)
         fd = fd.overloadExactMatch(tftostring);
     }
     return fd;
-}
-
-/***************************************
- * Request additional semantic analysis for TypeInfo generation.
- * Params:
- *      sc = context
- *      t = type that TypeInfo is being generated for
- */
-extern (D) void semanticTypeInfo(Scope* sc, Type t)
-{
-    if (sc)
-    {
-        if (sc.intypeof)
-            return;
-        if (!sc.needsCodegen())
-            return;
-    }
-
-    if (!t)
-        return;
-
-    void visitVector(TypeVector t)
-    {
-        semanticTypeInfo(sc, t.basetype);
-    }
-
-    void visitAArray(TypeAArray t)
-    {
-        semanticTypeInfo(sc, t.index);
-        semanticTypeInfo(sc, t.next);
-    }
-
-    void visitStruct(TypeStruct t)
-    {
-        //printf("semanticTypeInfo.visit(TypeStruct = %s)\n", t.toChars());
-        StructDeclaration sd = t.sym;
-
-        /* Step 1: create TypeInfoDeclaration
-         */
-        if (!sc) // inline may request TypeInfo.
-        {
-            Scope scx;
-            scx.eSink = global.errorSink;
-            scx._module = sd.getModule();
-            getTypeInfoType(sd.loc, t, &scx);
-version (IN_LLVM) {} else
-{
-            sd.requestTypeInfo = true;
-}
-        }
-        else if (!sc.minst)
-        {
-            // don't yet have to generate TypeInfo instance if
-            // the typeid(T) expression exists in speculative scope.
-        }
-        else
-        {
-            getTypeInfoType(sd.loc, t, sc);
-version (IN_LLVM) {} else
-{
-            sd.requestTypeInfo = true;
-}
-
-            // https://issues.dlang.org/show_bug.cgi?id=15149
-            // if the typeid operand type comes from a
-            // result of auto function, it may be yet speculative.
-            // unSpeculative(sc, sd);
-        }
-
-        /* Step 2: If the TypeInfo generation requires sd.semantic3, run it later.
-         * This should be done even if typeid(T) exists in speculative scope.
-         * Because it may appear later in non-speculative scope.
-         */
-        if (!sd.members)
-            return; // opaque struct
-        if (!sd.xeq && !sd.xcmp && !sd.postblit && !sd.tidtor && !sd.xhash && !search_toString(sd))
-            return; // none of TypeInfo-specific members
-
-        // If the struct is in a non-root module, run semantic3 to get
-        // correct symbols for the member function.
-        if (sd.semanticRun >= PASS.semantic3)
-        {
-            // semantic3 is already done
-        }
-        else if (TemplateInstance ti = sd.isInstantiated())
-        {
-            if (ti.minst && !ti.minst.isRoot())
-                Module.addDeferredSemantic3(sd);
-        }
-        else
-        {
-            if (sd.inNonRoot())
-            {
-                //printf("deferred sem3 for TypeInfo - sd = %s, inNonRoot = %d\n", sd.toChars(), sd.inNonRoot());
-                Module.addDeferredSemantic3(sd);
-            }
-        }
-    }
-
-    void visitTuple(TypeTuple t)
-    {
-        if (t.arguments)
-        {
-            foreach (arg; *t.arguments)
-            {
-                semanticTypeInfo(sc, arg.type);
-            }
-        }
-    }
-
-    /* Note structural similarity of this Type walker to that in isSpeculativeType()
-     */
-
-    Type tb = t.toBasetype();
-    switch (tb.ty)
-    {
-        case Tvector:   visitVector(tb.isTypeVector()); break;
-        case Taarray:   visitAArray(tb.isTypeAArray()); break;
-        case Tstruct:   visitStruct(tb.isTypeStruct()); break;
-        case Ttuple:    visitTuple (tb.isTypeTuple());  break;
-
-        case Tclass:
-        case Tenum:     break;
-
-        default:        semanticTypeInfo(sc, tb.nextOf()); break;
-    }
 }
 
 enum StructFlags : int
@@ -226,9 +101,10 @@ extern (C++) class StructDeclaration : AggregateDeclaration
         bool hasIdentityEquals;     // true if has identity opEquals
         bool hasNoFields;           // has no fields
         bool hasCopyCtor;           // copy constructor
+        bool hasMoveCtor;           // move constructor
         bool hasPointerField;       // members with indirections
         bool hasVoidInitPointers;   // void-initialized unsafe fields
-        bool hasSystemFields;      // @system members
+        bool hasUnsafeBitpatterns;  // @system members, pointers, bool
         bool hasFieldWithInvariant; // invariants
         bool computedTypeProperties;// the above 3 fields are computed
 version (IN_LLVM) {} else
@@ -243,9 +119,10 @@ version (IN_LLVM) {} else
     import dmd.common.bitfields : generateBitFields;
     mixin(generateBitFields!(BitFields, ushort));
 
-    extern (D) this(const ref Loc loc, Identifier id, bool inObject)
+    extern (D) this(Loc loc, Identifier id, bool inObject)
     {
         super(loc, id);
+        this.dsym = DSYM.structDeclaration;
         zeroInit = false; // assume false until we do semantic processing
         ispod = ThreeState.none;
         // For forward references
@@ -258,7 +135,7 @@ version (IN_LLVM) {} else
         }
     }
 
-    static StructDeclaration create(const ref Loc loc, Identifier id, bool inObject)
+    static StructDeclaration create(Loc loc, Identifier id, bool inObject)
     {
         return new StructDeclaration(loc, id, inObject);
     }
@@ -299,11 +176,12 @@ version (IN_LLVM) {} else
         {
             Dsymbol s = (*members)[i];
             s.setFieldOffset(this, &fieldState, isunion);
-        }
-        if (type.ty == Terror)
-        {
-            errors = true;
-            return;
+            if (type.ty == Terror)
+            {
+                errorSupplemental(s.loc, "error on member `%s`", s.toPrettyChars);
+                errors = true;
+                return;
+            }
         }
 
         if (structsize == 0)
@@ -327,11 +205,6 @@ version (IN_LLVM) {} else
                          *   struct S { int :0; };
                          */
                         structsize = 4;
-                    }
-                    else if (target.c.bitFieldStyle == TargetC.BitFieldStyle.DM)
-                    {
-                        structsize = 0;
-                        alignsize = 0;
                     }
                     else
                         structsize = 0;
@@ -363,18 +236,24 @@ version (IN_LLVM) {} else
 
         // Determine if struct is all zeros or not
         zeroInit = true;
+        auto lastOffset = -1;
         foreach (vd; fields)
         {
+            // First skip zero sized fields
+            if (vd.type.size(vd.loc) == 0)
+                continue;
+
+            // only consider first sized member of an (anonymous) union
+            if (vd.overlapped && vd.offset == lastOffset)
+                continue;
+            lastOffset = vd.offset;
+
             if (vd._init)
             {
                 if (vd._init.isVoidInitializer())
                     /* Treat as 0 for the purposes of putting the initializer
                      * in the BSS segment, or doing a mass set to 0
                      */
-                    continue;
-
-                // Zero size fields are zero initialized
-                if (vd.type.size(vd.loc) == 0)
                     continue;
 
                 // Examine init to see if it is all 0s.
@@ -404,13 +283,16 @@ version (IN_LLVM) {} else
         foreach (vd; fields)
         {
             if (vd.storage_class & STC.ref_ || vd.hasPointers())
+            {
                 hasPointerField = true;
+                hasUnsafeBitpatterns = true;
+            }
 
             if (vd._init && vd._init.isVoidInitializer() && vd.type.hasPointers())
                 hasVoidInitPointers = true;
 
-            if (vd.storage_class & STC.system || vd.type.hasSystemFields())
-                hasSystemFields = true;
+            if (vd.storage_class & STC.system || vd.type.hasUnsafeBitpatterns())
+                hasUnsafeBitpatterns = true;
 
             if (!vd._init && vd.type.hasVoidInitPointers())
                 hasVoidInitPointers = true;
@@ -441,13 +323,22 @@ version (IN_LLVM) {} else
         if (ispod != ThreeState.none)
             return (ispod == ThreeState.yes);
 
-        ispod = ThreeState.yes;
-
         import dmd.clone;
-        bool hasCpCtorLocal;
-        needCopyCtor(this, hasCpCtorLocal);
 
-        if (enclosing || search(this, loc, Id.postblit) || search(this, loc, Id.dtor) || hasCpCtorLocal)
+        bool hasCpCtorLocal;
+        bool hasMoveCtorLocal;
+        bool needCopyCtor;
+        bool needMoveCtor;
+        needCopyOrMoveCtor(this, hasCpCtorLocal, hasMoveCtorLocal, needCopyCtor, needMoveCtor);
+
+        if (enclosing                      || // is nested
+            search(this, loc, Id.postblit) || // has postblit
+            search(this, loc, Id.dtor)     || // has destructor
+            /* This is commented out because otherwise buildkite vibe.d:
+               `canCAS!Task` fails to compile
+             */
+            //hasMoveCtorLocal               || // has move constructor
+            hasCpCtorLocal)                   // has copy constructor
         {
             ispod = ThreeState.no;
             return false;
@@ -463,12 +354,9 @@ version (IN_LLVM) {} else
                 return false;
             }
 
-            Type tv = v.type.baseElemOf();
-            if (tv.ty == Tstruct)
+            if (auto ts = v.type.baseElemOf().isTypeStruct())
             {
-                TypeStruct ts = cast(TypeStruct)tv;
-                StructDeclaration sd = ts.sym;
-                if (!sd.isPOD())
+                if (!ts.sym.isPOD())
                 {
                     ispod = ThreeState.no;
                     return false;
@@ -476,7 +364,8 @@ version (IN_LLVM) {} else
             }
         }
 
-        return (ispod == ThreeState.yes);
+        ispod = ThreeState.yes;
+        return true;
     }
 
     /***************************************
@@ -487,11 +376,6 @@ version (IN_LLVM) {} else
     final bool hasCopyConstruction()
     {
         return postblit || hasCopyCtor;
-    }
-
-    override final inout(StructDeclaration) isStructDeclaration() inout @nogc nothrow pure @safe
-    {
-        return this;
     }
 
     override void accept(Visitor v)
@@ -618,7 +502,7 @@ bool _isZeroInit(Expression exp)
 
         case EXP.string_:
         {
-            StringExp se = cast(StringExp)exp;
+            auto se = cast(StringExp)exp;
 
             if (se.type.toBasetype().ty == Tarray) // if initializing a dynamic array
                 return se.len == 0;
@@ -655,9 +539,10 @@ bool _isZeroInit(Expression exp)
  */
 extern (C++) final class UnionDeclaration : StructDeclaration
 {
-    extern (D) this(const ref Loc loc, Identifier id)
+    extern (D) this(Loc loc, Identifier id)
     {
         super(loc, id, false);
+        this.dsym = DSYM.unionDeclaration;
     }
 
     override UnionDeclaration syntaxCopy(Dsymbol s)
@@ -671,11 +556,6 @@ extern (C++) final class UnionDeclaration : StructDeclaration
     override const(char)* kind() const
     {
         return "union";
-    }
-
-    override inout(UnionDeclaration) isUnionDeclaration() inout
-    {
-        return this;
     }
 
     override void accept(Visitor v)

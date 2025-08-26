@@ -16,6 +16,7 @@
 #include "dmd/target.h"
 #include "dmd/template.h"
 #include "gen/abi/abi.h"
+#include "gen/arrays.h"
 #include "gen/classes.h"
 #include "gen/dvalue.h"
 #include "gen/funcgenstate.h"
@@ -101,17 +102,9 @@ static void addExplicitArguments(std::vector<LLValue *> &args, AttrSet &attrs,
     Type *argType = argexps[i]->type;
     bool passByVal = gABI->passByVal(irFty.type, argType);
 
-#if LDC_LLVM_VER >= 1400
     llvm::AttrBuilder initialAttrs(getGlobalContext());
-#else
-    llvm::AttrBuilder initialAttrs;
-#endif
     if (passByVal) {
-#if LDC_LLVM_VER >= 1200
       initialAttrs.addByValAttr(DtoType(argType));
-#else
-      initialAttrs.addAttribute(LLAttribute::ByVal);
-#endif
       if (auto alignment = DtoAlignment(argType))
         initialAttrs.addAlignmentAttr(alignment);
     } else {
@@ -245,39 +238,10 @@ static LLValue *getTypeinfoArrayArgumentForDVarArg(Expressions *argexps,
   LLConstant *tiinits = LLConstantArray::get(typeinfoarraytype, vtypeinfos);
   typeinfomem->setInitializer(tiinits);
 
-  // put data in d-array
-  LLConstant *pinits[] = {
-      DtoConstSize_t(numVariadicArgs),
-      llvm::ConstantExpr::getBitCast(typeinfomem, getPtrToType(typeinfotype))};
-  LLType *tiarrty = DtoType(arrayOf(getTypeInfoType()));
-  tiinits = LLConstantStruct::get(isaStruct(tiarrty),
-                                  llvm::ArrayRef<LLConstant *>(pinits));
-  LLValue *typeinfoarrayparam = new llvm::GlobalVariable(
-      gIR->module, tiarrty, true, llvm::GlobalValue::InternalLinkage, tiinits,
-      "._arguments.array");
-
-  return DtoLoad(tiarrty, typeinfoarrayparam);
+  return DtoConstSlice(DtoConstSize_t(numVariadicArgs), typeinfomem);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-static LLType *getPtrToAtomicType(LLType *type) {
-  switch (const size_t N = getTypeBitSize(type)) {
-  case 8:
-  case 16:
-  case 32:
-  case 64:
-  case 128:
-#if LDC_LLVM_VER < 1800
-    return LLType::getIntNPtrTy(gIR->context(), static_cast<unsigned>(N));
-#else
-    return LLType::getIntNTy(gIR->context(), static_cast<unsigned>(N))
-        ->getPointerTo();
-#endif
-  default:
-    return nullptr;
-  }
-}
 
 static LLType *getAtomicType(LLType *type) {
   switch (const size_t N = getTypeBitSize(type)) {
@@ -309,7 +273,7 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
       gABI->vaCopy(ap, &argptr);
     } else {
       LLValue *llAp = gABI->prepareVaStart(ap);
-      p->ir->CreateCall(GET_INTRINSIC_DECL(vastart), llAp, "");
+      p->ir->CreateCall(GET_INTRINSIC_DECL(vastart, llAp->getType()), llAp, "");
     }
     result = nullptr;
     return true;
@@ -357,7 +321,7 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     DLValue *ap = toElem((*e->arguments)[0])->isLVal(); // va_list
     assert(ap);
     LLValue *llAp = gABI->prepareVaArg(ap);
-    p->ir->CreateCall(GET_INTRINSIC_DECL(vaend), llAp);
+    p->ir->CreateCall(GET_INTRINSIC_DECL(vaend, llAp->getType()), llAp);
     result = nullptr;
     return true;
   }
@@ -417,11 +381,9 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     LLValue *val = nullptr;
     if (pointeeType->isIntegerTy()) {
       val = DtoRVal(dval);
-    } else if (auto intPtrType = getPtrToAtomicType(pointeeType)) {
-      LLType *atype = getAtomicType(pointeeType);
-      ptr = DtoBitCast(ptr, intPtrType);
+    } else if (auto atype = getAtomicType(pointeeType)) {
       auto lval = makeLValue(exp1->loc, dval);
-      val = DtoLoad(atype, DtoBitCast(lval, intPtrType));
+      val = DtoLoad(atype, lval);
     } else {
       error(e->loc,
           "atomic store only supports types of size 1/2/4/8/16 bytes, not `%s`",
@@ -453,9 +415,8 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     Type *retType = exp->type->nextOf();
 
     if (!pointeeType->isIntegerTy()) {
-      if (auto intPtrType = getPtrToAtomicType(pointeeType)) {
-        ptr = DtoBitCast(ptr, intPtrType);
-        loadedType = getAtomicType(pointeeType);
+      if (auto atype = getAtomicType(pointeeType)) {
+        loadedType = atype;
       } else {
         error(e->loc,
               "atomic load only supports types of size 1/2/4/8/16 bytes, "
@@ -509,13 +470,11 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     if (pointeeType->isIntegerTy()) {
       cmp = DtoRVal(dcmp);
       val = DtoRVal(dval);
-    } else if (auto intPtrType = getPtrToAtomicType(pointeeType)) {
-      LLType *atype = getAtomicType(pointeeType);
-      ptr = DtoBitCast(ptr, intPtrType);
+    } else if (auto atype = getAtomicType(pointeeType)) {
       auto cmpLVal = makeLValue(exp2->loc, dcmp);
-      cmp = DtoLoad(atype, DtoBitCast(cmpLVal, intPtrType));
+      cmp = DtoLoad(atype, cmpLVal);
       auto lval = makeLValue(exp3->loc, dval);
-      val = DtoLoad(atype, DtoBitCast(lval, intPtrType));
+      val = DtoLoad(atype, lval);
     } else {
       error(e->loc,
             "`cmpxchg` only supports types of size 1/2/4/8/16 bytes, not `%s`",
@@ -524,11 +483,9 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     }
 
     auto ret =
-      p->ir->CreateAtomicCmpXchg(ptr, cmp, val,
-#if LDC_LLVM_VER >= 1300
-                                 llvm::MaybeAlign(), // default alignment
-#endif
-                                 successOrdering, failureOrdering);
+        p->ir->CreateAtomicCmpXchg(ptr, cmp, val,
+                                   llvm::MaybeAlign(), // default alignment
+                                   successOrdering, failureOrdering);
     ret->setWeak(isWeak);
 
     // we return a struct; allocate on stack and store to both fields manually
@@ -536,8 +493,7 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     // because of i1)
     auto mem = DtoAlloca(e->type);
     llvm::Type* memty = DtoType(e->type);
-    DtoStore(p->ir->CreateExtractValue(ret, 0),
-             DtoBitCast(DtoGEP(memty, mem, 0u, 0), ptr->getType()));
+    DtoStore(p->ir->CreateExtractValue(ret, 0), DtoGEP(memty, mem, 0u, 0));
     DtoStoreZextI8(p->ir->CreateExtractValue(ret, 1), DtoGEP(memty, mem, 0, 1));
 
     result = new DLValue(e->type, mem);
@@ -577,9 +533,7 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     LLValue *val = DtoRVal(exp2);
     LLValue *ret =
         p->ir->CreateAtomicRMW(llvm::AtomicRMWInst::BinOp(op), ptr, val,
-#if LDC_LLVM_VER >= 1300
                                llvm::MaybeAlign(), // default alignment
-#endif
                                llvm::AtomicOrdering(atomicOrdering));
     result = new DImValue(exp2->type, ret);
     return true;
@@ -603,8 +557,9 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
     unsigned bitmask = DtoSize_t()->getBitWidth() - 1;
     assert(bitmask == 31 || bitmask == 63);
     // auto q = cast(size_t*)ptr + (bitnum >> (64bit ? 6 : 5));
-    LLValue *q = DtoBitCast(ptr, DtoSize_t()->getPointerTo());
-    q = DtoGEP1(DtoSize_t(), q, p->ir->CreateLShr(bitnum, bitmask == 63 ? 6 : 5), "bitop.q");
+    LLValue *q =
+        DtoGEP1(DtoSize_t(), ptr,
+                p->ir->CreateLShr(bitnum, bitmask == 63 ? 6 : 5), "bitop.q");
 
     // auto mask = 1 << (bitnum & bitmask);
     LLValue *mask =
@@ -680,7 +635,7 @@ bool DtoLowerMagicIntrinsic(IRState *p, FuncDeclaration *fndecl, CallExp *e,
 class ImplicitArgumentsBuilder {
 public:
   ImplicitArgumentsBuilder(std::vector<LLValue *> &args, AttrSet &attrs,
-                           const Loc &loc, DValue *fnval,
+                           Loc loc, DValue *fnval,
                            LLFunctionType *llCalleeType, Expressions *argexps,
                            Type *resulttype, LLValue *sretPointer)
       : args(args), attrs(attrs), loc(loc), fnval(fnval), argexps(argexps),
@@ -691,13 +646,13 @@ public:
         tf(DtoTypeFunction(fnval)),
         llArgTypesBegin(llCalleeType->param_begin()) {}
 
-  void addImplicitArgs() {
+  void addImplicitArgs(bool directcall) {
     if (gABI->passThisBeforeSret(tf)) {
-      addContext();
+      addContext(directcall);
       addSret();
     } else {
       addSret();
-      addContext();
+      addContext(directcall);
     }
 
     addArguments();
@@ -709,7 +664,7 @@ private:
   // passed:
   std::vector<LLValue *> &args;
   AttrSet &attrs;
-  const Loc &loc;
+  const Loc loc;
   DValue *const fnval;
   Expressions *const argexps;
   Type *const resulttype;
@@ -747,16 +702,17 @@ private:
   }
 
   // Adds an optional context/this pointer argument and sets hasContext.
-  void addContext() {
+  void addContext(bool directcall) {
     const bool thiscall = irFty.arg_this;
     const bool nestedcall = irFty.arg_nest;
+    const bool objccall = irFty.type->linkage == LINK::objc;
 
-    hasContext = thiscall || nestedcall || isDelegateCall;
+    hasContext = thiscall || nestedcall || isDelegateCall || objccall;
     if (!hasContext)
       return;
 
     size_t index = args.size();
-    LLType *llArgType = *(llArgTypesBegin + index);
+    auto argtype = *(llArgTypesBegin + index);
 
     if (dfnval && (dfnval->func->ident == Id::ensure ||
                    dfnval->func->ident == Id::require)) {
@@ -776,30 +732,53 @@ private:
           }
         }
       }
-      LLValue *contextptr = DtoBitCast(thisptrLval, getVoidPtrType());
-      args.push_back(contextptr);
+      args.push_back(thisptrLval);
     } else if (thiscall && dfnval && dfnval->vthis) {
-      // ... or a normal 'this' argument
-      LLValue *thisarg = DtoBitCast(dfnval->vthis, llArgType);
-      args.push_back(thisarg);
+      
+      if (objccall && directcall) {
+
+        // ... or a Objective-c direct call argument
+        if (auto func = dfnval->func->isFuncDeclaration()) {
+          if (auto klass = func->isThis()->isClassDeclaration()) {
+
+            // Create obj_super struct with (this, <class ref>)
+            auto obj_super = DtoAggrPair(
+              DtoBitCast(dfnval->vthis, argtype),
+              gIR->objc.deref(klass, getOpaquePtrType()),
+              "super"
+            );
+
+
+            // Allocate and store obj_super struct into a new variable.
+            auto clsaddr = DtoRawAlloca(obj_super->getType(), 16, "super");
+            DtoStore(obj_super, clsaddr);
+
+            args.push_back(clsaddr);
+          }
+        }
+      } else {
+
+        // ... or a normal 'this' argument
+        args.push_back(DtoBitCast(dfnval->vthis, argtype));
+      }
     } else if (isDelegateCall) {
       // ... or a delegate context arg
       LLValue *ctxarg;
       if (fnval->isLVal()) {
-        ctxarg = DtoLoad(getVoidPtrType(), DtoGEP(DtoType(fnval->type), DtoLVal(fnval), 0u, 0), ".ptr");
+        ctxarg = DtoLoad(getOpaquePtrType(),
+                         DtoGEP(DtoType(fnval->type), DtoLVal(fnval), 0u, 0),
+                         ".ptr");
       } else {
         ctxarg = gIR->ir->CreateExtractValue(DtoRVal(fnval), 0, ".ptr");
       }
-      ctxarg = DtoBitCast(ctxarg, llArgType);
       args.push_back(ctxarg);
     } else if (nestedcall) {
       // ... or a nested function context arg
       if (dfnval) {
         LLValue *contextptr = DtoNestedContext(loc, dfnval->func);
-        contextptr = DtoBitCast(contextptr, getVoidPtrType());
         args.push_back(contextptr);
       } else {
-        args.push_back(llvm::UndefValue::get(getVoidPtrType()));
+        args.push_back(llvm::UndefValue::get(getOpaquePtrType()));
       }
     } else {
       error(loc, "Context argument required but none given");
@@ -815,11 +794,9 @@ private:
 
     if (irFty.arg_objcSelector) {
       assert(dfnval);
-      const auto selector = dfnval->func->objc.selector;
-      assert(selector);
-      LLGlobalVariable *selptr = gIR->objc.getMethVarRef(*selector);
-      args.push_back(DtoBitCast(DtoLoad(selptr->getValueType(), selptr),
-                                getVoidPtrType()));
+
+      auto methodptr = gIR->objc.getMethod(dfnval->func)->selector;
+      args.push_back(DtoLoad(methodptr->getType(), methodptr));
     }
   }
 
@@ -861,8 +838,8 @@ static LLValue *DtoCallableValue(DValue *fn) {
 }
 
 // FIXME: this function is a mess !
-DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
-                        Expressions *arguments, LLValue *sretPointer) {
+DValue *DtoCallFunction(Loc loc, Type *resulttype, DValue *fnval,
+                        Expressions *arguments, LLValue *sretPointer, bool directcall) {
   IF_LOG Logger::println("DtoCallFunction()");
   LOG_SCOPE
 
@@ -907,7 +884,7 @@ DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
   // handle implicit arguments (sret, context/this, _arguments)
   ImplicitArgumentsBuilder iab(args, attrs, loc, fnval, callableTy, arguments,
                                resulttype, sretPointer);
-  iab.addImplicitArgs();
+  iab.addImplicitArgs(directcall);
 
   // handle explicit arguments
 
@@ -929,16 +906,17 @@ DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
   }
 
   if (irFty.arg_objcSelector) {
+
     // Use runtime msgSend function bitcasted as original call
-    const char *msgSend = gABI->objcMsgSendFunc(resulttype, irFty);
-    LLType *t = callable->getType();
+    const char *msgSend = gABI->objcMsgSendFunc(resulttype, irFty, directcall);
+    auto t = callable->getType();
     callable = getRuntimeFunction(loc, gIR->module, msgSend);
     callable = DtoBitCast(callable, t);
   }
 
   // call the function
   llvm::CallBase *call = gIR->funcGen().callOrInvoke(callable, callableTy, args,
-                                                     "", tf->isnothrow());
+                                                     "", tf->isNothrow());
 
   // PGO: Insert instrumentation or attach profile metadata at indirect call
   // sites.
@@ -954,7 +932,7 @@ DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
   LLValue *retllval = irFty.arg_sret ? args[sretArgIndex]
                                      : static_cast<llvm::Instruction *>(call);
   bool retValIsLVal =
-      (tf->isref() && returnTy != TY::Tvoid) || (irFty.arg_sret != nullptr);
+      (tf->isRef() && returnTy != TY::Tvoid) || (irFty.arg_sret != nullptr);
 
   if (!retValIsLVal) {
     // let the ABI transform the return value back
@@ -974,7 +952,7 @@ DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
                            returntype->toChars(), rbase->toChars());
     switch (rbase->ty) {
     case TY::Tarray:
-      if (tf->isref()) {
+      if (tf->isRef()) {
         retllval = DtoBitCast(retllval, DtoType(pointerTo(rbase)));
       } else {
         retllval = DtoSlicePaint(retllval, DtoType(rbase));
@@ -982,10 +960,8 @@ DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
       break;
 
     case TY::Tsarray:
-      if (nextbase->ty == TY::Tvector && !tf->isref()) {
-        if (retValIsLVal) {
-          retllval = DtoBitCast(retllval, DtoType(pointerTo(rbase)));
-        } else {
+      if (nextbase->ty == TY::Tvector && !tf->isRef()) {
+        if (!retValIsLVal) {
           // static arrays need to be dumped to memory; use vector alignment
           retllval =
               DtoAllocaDump(retllval, DtoType(rbase), DtoAlignment(nextbase),
@@ -999,7 +975,7 @@ DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
     case TY::Tclass:
     case TY::Taarray:
     case TY::Tpointer:
-      if (tf->isref()) {
+      if (tf->isRef()) {
         retllval = DtoBitCast(retllval, DtoType(pointerTo(rbase)));
       } else {
         retllval = DtoBitCast(retllval, DtoType(rbase));
@@ -1007,7 +983,7 @@ DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
       break;
 
     case TY::Tstruct:
-      if (nextbase->ty == TY::Taarray && !tf->isref()) {
+      if (nextbase->ty == TY::Taarray && !tf->isRef()) {
         // In the D2 frontend, the associative array type and its
         // object.AssociativeArray representation are used
         // interchangably in some places. However, AAs are returned
@@ -1076,15 +1052,9 @@ DValue *DtoCallFunction(const Loc &loc, Type *resulttype, DValue *fnval,
     call->setCallingConv(gABI->callingConv(tf, iab.hasContext));
   }
   // merge in function attributes set in callOrInvoke
-#if LDC_LLVM_VER >= 1400
   auto attrbuildattribs = call->getAttributes().getFnAttrs();
   attrlist = attrlist.addFnAttributes(
       gIR->context(), llvm::AttrBuilder(gIR->context(), attrbuildattribs));
-#else
-  attrlist = attrlist.addAttributes(
-      gIR->context(), LLAttributeList::FunctionIndex,
-      llvm::AttrBuilder(call->getAttributes(), LLAttributeList::FunctionIndex));
-#endif
   call->setAttributes(attrlist);
 
   // Special case for struct constructor calls: For temporaries, using the

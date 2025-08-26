@@ -90,7 +90,7 @@ void IrGlobal::declare() {
     if (!V->isThreadlocal()) {
       // implicitly include extern(D) globals with -dllimport
       useDLLImport =
-          (V->isExport() || V->_linkage == LINK::d) && dllimportDataSymbol(V);
+          (V->isExport() || V->_linkage() == LINK::d) && dllimportDataSymbol(V);
     }
   }
 
@@ -139,7 +139,8 @@ void IrGlobal::define() {
   // Set the initializer, swapping out the variable if the types do not
   // match.
   auto gvar = llvm::cast<LLGlobalVariable>(value);
-  value = gIR->setGlobalVarInitializer(gvar, initVal, V);
+  gvar = gIR->setGlobalVarInitializer(gvar, initVal, V);
+  value = gvar;
 
   // dllexport isn't supported for thread-local globals (MSVC++ neither);
   // don't let LLVM create a useless /EXPORT directive (yields the same linker

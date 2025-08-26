@@ -1,6 +1,5 @@
 // REQUIRED_ARGS: -g
-// REQUIRED_ARGS(linux freebsd dragonflybsd): -L-export-dynamic
-// LDC (FreeBSD's libexecinfo apparently doesn't like elided frame pointers): REQUIRED_ARGS(freebsd): -link-defaultlib-debug -frame-pointer=all
+// REQUIRED_ARGS(linux freebsd openbsd dragonflybsd): -L-export-dynamic
 // DISABLED: LDC_win32 // no file/line info for the `run19086` frame (and only that frame), even without -O
 // PERMUTE_ARGS:
 // DISABLED: osx

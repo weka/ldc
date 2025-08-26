@@ -15,17 +15,20 @@
  * - $(LINK2 https://github.com/ldc-developers/ldc, LDC repository)
  * - $(LINK2 https://github.com/D-Programming-GDC/gcc, GDC repository)
  *
- * Copyright:   Copyright (C) 1999-2024 by The D Language Foundation, All Rights Reserved
+ * Copyright:   Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
  * Authors:     $(LINK2 https://www.digitalmars.com, Walter Bright)
  * License:     $(LINK2 https://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
- * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/src/dmd/target.d, _target.d)
+ * Source:      $(LINK2 https://github.com/dlang/dmd/blob/master/compiler/src/dmd/target.d, _target.d)
  * Documentation:  https://dlang.org/phobos/dmd_target.html
- * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/src/dmd/target.d
+ * Coverage:    https://codecov.io/gh/dlang/dmd/src/master/compiler/src/dmd/target.d
  */
 
 module dmd.target;
 
-import dmd.globals : Param, CHECKENABLE;
+import core.stdc.stdio;
+
+import dmd.astenums : CHECKENABLE;
+import dmd.globals : Param;
 
 version (IN_LLVM)
 {
@@ -84,6 +87,8 @@ ubyte defaultTargetOSMajor() @safe
             return 12;
         else version (TARGET_FREEBSD13)
             return 13;
+        else version (TARGET_FREEBSD14)
+            return 14;
         else
             return 0;
     }
@@ -208,13 +213,14 @@ void addPredefinedGlobalIdentifiers(const ref Target tgt)
             case OS.FreeBSD:
             {
                 predef("FreeBSD");
-                switch (tgt.osMajor)
+
+                if(tgt.osMajor != 0)
                 {
-                    case 10: predef("FreeBSD_10");  break;
-                    case 11: predef("FreeBSD_11"); break;
-                    case 12: predef("FreeBSD_12"); break;
-                    case 13: predef("FreeBSD_13"); break;
-                    default: predef("FreeBSD_11"); break;
+                    import core.stdc.stdio : snprintf;
+
+                    char["FreeBSD_100".length + 1] buffer;
+                    immutable len = snprintf(buffer.ptr, buffer.length, "FreeBSD_%u", uint(tgt.osMajor));
+                    predef(buffer[0 .. len]);
                 }
                 break;
             }
@@ -225,7 +231,11 @@ void addPredefinedGlobalIdentifiers(const ref Target tgt)
     addCRuntimePredefinedGlobalIdent(tgt.c);
     addCppRuntimePredefinedGlobalIdent(tgt.cpp);
 
-    if (tgt.isX86_64)
+    if (tgt.isAArch64)
+    {
+        VersionCondition.addPredefinedGlobalIdent("AArch64");
+    }
+    else if (tgt.isX86_64)
     {
         VersionCondition.addPredefinedGlobalIdent("D_InlineAsm_X86_64");
         VersionCondition.addPredefinedGlobalIdent("X86_64");
@@ -236,6 +246,7 @@ void addPredefinedGlobalIdentifiers(const ref Target tgt)
         VersionCondition.addPredefinedGlobalIdent("D_InlineAsm_X86");
         VersionCondition.addPredefinedGlobalIdent("X86");
     }
+
     if (tgt.isLP64)
         VersionCondition.addPredefinedGlobalIdent("D_LP64");
     else if (tgt.isX86_64)
@@ -253,7 +264,6 @@ void addCRuntimePredefinedGlobalIdent(const ref TargetC c)
     default:
     case Unspecified: return;
     case Bionic:      return predef("CRuntime_Bionic");
-    case DigitalMars: return predef("CRuntime_DigitalMars");
     case Glibc:       return predef("CRuntime_Glibc");
     case Microsoft:   return predef("CRuntime_Microsoft");
     case Musl:        return predef("CRuntime_Musl");
@@ -272,12 +282,22 @@ void addCppRuntimePredefinedGlobalIdent(const ref TargetCPP cpp)
     with (TargetCPP.Runtime) switch (cpp.runtime)
     {
     default:
-    case Unspecified: return;
-    case Clang:       return predef("CppRuntime_Clang");
-    case DigitalMars: return predef("CppRuntime_DigitalMars");
-    case Gcc:         return predef("CppRuntime_Gcc");
-    case Microsoft:   return predef("CppRuntime_Microsoft");
-    case Sun:         return predef("CppRuntime_Sun");
+    case Unspecified:
+        return;
+    case LLVM:
+        predef("CppRuntime_LLVM");
+        predef("CppRuntime_Clang"); // legacy
+        return;
+    case GNU:
+        predef("CppRuntime_GNU");
+        predef("CppRuntime_Gcc"); // legacy
+        return;
+    case Microsoft:
+        predef("CppRuntime_Microsoft");
+        return;
+    case Sun:
+        predef("CppRuntime_Sun");
+        return;
     }
 }
 
@@ -301,7 +321,7 @@ extern (C++) struct Target
     import dmd.location;
     import dmd.astenums : LINK, TY;
     import dmd.mtype : Type, TypeFunction, TypeTuple;
-    import dmd.typesem : pointerTo;
+    import dmd.typesem : pointerTo, size;
     import dmd.root.ctfloat : real_t;
     import dmd.statement : Statement;
     import dmd.tokens : EXP;
@@ -331,7 +351,6 @@ extern (C++) struct Target
         elf,
         macho,
         coff,
-        omf
     }
 
     OS os;
@@ -363,7 +382,9 @@ version (IN_LLVM)
 version (IN_LLVM) {} else
 {
     CPU cpu;                // CPU instruction set to target
+    bool isAArch64;         // generate 64 bit Arm code
     bool isX86_64;          // generate 64 bit code for x86_64; true by default for 64 bit dmd
+    bool isX86;             // generate 32 bit Intel x86 code
 }
     bool isLP64;            // pointers are 64 bits
 
@@ -372,7 +393,6 @@ version (IN_LLVM) {} else
     const(char)[] lib_ext;    /// extension for static library files
     const(char)[] dll_ext;    /// extension for dynamic library files
     bool run_noext;           /// allow -run sources without extensions
-    bool omfobj;              // for Win32: write OMF object files instead of MsCoff
     /**
      * Values representing all properties for floating point types
      */
@@ -432,7 +452,7 @@ version (IN_LLVM)
     uint alignsize(Type type);
     uint fieldalign(Type type);
 
-    Type va_listType(const ref Loc loc, Scope* sc);
+    Type va_listType(Loc loc, Scope* sc);
 }
 else // !IN_LLVM
 {
@@ -441,7 +461,10 @@ else // !IN_LLVM
      */
     extern (C++) void _init(ref const Param params)
     {
-        // isX86_64, omfobj and cpu are initialized in parseCommandLine
+        // isX86_64 and cpu are initialized in parseCommandLine
+        //printf("isX86_64 %d isAArch64 %d\n", isX86_64, isAArch64);
+        isX86 = !isX86_64 && !isAArch64;
+        assert(isX86 + isX86_64 + isAArch64 == 1); // there can be only one
 
         this.params = &params;
 
@@ -464,11 +487,12 @@ else // !IN_LLVM
          */
         maxStaticDataSize = int.max;
 
-        if (isLP64)
+        if (isLP64 || isAArch64)
         {
             ptrsize = 8;
             classinfosize = 0x98+16; // 168
         }
+
         if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
         {
             realsize = 12;
@@ -486,17 +510,11 @@ else // !IN_LLVM
             realsize = 10;
             realpad = 0;
             realalignsize = 2;
-            if (omfobj)
-            {
-                /* Optlink cannot deal with individual data chunks
-                 * larger than 16Mb
-                 */
-                maxStaticDataSize = 0x100_0000;  // 16Mb
-            }
         }
         else
             assert(0);
-        if (isX86_64)
+
+        if (isX86_64 || isAArch64)
         {
             if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
             {
@@ -512,8 +530,12 @@ else // !IN_LLVM
 
         if (isX86_64)
             architectureName = "X86_64";
-        else
+        else if (isX86)
             architectureName = "X86";
+        else if (isAArch64)
+            architectureName = "AArch64";
+        else
+            assert(0);
 
         if (os == Target.OS.Windows)
         {
@@ -539,16 +561,15 @@ else // !IN_LLVM
     /**
      Determine the object format to be used
      */
-    extern(D) Target.ObjectFormat objectFormat() @safe
+    extern(D) Target.ObjectFormat objectFormat() const @safe
     {
         if (os == Target.OS.OSX)
             return Target.ObjectFormat.macho;
-        else if (os & Target.OS.Posix)
+        if (os & Target.OS.Posix)
             return Target.ObjectFormat.elf;
-        else if (os == Target.OS.Windows)
-            return omfobj ? Target.ObjectFormat.omf : Target.ObjectFormat.coff;
-        else
-            assert(0, "unkown object format");
+        if (os == Target.OS.Windows)
+            return Target.ObjectFormat.coff;
+        assert(0, "unkown object format");
     }
 
     /**
@@ -617,7 +638,7 @@ else // !IN_LLVM
         case TY.Timaginary64:
         case TY.Tcomplex64:
             if (os & Target.OS.Posix)
-                return isX86_64 ? 8 : 4;
+                return isX86 ? 4 : 8;
             break;
         default:
             break;
@@ -636,7 +657,7 @@ else // !IN_LLVM
     {
         const size = type.alignsize();
 
-        if ((isX86_64 || os == Target.OS.OSX) && (size == 16 || size == 32))
+        if ((isX86_64 || isAArch64 || os == Target.OS.OSX) && (size == 16 || size == 32))
             return size;
 
         return (8 < size) ? 8 : size;
@@ -650,7 +671,7 @@ else // !IN_LLVM
      * Returns:
      *      `Type` that represents `va_list`.
      */
-    extern (C++) Type va_listType(const ref Loc loc, Scope* sc)
+    extern (C++) Type va_listType(Loc loc, Scope* sc)
     {
         if (tvalist)
             return tvalist;
@@ -661,7 +682,7 @@ else // !IN_LLVM
         }
         else if (os & Target.OS.Posix)
         {
-            if (isX86_64)
+            if (isX86_64 || isAArch64)
             {
                 import dmd.identifier : Identifier;
                 import dmd.mtype : TypeIdentifier;
@@ -786,23 +807,16 @@ static if (!IN_LLVM)
         if (!IN_LLVM && vecsize != 16 && vecsize != 32)
             return false;
 
-        // LDC_FIXME:
-        // Most of the binops only work with `t2` being the same IR type as `tvec`
-        // (LLVM restriction). We'd need to be more strict here and/or convert
-        // the rhs to a matching type during codegen (e.g., promote scalars to
-        // vectors).
-        bool supported = false;
         switch (op)
         {
         case EXP.uadd:
             // Expression is a no-op, supported everywhere.
-            supported = tvec.isscalar();
-            break;
+            return tvec.isScalar();
 
         case EXP.negate:
 version (IN_LLVM)
 {
-            supported = tvec.isscalar();
+            return tvec.isScalar();
 }
 else
 {
@@ -810,36 +824,35 @@ else
             {
                 // float[4] negate needs SSE support ({V}SUBPS)
                 if (elemty == TY.Tfloat32 && cpu >= CPU.sse)
-                    supported = true;
+                    return true;
                 // double[2] negate needs SSE2 support ({V}SUBPD)
-                else if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
-                    supported = true;
+                if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
+                    return true;
                 // (u)byte[16]/short[8]/int[4]/long[2] negate needs SSE2 support ({V}PSUB[BWDQ])
-                else if (tvec.isintegral() && cpu >= CPU.sse2)
-                    supported = true;
+                if (tvec.isIntegral() && cpu >= CPU.sse2)
+                    return true;
             }
             else if (vecsize == 32)
             {
                 // float[8]/double[4] negate needs AVX support (VSUBP[SD])
-                if (tvec.isfloating() && cpu >= CPU.avx)
-                    supported = true;
+                if (tvec.isFloating() && cpu >= CPU.avx)
+                    return true;
                 // (u)byte[32]/short[16]/int[8]/long[4] negate needs AVX2 support (VPSUB[BWDQ])
-                else if (tvec.isintegral() && cpu >= CPU.avx2)
-                    supported = true;
+                if (tvec.isIntegral() && cpu >= CPU.avx2)
+                    return true;
             }
-} // !IN_LLVM
             break;
+} // !IN_LLVM
 
         case EXP.identity, EXP.notIdentity:
-            supported = IN_LLVM;
-            break;
+            return IN_LLVM;
 
         case EXP.lessThan, EXP.greaterThan, EXP.lessOrEqual, EXP.greaterOrEqual:
         case EXP.equal:
         case EXP.notEqual:
 version (IN_LLVM)
 {
-            supported = tvec.isscalar();
+            return tvec.isScalar();
 }
 else
 {
@@ -847,46 +860,45 @@ else
             {
                 // float[4] comparison needs SSE support (CMP{EQ,NEQ,LT,LE}PS)
                 if (elemty == TY.Tfloat32 && cpu >= CPU.sse)
-                    supported = true;
+                    return true;
                 // double[2] comparison needs SSE2 support (CMP{EQ,NEQ,LT,LE}PD)
-                else if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
-                    supported = true;
-                else if (tvec.isintegral())
+                if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
+                    return true;
+                if (tvec.isIntegral())
                 {
                     if (elemty == TY.Tint64 || elemty == TY.Tuns64)
                     {
                         // (u)long[2] equality needs SSE4.1 support (PCMPEQQ)
                        if ((op == EXP.equal || op == EXP.notEqual) && cpu >= CPU.sse4_1)
-                           supported = true;
+                           return true;
                        // (u)long[2] comparison needs SSE4.2 support (PCMPGTQ)
-                       else if (cpu >= CPU.sse4_2)
-                           supported = true;
+                       if (cpu >= CPU.sse4_2)
+                           return true;
                     }
                     // (u)byte[16]/short[8]/int[4] comparison needs SSE2 support (PCMP{EQ,GT}[BWD])
-                    else if (cpu >= CPU.sse2)
-                        supported = true;
+                    if (cpu >= CPU.sse2)
+                        return true;
                 }
             }
             else if (vecsize == 32)
             {
                 // float[8]/double[4] comparison needs AVX support (VCMP{EQ,NEQ,LT,LE}P[SD])
-                if (tvec.isfloating() && cpu >= CPU.avx)
-                    supported = true;
+                if (tvec.isFloating() && cpu >= CPU.avx)
+                    return true;
                 // (u)byte[32]/short[16]/int[8]/long[4] comparison needs AVX2 support (VPCMP{EQ,GT}[BWDQ])
-                else if (tvec.isintegral() && cpu >= CPU.avx2)
-                    supported = true;
+                if (tvec.isIntegral() && cpu >= CPU.avx2)
+                    return true;
             }
-} // !IN_LLVM
             break;
+} // !IN_LLVM
 
         case EXP.leftShift, EXP.leftShiftAssign, EXP.rightShift, EXP.rightShiftAssign, EXP.unsignedRightShift, EXP.unsignedRightShiftAssign:
-            supported = IN_LLVM && tvec.isintegral();
-            break;
+            return IN_LLVM && tvec.isIntegral();
 
         case EXP.add, EXP.addAssign, EXP.min, EXP.minAssign:
 version (IN_LLVM)
 {
-            supported = tvec.isscalar();
+            return tvec.isScalar();
 }
 else
 {
@@ -894,30 +906,30 @@ else
             {
                 // float[4] add/sub needs SSE support ({V}ADDPS, {V}SUBPS)
                 if (elemty == TY.Tfloat32 && cpu >= CPU.sse)
-                    supported = true;
+                    return true;
                 // double[2] add/sub needs SSE2 support ({V}ADDPD, {V}SUBPD)
-                else if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
-                    supported = true;
+                if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
+                    return true;
                 // (u)byte[16]/short[8]/int[4]/long[2] add/sub needs SSE2 support ({V}PADD[BWDQ], {V}PSUB[BWDQ])
-                else if (tvec.isintegral() && cpu >= CPU.sse2)
-                    supported = true;
+                if (tvec.isIntegral() && cpu >= CPU.sse2)
+                    return true;
             }
             else if (vecsize == 32)
             {
                 // float[8]/double[4] add/sub needs AVX support (VADDP[SD], VSUBP[SD])
-                if (tvec.isfloating() && cpu >= CPU.avx)
-                    supported = true;
+                if (tvec.isFloating() && cpu >= CPU.avx)
+                    return true;
                 // (u)byte[32]/short[16]/int[8]/long[4] add/sub needs AVX2 support (VPADD[BWDQ], VPSUB[BWDQ])
-                else if (tvec.isintegral() && cpu >= CPU.avx2)
-                    supported = true;
+                if (tvec.isIntegral() && cpu >= CPU.avx2)
+                    return true;
             }
-} // !IN_LLVM
             break;
+} // !IN_LLVM
 
         case EXP.mul, EXP.mulAssign:
 version (IN_LLVM)
 {
-            supported = tvec.isscalar();
+            return tvec.isScalar();
 }
 else
 {
@@ -925,36 +937,36 @@ else
             {
                 // float[4] multiply needs SSE support ({V}MULPS)
                 if (elemty == TY.Tfloat32 && cpu >= CPU.sse)
-                    supported = true;
+                    return true;
                 // double[2] multiply needs SSE2 support ({V}MULPD)
-                else if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
-                    supported = true;
+                if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
+                    return true;
                 // (u)short[8] multiply needs SSE2 support ({V}PMULLW)
-                else if ((elemty == TY.Tint16 || elemty == TY.Tuns16) && cpu >= CPU.sse2)
-                    supported = true;
+                if ((elemty == TY.Tint16 || elemty == TY.Tuns16) && cpu >= CPU.sse2)
+                    return true;
                 // (u)int[4] multiply needs SSE4.1 support ({V}PMULLD)
-                else if ((elemty == TY.Tint32 || elemty == TY.Tuns32) && cpu >= CPU.sse4_1)
-                    supported = true;
+                if ((elemty == TY.Tint32 || elemty == TY.Tuns32) && cpu >= CPU.sse4_1)
+                    return true;
             }
             else if (vecsize == 32)
             {
                 // float[8]/double[4] multiply needs AVX support (VMULP[SD])
-                if (tvec.isfloating() && cpu >= CPU.avx)
-                    supported = true;
+                if (tvec.isFloating() && cpu >= CPU.avx)
+                    return true;
                 // (u)short[16] multiply needs AVX2 support (VPMULLW)
-                else if ((elemty == TY.Tint16 || elemty == TY.Tuns16) && cpu >= CPU.avx2)
-                    supported = true;
+                if ((elemty == TY.Tint16 || elemty == TY.Tuns16) && cpu >= CPU.avx2)
+                    return true;
                 // (u)int[8] multiply needs AVX2 support (VPMULLD)
-                else if ((elemty == TY.Tint32 || elemty == TY.Tuns32) && cpu >= CPU.avx2)
-                    supported = true;
+                if ((elemty == TY.Tint32 || elemty == TY.Tuns32) && cpu >= CPU.avx2)
+                    return true;
             }
-} // !IN_LLVM
             break;
+} // !IN_LLVM
 
         case EXP.div, EXP.divAssign:
 version (IN_LLVM)
 {
-            supported = tvec.isscalar();
+            return tvec.isScalar();
 }
 else
 {
@@ -962,70 +974,73 @@ else
             {
                 // float[4] divide needs SSE support ({V}DIVPS)
                 if (elemty == TY.Tfloat32 && cpu >= CPU.sse)
-                    supported = true;
+                    return true;
                 // double[2] divide needs SSE2 support ({V}DIVPD)
-                else if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
-                    supported = true;
+                if (elemty == TY.Tfloat64 && cpu >= CPU.sse2)
+                    return true;
             }
             else if (vecsize == 32)
             {
                 // float[8]/double[4] multiply needs AVX support (VDIVP[SD])
-                if (tvec.isfloating() && cpu >= CPU.avx)
-                    supported = true;
+                if (tvec.isFloating() && cpu >= CPU.avx)
+                    return true;
             }
-} // !IN_LLVM
             break;
+} // !IN_LLVM
 
         case EXP.mod, EXP.modAssign:
-            supported = IN_LLVM && tvec.isscalar();
-            break;
+            return IN_LLVM && tvec.isScalar();
 
         case EXP.and, EXP.andAssign, EXP.or, EXP.orAssign, EXP.xor, EXP.xorAssign:
 version (IN_LLVM)
 {
-            supported = tvec.isintegral();
+            return tvec.isIntegral();
 }
 else
 {
-            // (u)byte[16]/short[8]/int[4]/long[2] bitwise ops needs SSE2 support ({V}PAND, {V}POR, {V}PXOR)
-            if (vecsize == 16 && tvec.isintegral() && cpu >= CPU.sse2)
-                supported = true;
-            // (u)byte[32]/short[16]/int[8]/long[4] bitwise ops needs AVX2 support (VPAND, VPOR, VPXOR)
-            else if (vecsize == 32 && tvec.isintegral() && cpu >= CPU.avx2)
-                supported = true;
-} // !IN_LLVM
+            if (tvec.isIntegral())
+            {
+                // (u)byte[16]/short[8]/int[4]/long[2] bitwise ops needs SSE2 support ({V}PAND, {V}POR, {V}PXOR)
+                if (vecsize == 16 && cpu >= CPU.sse2)
+                    return true;
+                // (u)byte[32]/short[16]/int[8]/long[4] bitwise ops needs AVX2 support (VPAND, VPOR, VPXOR)
+                if (vecsize == 32 && cpu >= CPU.avx2)
+                    return true;
+            }
             break;
+} // !IN_LLVM
 
         case EXP.not:
-            supported = false;
-            break;
+            return false;
 
         case EXP.tilde:
 version (IN_LLVM)
 {
-            supported = tvec.isintegral();
+            return tvec.isIntegral();
 }
 else
 {
-            // (u)byte[16]/short[8]/int[4]/long[2] logical exclusive needs SSE2 support ({V}PXOR)
-            if (vecsize == 16 && tvec.isintegral() && cpu >= CPU.sse2)
-                supported = true;
-            // (u)byte[32]/short[16]/int[8]/long[4] logical exclusive needs AVX2 support (VPXOR)
-            else if (vecsize == 32 && tvec.isintegral() && cpu >= CPU.avx2)
-                supported = true;
-} // !IN_LLVM
+            if (tvec.isIntegral())
+            {
+                // (u)byte[16]/short[8]/int[4]/long[2] logical exclusive needs SSE2 support ({V}PXOR)
+                if (vecsize == 16 && cpu >= CPU.sse2)
+                    return true;
+                // (u)byte[32]/short[16]/int[8]/long[4] logical exclusive needs AVX2 support (VPXOR)
+                if (vecsize == 32 && cpu >= CPU.avx2)
+                    return true;
+            }
             break;
+} // !IN_LLVM
 
         case EXP.pow, EXP.powAssign:
-            supported = false;
-            break;
+            return false;
 
         default:
             // import std.stdio : stderr, writeln;
             // stderr.writeln(op);
             assert(0, "unhandled op " ~ EXPtoString(cast(EXP)op));
         }
-        return supported;
+        return false;
     }
 
     /**
@@ -1045,7 +1060,7 @@ version (IN_LLVM)
     TypeTuple toArgTypes(Type t);
     bool isReturnOnStack(TypeFunction tf, bool needsThis);
     bool preferPassByRef(Type t);
-    Expression getTargetInfo(const(char)* name, const ref Loc loc);
+    Expression getTargetInfo(const(char)* name, Loc loc);
     bool isCalleeDestroyingArgs(TypeFunction tf);
     bool libraryObjectMonitors(FuncDeclaration fd, Statement fbody) { return true; }
     bool supportsLinkerDirective() const;
@@ -1065,7 +1080,7 @@ else // !IN_LLVM
     {
         import dmd.argtypes_x86 : toArgTypes_x86;
         import dmd.argtypes_sysv_x64 : toArgTypes_sysv_x64;
-        if (isX86_64)
+        if (isX86_64 || isAArch64)
         {
             // no argTypes for Win64 yet
             return isPOSIX ? toArgTypes_sysv_x64(t) : null;
@@ -1088,7 +1103,7 @@ else // !IN_LLVM
         import dmd.argtypes_sysv_x64 : toArgTypes_sysv_x64;
         import dmd.typesem : castMod;
 
-        if (tf.isref)
+        if (tf.isRef)
         {
             //printf("  ref false\n");
             return false;                 // returns a pointer
@@ -1113,12 +1128,12 @@ else // !IN_LLVM
         const sz = tn.size();
         Type tns = tn;
 
-        if (os == Target.OS.Windows && isX86_64)
+        if (os == Target.OS.Windows && (isX86_64 || isAArch64))
         {
             // https://msdn.microsoft.com/en-us/library/7572ztz4%28v=vs.100%29.aspx
             if (tns.ty == TY.Tcomplex32)
                 return true;
-            if (tns.isscalar())
+            if (tns.isScalar())
                 return false;
 
             tns = tns.baseElemOf();
@@ -1126,6 +1141,8 @@ else // !IN_LLVM
             {
                 auto sd = ts.sym;
                 if (tf.linkage == LINK.cpp && needsThis)
+                    return true;
+                if (tf.linkage == LINK.cpp && sd.ctor)
                     return true;
                 if (!sd.isPOD() || sz > 8)
                     return true;
@@ -1145,13 +1162,13 @@ else // !IN_LLVM
                     return true;
             }
         }
-        else if (isX86_64 && isPOSIX)
+        else if ((isX86_64 || isAArch64) && isPOSIX)
         {
             TypeTuple tt = toArgTypes_sysv_x64(tn);
             if (!tt)
                 return false; // void
-            else
-                return !tt.arguments.length;
+
+            return !tt.arguments.length;
         }
 
     Lagain:
@@ -1161,7 +1178,7 @@ else // !IN_LLVM
             if (tns.ty != TY.Tstruct)
             {
     L2:
-                if (os == Target.OS.linux && tf.linkage != LINK.d && !isX86_64)
+                if (os == Target.OS.linux && tf.linkage != LINK.d && isX86)
                 {
                                                     // 32 bit C/C++ structs always on stack
                 }
@@ -1188,12 +1205,12 @@ else // !IN_LLVM
         if (auto ts = tns.isTypeStruct())
         {
             auto sd = ts.sym;
-            if (os == Target.OS.linux && tf.linkage != LINK.d && !isX86_64)
+            if (os == Target.OS.linux && tf.linkage != LINK.d && isX86)
             {
                 //printf("  2 true\n");
                 return true;            // 32 bit C/C++ structs always on stack
             }
-            if (os == Target.OS.Windows && tf.linkage == LINK.cpp && !isX86_64 &&
+            if (os == Target.OS.Windows && tf.linkage == LINK.cpp && isX86 &&
                      sd.isPOD() && sd.ctor)
             {
                 // win32 returns otherwise POD structs with ctors via memory
@@ -1206,9 +1223,9 @@ else // !IN_LLVM
                     goto L2;
                 goto Lagain;
             }
-            else if (isX86_64 && sd.numArgTypes() == 0)
+            else if ((isX86_64 || isAArch64) && sd.numArgTypes() == 0)
                 return true;
-            else if (sd.isPOD())
+            if (sd.isPOD())
             {
                 switch (sz)
                 {
@@ -1220,7 +1237,7 @@ else // !IN_LLVM
                         return false;     // return small structs in regs
                                             // (not 3 byte structs!)
                     case 16:
-                        if (os & Target.OS.Posix && isX86_64)
+                        if (os & Target.OS.Posix && (isX86_64 || isAArch64))
                            return false;
                         break;
 
@@ -1233,17 +1250,17 @@ else // !IN_LLVM
         }
         else if (os & Target.OS.Posix &&
                  (tf.linkage == LINK.c || tf.linkage == LINK.cpp) &&
-                 tns.iscomplex())
+                 tns.isComplex())
         {
             if (tns.ty == TY.Tcomplex32)
                 return false;     // in EDX:EAX, not ST1:ST0
-            else
-                return true;
+
+            return true;
         }
         else if (os == Target.OS.Windows &&
-                 !isX86_64 &&
+                 isX86 &&
                  tf.linkage == LINK.cpp &&
-                 tf.isfloating())
+                 tf.isFloating())
         {
             /* See DMC++ function exp2_retmethod()
              * https://github.com/DigitalMars/Compiler/blob/master/dm/src/dmc/dexp2.d#L149
@@ -1269,7 +1286,7 @@ else // !IN_LLVM
     extern (C++) bool preferPassByRef(Type t)
     {
         const size = t.size();
-        if (isX86_64)
+        if (isX86_64 || isAArch64)
         {
             if (os == Target.OS.Windows)
             {
@@ -1334,7 +1351,7 @@ else // !IN_LLVM
      * Returns:
      *  Expression for the requested targetInfo
      */
-    extern (C++) Expression getTargetInfo(const(char)* name, const ref Loc loc)
+    extern (C++) Expression getTargetInfo(const(char)* name, Loc loc)
     {
         import dmd.dmdparams : driverParams;
         import dmd.expression : IntegerExp, StringExp;
@@ -1349,20 +1366,15 @@ else // !IN_LLVM
         {
             case objectFormat.stringof:
                 if (os == Target.OS.Windows)
-                    return stringExp(omfobj ? "omf" : "coff" );
-                else if (os == Target.OS.OSX)
+                    return stringExp("coff");
+                if (os == Target.OS.OSX)
                     return stringExp("macho");
-                else
-                    return stringExp("elf");
+                return stringExp("elf");
             case floatAbi.stringof:
                 return stringExp("hard");
             case cppRuntimeLibrary.stringof:
                 if (os == Target.OS.Windows)
-                {
-                    if (omfobj)
-                        return stringExp("snn");
                     return stringExp(driverParams.mscrtlib);
-                }
                 return stringExp("");
             case cppStd.stringof:
                 return new IntegerExp(params.cplusplus);
@@ -1404,7 +1416,7 @@ else // !IN_LLVM
      */
     extern (C++) bool libraryObjectMonitors(FuncDeclaration fd, Statement fbody)
     {
-        if (!isX86_64 && os == Target.OS.Windows && !fd.isStatic() && !fbody.usesEH() && !params.trace)
+        if (isX86 && os == Target.OS.Windows && !fd.isStatic() && !fbody.usesEH() && !params.trace)
         {
             /* The back end uses the "jmonitor" hack for syncing;
              * no need to do the sync in the library.
@@ -1421,7 +1433,7 @@ else // !IN_LLVM
      */
     extern (C++) bool supportsLinkerDirective() const @safe
     {
-        return os == Target.OS.Windows && !omfobj;
+        return os == Target.OS.Windows;
     }
 
     ////////////////////////////////////////////////////////////////////////////
@@ -1435,7 +1447,7 @@ else // !IN_LLVM
      */
     extern (D) bool isXmmSupported() @safe
     {
-        return isX86_64 || os == Target.OS.OSX;
+        return (isX86_64 || isAArch64) || (isX86 && os == Target.OS.OSX);
     }
 
     /**
@@ -1455,7 +1467,12 @@ else // !IN_LLVM
      */
     extern (D) uint stackAlign() @safe
     {
-        return isXmmSupported() ? 16 : (isX86_64 ? 8 : 4);
+        uint sz = isXmmSupported() ? 16 :
+                  isX86_64         ?  8 :
+                  isAArch64        ?  8 :
+                  isX86            ?  4 : 0;
+        assert(sz);
+        return sz;
     }
 } // !IN_LLVM
 }
@@ -1466,11 +1483,12 @@ else // !IN_LLVM
  */
 struct TargetC
 {
+    import dmd.declaration : BitFieldDeclaration;
+
     enum Runtime : ubyte
     {
         Unspecified,
         Bionic,
-        DigitalMars,
         Glibc,
         Microsoft,
         Musl,
@@ -1482,7 +1500,6 @@ struct TargetC
     enum BitFieldStyle : ubyte
     {
         Unspecified,
-        DM,                   /// Digital Mars 32 bit C compiler
         MS,                   /// Microsoft 32 and 64 bit C compilers
                               /// https://docs.microsoft.com/en-us/cpp/c-language/c-bit-fields?view=msvc-160
                               /// https://docs.microsoft.com/en-us/cpp/cpp/cpp-bit-fields?view=msvc-160
@@ -1518,14 +1535,14 @@ version (IN_LLVM) {} else
             longsize = 4;
         else
             assert(0);
-        if (target.isX86_64)
+        if (target.isX86_64 || target.isAArch64)
         {
             if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
                 longsize = 8;
             else if (os == Target.OS.OSX)
                 longsize = 8;
         }
-        if (target.isX86_64 && os == Target.OS.Windows)
+        if ((target.isX86_64 || target.isAArch64) && os == Target.OS.Windows)
             long_doublesize = 8;
         else
             long_doublesize = target.realsize;
@@ -1535,7 +1552,7 @@ version (IN_LLVM) {} else
             wchar_tsize = 4;
 
         if (os == Target.OS.Windows)
-            runtime = target.omfobj ? Runtime.DigitalMars : Runtime.Microsoft;
+            runtime = Runtime.Microsoft;
         else if (os == Target.OS.linux)
         {
             // Note: This is overridden later by `-target=<triple>` if supplied.
@@ -1547,7 +1564,7 @@ version (IN_LLVM) {} else
         }
 
         if (os == Target.OS.Windows)
-            bitFieldStyle = target.omfobj ? BitFieldStyle.DM : BitFieldStyle.MS;
+            bitFieldStyle = BitFieldStyle.MS;
         else if (os & (Target.OS.linux | Target.OS.FreeBSD | Target.OS.OSX |
                        Target.OS.OpenBSD | Target.OS.DragonFlyBSD | Target.OS.Solaris))
             bitFieldStyle = BitFieldStyle.Gcc_Clang;
@@ -1561,6 +1578,32 @@ version (IN_LLVM) {} else
             crtDestructorsSupported = false;
         }
     }
+
+version (IN_LLVM)
+{
+    // implemented in gen/target.cpp
+    extern (C++) bool contributesToAggregateAlignment(BitFieldDeclaration bfd);
+}
+else
+{
+    /**
+     * Indicates whether the specified bit-field contributes to the alignment
+     * of the containing aggregate.
+     * E.g., (not all) ARM ABIs do NOT ignore anonymous (incl. 0-length)
+     * bit-fields.
+     */
+    extern (C++) bool contributesToAggregateAlignment(BitFieldDeclaration bfd)
+    {
+        if (bitFieldStyle == BitFieldStyle.MS)
+            return true;
+        if (bitFieldStyle == BitFieldStyle.Gcc_Clang)
+        {
+            // sufficient for DMD's currently supported architectures
+            return !bfd.isAnonymous();
+        }
+        assert(0);
+    }
+}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1577,9 +1620,8 @@ struct TargetCPP
     enum Runtime : ubyte
     {
         Unspecified,
-        Clang,
-        DigitalMars,
-        Gcc,
+        LLVM,
+        GNU,
         Microsoft,
         Sun
     }
@@ -1604,23 +1646,23 @@ version (IN_LLVM) {} else
         else if (os == Target.OS.Windows)
         {
             reverseOverloads = true;
-            splitVBasetable = !target.omfobj;
+            splitVBasetable = true;
         }
         else
             assert(0);
         exceptions = (os & Target.OS.Posix) != 0;
         if (os == Target.OS.Windows)
-            runtime = target.omfobj ? Runtime.DigitalMars : Runtime.Microsoft;
+            runtime = Runtime.Microsoft;
         else if (os & (Target.OS.linux | Target.OS.DragonFlyBSD))
-            runtime = Runtime.Gcc;
+            runtime = Runtime.GNU;
         else if (os & (Target.OS.OSX | Target.OS.FreeBSD | Target.OS.OpenBSD))
-            runtime = Runtime.Clang;
+            runtime = Runtime.LLVM;
         else if (os == Target.OS.Solaris)
-            runtime = Runtime.Gcc;
+            runtime = Runtime.GNU;
         else
             assert(0);
         // C++ and D ABI incompatible on all (?) x86 32-bit platforms
-        wrapDtorInExternD = !target.isX86_64;
+        wrapDtorInExternD = target.isX86;
     }
 
     /**
@@ -1632,8 +1674,8 @@ version (IN_LLVM) {} else
      */
     extern (C++) const(char)* toMangle(Dsymbol s)
     {
-        import dmd.cppmangle : toCppMangleItanium;
-        import dmd.cppmanglewin : toCppMangleDMC, toCppMangleMSVC;
+        import dmd.mangle.cpp : toCppMangleItanium;
+        import dmd.mangle.cppwin : toCppMangleMSVC;
 
 version (IN_LLVM)
 {
@@ -1642,20 +1684,15 @@ version (IN_LLVM)
         else
             return toCppMangleItanium(s);
 }
-else
+else // !IN_LLVM
 {
         if (target.os & (Target.OS.linux | Target.OS.OSX | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
             return toCppMangleItanium(s);
         if (target.os == Target.OS.Windows)
-        {
-            if (target.omfobj)
-                return toCppMangleDMC(s);
-            else
-                return toCppMangleMSVC(s);
-        }
-        else
-            assert(0, "fix this");
-}
+            return toCppMangleMSVC(s);
+
+        assert(0, "fix this");
+} // !IN_LLVM
     }
 
     /**
@@ -1667,8 +1704,8 @@ else
      */
     extern (C++) const(char)* typeInfoMangle(ClassDeclaration cd)
     {
-        import dmd.cppmangle : cppTypeInfoMangleItanium;
-        import dmd.cppmanglewin : cppTypeInfoMangleDMC, cppTypeInfoMangleMSVC;
+        import dmd.mangle.cpp : cppTypeInfoMangleItanium;
+        import dmd.mangle.cppwin : cppTypeInfoMangleMSVC;
 
 version (IN_LLVM)
 {
@@ -1677,20 +1714,15 @@ version (IN_LLVM)
         else
             return cppTypeInfoMangleItanium(cd);
 }
-else
+else // !IN_LLVM
 {
         if (target.os & (Target.OS.linux | Target.OS.OSX | Target.OS.FreeBSD | Target.OS.OpenBSD | Target.OS.Solaris | Target.OS.DragonFlyBSD))
             return cppTypeInfoMangleItanium(cd);
         if (target.os == Target.OS.Windows)
-        {
-            if (target.omfobj)
-                return cppTypeInfoMangleDMC(cd);
-            else
-                return cppTypeInfoMangleMSVC(cd);
-        }
-        else
-            assert(0, "fix this");
-}
+            return cppTypeInfoMangleMSVC(cd);
+
+        assert(0, "fix this");
+} // !IN_LLVM
     }
 
     /**
@@ -1767,8 +1799,8 @@ else
         // IN_LLVM: changed from `if (target.os == Target.OS.Windows)`
         if (isTargetWindowsMSVC())
             return (baseClass.structsize + baseClass.alignsize - 1) & ~(baseClass.alignsize - 1);
-        else
-            return baseClass.structsize;
+
+        return baseClass.structsize;
     }
 }
 
@@ -1783,7 +1815,7 @@ struct TargetObjC
     version (IN_LLVM) { /* initialized in Target::_init() */ } else
     extern (D) void initialize(ref const Param params, ref const Target target) @safe
     {
-        if (target.os == Target.OS.OSX && target.isX86_64)
+        if (target.os == Target.OS.OSX && (target.isX86_64 || target.isAArch64))
             supported = true;
     }
 }

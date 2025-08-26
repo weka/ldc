@@ -17,8 +17,6 @@ module rt.tracegc;
 
 version (LDC) { /* -profile=gc not supported yet */ } else:
 
-// version = tracegc;
-
 extern (C) void _d_callfinalizer(void* p);
 extern (C) void _d_callinterfacefinalizer(void *p);
 extern (C) void _d_delclass(Object* p);
@@ -71,19 +69,6 @@ enum accumulator = q{
     else
         string name = "";
 
-    version (tracegc)
-    {
-        import core.stdc.stdio;
-
-        printf("%s file = '%.*s' line = %d function = '%.*s' type = %.*s\n",
-            __FUNCTION__.ptr,
-            file.length, file.ptr,
-            line,
-            funcname.length, funcname.ptr,
-            name.length, name.ptr
-        );
-    }
-
     ulong currentlyAllocated = GC.allocatedInCurrentThread;
 
     scope(exit)
@@ -122,7 +107,7 @@ private string generateTraceWrappers()
     return code;
 }
 
-static enum ParamPos { front, back }
+enum ParamPos { front, back }
 
 private string generateWrapper(alias Declaration, ParamPos pos = ParamPos.front)()
 {

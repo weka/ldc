@@ -1,3 +1,5 @@
+enable_language(CXX) # for CMAKE_CXX_COMPILER
+
 # Try to find GNU make, use specific version first (BSD) and fall back to default 'make' (Linux)
 find_program(GNU_MAKE_BIN NAMES gmake gnumake make)
 if(NOT GNU_MAKE_BIN)
@@ -26,7 +28,7 @@ if(MULTILIB AND "${TARGET_SYSTEM}" MATCHES "APPLE")
         set(druntime_path "${CMAKE_BINARY_DIR}/lib${LIB_SUFFIX}/libdruntime-ldc.a")
     endif()
 else()
-    set(shared_druntime_path "$<TARGET_LINKER_FILE:druntime-ldc${SHARED_LIB_SUFFIX}>")
+    set(shared_druntime_path "$<TARGET_FILE:druntime-ldc${SHARED_LIB_SUFFIX}>")
     if(${BUILD_SHARED_LIBS} STREQUAL "ON")
         set(druntime_path ${shared_druntime_path})
     else()
@@ -34,9 +36,8 @@ else()
     endif()
 endif()
 
-if(NOT "${TARGET_SYSTEM}" MATCHES "MSVC")
-    set(cflags_base "CFLAGS_BASE=-Wall -Wl,-rpath,${CMAKE_BINARY_DIR}/lib${LIB_SUFFIX}")
-endif()
+string(REPLACE ";" " " dflags_base "${D_EXTRA_FLAGS}")
+string(REPLACE ";" " " cflags_base "${RT_CFLAGS}")
 
 set(linkdl "")
 if("${TARGET_SYSTEM}" MATCHES "Linux")
@@ -56,6 +57,19 @@ else()
     list(REMOVE_ITEM testnames uuid)
 endif()
 
+set(musl "")
+if(TARGET_SYSTEM MATCHES "musl")
+    set(musl "IS_MUSL=1")
+endif()
+
+set(cc  "CC=${CMAKE_C_COMPILER}")
+set(cxx "CXX=${CMAKE_CXX_COMPILER}")
+if(CMAKE_VERSION VERSION_LESS "4.0.0" AND CMAKE_HOST_APPLE AND "${TARGET_SYSTEM}" MATCHES "APPLE")
+    # see https://github.com/ldc-developers/ldc/issues/3901
+    set(cc  "")
+    set(cxx "")
+endif()
+
 foreach(name ${testnames})
     foreach(build debug release)
         set(druntime_path_build ${druntime_path})
@@ -72,14 +86,11 @@ foreach(name ${testnames})
         )
         add_test(NAME ${fullname}
             COMMAND ${GNU_MAKE_BIN} -C ${PROJECT_SOURCE_DIR}/druntime/test/${name}
-                ROOT=${outdir} DMD=${LDMD_EXE_FULL} BUILD=${build}
+                ROOT=${outdir} DMD=${LDMD_EXE_FULL} BUILD=${build} SHARED=1
                 DRUNTIME=${druntime_path_build} DRUNTIMESO=${shared_druntime_path_build}
-                SHARED=1 ${cflags_base} ${linkdl}
+                ${cc} ${cxx} CFLAGS_BASE=${cflags_base} DFLAGS_BASE=${dflags_base} ${linkdl}
+                IN_LDC=1 ${musl}
         )
         set_tests_properties(${fullname} PROPERTIES DEPENDS clean-${fullname})
     endforeach()
 endforeach()
-
-# HACK: there's a race condition for the debug/release coverage tests
-#       (temporary in-place modification of source file)
-set_tests_properties(druntime-test-coverage-release PROPERTIES DEPENDS druntime-test-coverage-debug)

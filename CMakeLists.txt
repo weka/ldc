@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.16.0)
 if(POLICY CMP0025)
     cmake_policy(SET CMP0025 NEW)
 endif()
+if(POLICY CMP0132)
+    # see https://github.com/ldc-developers/ldc/issues/3901
+    cmake_policy(SET CMP0132 NEW)
+endif()
 if(${CMAKE_VERSION} VERSION_GREATER "3.26.9")
     # Prevent implicit dependencies for custom commands, e.g.,
     # `obj/ldc2.o` depending on `lib/libldc.a` with LDC_LINK_MANUALLY=ON.
@@ -34,7 +38,7 @@ endfunction()
 # Locate LLVM.
 #
 
-find_package(LLVM 11.0 REQUIRED
+find_package(LLVM 15.0 REQUIRED
     all-targets analysis asmparser asmprinter bitreader bitwriter codegen core
     debuginfodwarf debuginfomsf debuginfopdb demangle
     instcombine ipo instrumentation irreader libdriver linker lto mc
@@ -117,10 +121,10 @@ include(GetLinuxDistribution)
 #
 
 # Version information
-set(LDC_VERSION "1.38.0") # May be overridden by git hash tag
+set(LDC_VERSION "1.41.0") # May be overridden by git hash tag
 set(DMDFE_MAJOR_VERSION   2)
-set(DMDFE_MINOR_VERSION   108)
-set(DMDFE_PATCH_VERSION   1)
+set(DMDFE_MINOR_VERSION   111)
+set(DMDFE_PATCH_VERSION   0)
 
 set(DMD_VERSION ${DMDFE_MAJOR_VERSION}.${DMDFE_MINOR_VERSION}.${DMDFE_PATCH_VERSION})
 
@@ -137,7 +141,8 @@ endif()
 set(D_VERSION ${DMDFE_MAJOR_VERSION} CACHE STRING "D language version")
 set(PROGRAM_PREFIX "" CACHE STRING "Prepended to ldc/ldmd binary names")
 set(PROGRAM_SUFFIX "" CACHE STRING "Appended to ldc/ldmd binary names")
-set(CONF_INST_DIR ${SYSCONF_INSTALL_DIR} CACHE PATH "Directory ldc.conf is installed to")
+set(CONF_INST_DIR ${SYSCONF_INSTALL_DIR} CACHE PATH "Directory ldc2.conf is installed to")
+set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/include/d CACHE PATH "Path to install D modules to")
 
 # Note: LIB_SUFFIX should perhaps be renamed to LDC_LIBDIR_SUFFIX.
 set(LIB_SUFFIX "" CACHE STRING "Appended to the library installation directory. Set to '64' to install libraries into ${PREFIX}/lib64.")
@@ -148,6 +153,9 @@ set(LDC_ENABLE_ASSERTIONS "${LLVM_ENABLE_ASSERTIONS}" CACHE BOOL "Enable LDC ass
 
 # Allow user to specify mimalloc.o location, to be linked with `ldc2` only
 set(ALTERNATIVE_MALLOC_O   ""     CACHE STRING "If specified, adds ALTERNATIVE_MALLOC_O object file to LDC link, to override the CRT malloc.")
+
+# Most linux distributions have a policy of not bundling dependencies like zlib
+set(PHOBOS_SYSTEM_ZLIB OFF CACHE BOOL "Use system zlib instead of Phobos' vendored version")
 
 if(D_VERSION EQUAL 1)
     message(FATAL_ERROR "D version 1 is no longer supported.
@@ -203,17 +211,11 @@ if(MSVC)
         append("-Llegacy_stdio_definitions.lib" DFLAGS_BASE)
     endif()
 
-    # Link against the static MSVC runtime; CMake's C(++) flags apparently default to the dynamic one.
-    # Host DMD/LDMD already defaults to linking against the static MSVC runtime.
-    if(${LLVM_CXXFLAGS} MATCHES "(^| )/MDd?( |$)")
-        message(FATAL_ERROR "LLVM must be built with CMake option LLVM_USE_CRT_<CMAKE_BUILD_TYPE>=MT[d]")
-    endif()
     set(llvm_ob_flag)
     string(REGEX MATCH "/Ob[0-2]" llvm_ob_flag "${LLVM_CXXFLAGS}")
     foreach(flag_var
             CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
             CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-        string(REGEX REPLACE "/MD" "/MT" ${flag_var} "${${flag_var}}")
         # CMake defaults to /W3, LLVM uses /W4 => MS compiler warns about overridden option.
         # Simply replace with /W4.
         string(REGEX REPLACE "/W[0-3]" "/W4" ${flag_var} "${${flag_var}}")
@@ -272,10 +274,6 @@ if( CMAKE_COMPILER_IS_GNUCXX
     AND CMAKE_C_COMPILER_VERSION VERSION_LESS "4.6.0" )
     append("-mminimal-toc" LDC_CXXFLAGS)
 endif()
-# Do not use doubledouble on ppc
-if( CMAKE_SYSTEM_PROCESSOR MATCHES "ppc|powerpc")
-    append("-mlong-double-64" LDC_CXXFLAGS)
-endif()
 if(UNIX)
     append("-DLDC_POSIX" LDC_CXXFLAGS)
 endif()
@@ -290,6 +288,9 @@ if(SANITIZE)
     endif()
 endif()
 append("${SANITIZE_CXXFLAGS}" LDC_CXXFLAGS)
+if(PHOBOS_SYSTEM_ZLIB)
+    append("-DPHOBOS_SYSTEM_ZLIB" LDC_CXXFLAGS)
+endif()
 # LLVM_CXXFLAGS may contain -Werror which causes compile errors with dmd source
 string(REPLACE "-Werror " "" LLVM_CXXFLAGS ${LLVM_CXXFLAGS})
 if (UNIX AND NOT "${LLVM_LDFLAGS}" STREQUAL "")
@@ -309,8 +310,14 @@ else()
     separate_arguments(LLVM_LDFLAGS UNIX_COMMAND "${LLVM_LDFLAGS}")
 endif()
 
+option(LDC_FULLY_STATIC "Posix: Link most executables (compiler and tools) as fully-static binaries" OFF)
+set(FULLY_STATIC_LDFLAG)
+if(UNIX AND LDC_FULLY_STATIC)
+    set(FULLY_STATIC_LDFLAG "-static")
+endif()
+
 # Suppress superfluous randlib warnings about "*.a" having no symbols on MacOSX.
-if (APPLE)
+if (${CMAKE_CXX_COMPILER_ID} STREQUAL "AppleClang") # not supported by llvm-ranlib used with Homebrew clang
     set(CMAKE_C_ARCHIVE_CREATE   "<CMAKE_AR> Scr <TARGET> <LINK_FLAGS> <OBJECTS>")
     set(CMAKE_CXX_ARCHIVE_CREATE "<CMAKE_AR> Scr <TARGET> <LINK_FLAGS> <OBJECTS>")
     set(CMAKE_C_ARCHIVE_FINISH   "<CMAKE_RANLIB> -no_warning_for_no_symbols -c <TARGET>")
@@ -405,7 +412,6 @@ set(DRV_HDR
     driver/linker.h
     driver/plugins.h
     driver/targetmachine.h
-    driver/timetrace.h
     driver/toobj.h
     driver/tool.h
 )
@@ -446,20 +452,36 @@ include(HandleLTOPGOBuildOptions)
 #
 # Enable Dynamic compilation if supported for this platform and LLVM version.
 #
-set(LDC_DYNAMIC_COMPILE "AUTO" CACHE STRING "Support dynamic compilation (ON|OFF). Enabled by default; not supported for LLVM >= 12.")
+set(LDC_DYNAMIC_COMPILE "AUTO" CACHE STRING "Support dynamic compilation (ON|OFF). Enabled by default; not supported for LLVM < 18.")
 option(LDC_DYNAMIC_COMPILE_USE_CUSTOM_PASSES "Use custom LDC passes in jit" ON)
 if(LDC_DYNAMIC_COMPILE STREQUAL "AUTO")
-    if(LDC_LLVM_VER LESS 1200)
+    if(LDC_LLVM_VER LESS 1800)
+        set(LDC_DYNAMIC_COMPILE OFF)
+    # FIXME: dynamic-compile regressions with LLVM 20
+    elseif(LDC_LLVM_VER LESS 2000)
         set(LDC_DYNAMIC_COMPILE ON)
     else()
-        # TODO: port from ORCv1 API (dropped with LLVM 12) to ORCv2 (added with LLVM 7)
         set(LDC_DYNAMIC_COMPILE OFF)
     endif()
 endif()
+# https://llvm.org/docs/JITLink.html for the list of supported platforms
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|x64|amd64|aarch64|arm64|riscv64|loongarch64")
+    set(_LDC_DYNAMIC_COMPILE_USE_LLVM_JITLINK_DEFAULT ON)
+else()
+    set(_LDC_DYNAMIC_COMPILE_USE_LLVM_JITLINK_DEFAULT OFF)
+endif()
+# Disable LLVM JITLink on Windows for now, currently does not work very well on Windows
+if(WIN32)
+    set(_LDC_DYNAMIC_COMPILE_USE_LLVM_JITLINK_DEFAULT OFF)
+endif()
+option(LDC_DYNAMIC_COMPILE_USE_LLVM_JITLINK "Use the experimental but faster LLVM JITLink dynamic code linker" "${_LDC_DYNAMIC_COMPILE_USE_LLVM_JITLINK_DEFAULT}")
 message(STATUS "-- Building LDC with dynamic compilation support (LDC_DYNAMIC_COMPILE): ${LDC_DYNAMIC_COMPILE}")
 if(LDC_DYNAMIC_COMPILE)
     add_definitions(-DLDC_DYNAMIC_COMPILE)
-    add_definitions(-DLDC_DYNAMIC_COMPILE_API_VERSION=3)
+    add_definitions(-DLDC_DYNAMIC_COMPILE_API_VERSION=4)
+endif()
+if (LDC_DYNAMIC_COMPILE_USE_LLVM_JITLINK)
+    add_compile_definitions(LDC_JITRT_USE_JITLINK)
 endif()
 
 #
@@ -541,7 +563,7 @@ else()
         # Define a 'HOST_D' CMake linker language for the static LDCShared
         # library, using the host ldmd2 compiler ≥ v1.5 as archiver, which
         # supports LTO objects and cross-archiving.
-        set(CMAKE_HOST_D_CREATE_STATIC_LIBRARY "${D_COMPILER} -lib ${D_COMPILER_FLAGS} ${DFLAGS_BASE} -of=<TARGET> <OBJECTS>")
+        set(CMAKE_HOST_D_CREATE_STATIC_LIBRARY "\"${D_COMPILER}\" -lib ${D_COMPILER_FLAGS} ${DFLAGS_BASE} -of=<TARGET> <OBJECTS>")
         set(LDC_LIB_LANGUAGE HOST_D)
     endif()
 endif()
@@ -606,28 +628,20 @@ if(LDC_WITH_LLD)
     else()
         set(LDC_LINKERFLAG_LIST -lLLVMSymbolize ${LDC_LINKERFLAG_LIST})
     endif()
-    if (LDC_LLVM_VER LESS 1200 OR NOT LDC_LLVM_VER LESS 1400)
-        set(LLD_MACHO lldMachO)
-    else()
-        set(LLD_MACHO lldMachO2)
-    endif()
     if(MSVC)
-        if(NOT (LDC_LLVM_VER LESS 1400))
-            list(APPEND LDC_LINKERFLAG_LIST lldMinGW.lib lldCOFF.lib lldELF.lib ${LLD_MACHO}.lib lldWasm.lib lldCommon.lib)
-        else()
-            list(APPEND LDC_LINKERFLAG_LIST lldDriver.lib lldMinGW.lib lldCOFF.lib lldELF.lib ${LLD_MACHO}.lib lldWasm.lib lldYAML.lib lldReaderWriter.lib lldCommon.lib lldCore.lib)
-        endif()
+        list(APPEND LDC_LINKERFLAG_LIST lldMinGW.lib lldCOFF.lib lldELF.lib lldMachO.lib lldWasm.lib lldCommon.lib)
     else()
-        if(NOT (LDC_LLVM_VER LESS 1400))
-            set(LDC_LINKERFLAG_LIST -llldMinGW -llldCOFF -llldELF -l${LLD_MACHO} -llldWasm -llldCommon ${LDC_LINKERFLAG_LIST})
-        else()
-            set(LDC_LINKERFLAG_LIST -llldDriver -llldMinGW -llldCOFF -llldELF -l${LLD_MACHO} -llldWasm -llldYAML -llldReaderWriter -llldCommon -llldCore ${LDC_LINKERFLAG_LIST})
-        endif()
+        set(LDC_LINKERFLAG_LIST -llldMinGW -llldCOFF -llldELF -llldMachO -llldWasm -llldCommon ${LDC_LINKERFLAG_LIST})
     endif()
     if(APPLE)
-        if(NOT (LDC_LLVM_VER LESS 1300)) # LLD 13.0.0 on Mac needs libxar
-            list(APPEND LDC_LINKERFLAG_LIST -lxar)
-        endif()
+        # LLD 13.0.0 on Mac needs libxar
+        list(APPEND LDC_LINKERFLAG_LIST -lxar)
+    endif()
+    if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
+        # FreeBSD LLVM port links to zstd, but does not convey this information via CMake
+        # Workaround it here until it is fixed in the port
+        find_package(zstd)
+        list(APPEND LDC_LINKERFLAG_LIST "$<TARGET_LINKER_FILE:zstd::libzstd_shared>")
     endif()
 endif()
 
@@ -708,7 +722,7 @@ build_d_executable(
     "${LDC_EXE_FULL}"
     "${LDC_D_SOURCE_FILES}"
     "${DFLAGS_BUILD_TYPE} ${DFLAGS_LDC}"
-    "${ALTERNATIVE_MALLOC_O};${LDC_LINKERFLAG_LIST}"
+    "${ALTERNATIVE_MALLOC_O};${LDC_LINKERFLAG_LIST};${FULLY_STATIC_LDFLAG}"
     "${FE_RES}"
     "${LDC_LIB}"
     ${COMPILE_D_MODULES_SEPARATELY}
@@ -718,7 +732,7 @@ if(MSVC_IDE)
     # the IDE generator is a multi-config one
     # so copy the config file into the correct bin subfolder
     # (different outputs no longer feasible for custom commands, so disabled)
-    #    add_custom_command(TARGET ${LDC_EXE} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/bin/${LDC_EXE}.conf $<TARGET_FILE_DIR:${LDC_EXE}> COMMENT "Copy config file ${LDC_EXE}.conf")
+    #    add_custom_command(TARGET ${LDC_EXE} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy ${PROJECT_BINARY_DIR}/etc/${LDC_EXE}.conf $<TARGET_FILE_DIR:${LDC_EXE}> COMMENT "Copy config file ${LDC_EXE}.conf")
 endif()
 
 
@@ -743,7 +757,7 @@ build_d_executable(
     "${LDMD_EXE_FULL}"
     "${LDMD_D_SOURCE_FILES}"
     "${DFLAGS_BUILD_TYPE}"
-    "${LDC_LINKERFLAG_LIST}"
+    "${LDC_LINKERFLAG_LIST};${FULLY_STATIC_LDFLAG}"
     ""
     "LDMD_CXX_LIB"
     ${COMPILE_D_MODULES_SEPARATELY}
@@ -804,9 +818,40 @@ else()
 endif()
 
 #
-# Locate ASan and other LLVM compiler-rt libraries, and copy them to our lib folder
-# Location is LLVM_LIBRARY_DIRS/clang/<version>/lib/<OS>/ , for example LLVM_LIBRARY_DIRS/clang/4.0.0/lib/darwin/
-#
+# Locate ASan and other LLVM compiler-rt libraries, and copy them to our lib
+# folder or save that folder in the config files. Location is typically
+# LLVM_LIBRARY_DIRS/clang/<version>/lib/<OS>/ , for example
+# LLVM_LIBRARY_DIRS/clang/4.0.0/lib/darwin/ , but we allow the user to specify
+# another directory.
+set(COMPILER_RT_BASE_DIR "${LLVM_LIBRARY_DIRS}/clang" CACHE PATH "Base path of compiler-rt libraries. If they in are /usr/lib/clang/17/lib/linux/libclang_rt* you should set this value to /usr/lib/clang")
+set(COMPILER_RT_LIBDIR "${COMPILER_RT_BASE_DIR}")
+if(LDC_LLVM_VER LESS 1600)
+    set(COMPILER_RT_LIBDIR "${COMPILER_RT_LIBDIR}/${LLVM_VERSION_BASE_STRING}")
+else()
+    set(COMPILER_RT_LIBDIR "${COMPILER_RT_LIBDIR}/${LLVM_VERSION_MAJOR}")
+endif()
+set(COMPILER_RT_LIBDIR "${COMPILER_RT_LIBDIR}/lib")
+if(APPLE)
+    set(COMPILER_RT_LIBDIR "${COMPILER_RT_LIBDIR}/darwin")
+elseif(ANDROID)
+    set(COMPILER_RT_LIBDIR "${COMPILER_RT_LIBDIR}/linux")
+elseif(UNIX)
+    set(COMPILER_RT_LIBDIR_OS_DEFAULT "${LLVM_HOST_TARGET}") # default when building compiler-rt alongside LLVM
+    if(NOT EXISTS "${COMPILER_RT_LIBDIR}/${COMPILER_RT_LIBDIR_OS_DEFAULT}")
+        # default when building compiler-rt separately: OS name alone in lowercase
+        string(TOLOWER "${CMAKE_SYSTEM_NAME}" lowercase_CMAKE_SYSTEM_NAME)
+        if(EXISTS "${COMPILER_RT_LIBDIR}/${lowercase_CMAKE_SYSTEM_NAME}")
+            set(COMPILER_RT_LIBDIR_OS_DEFAULT "${lowercase_CMAKE_SYSTEM_NAME}")
+        endif()
+    endif()
+    set(COMPILER_RT_LIBDIR_OS "${COMPILER_RT_LIBDIR_OS_DEFAULT}"   CACHE STRING "Non-Mac Posix: OS used as directory name for the compiler-rt source libraries, e.g., 'freebsd'.")
+    set(COMPILER_RT_LIBDIR "${COMPILER_RT_LIBDIR}/${COMPILER_RT_LIBDIR_OS}")
+elseif(WIN32)
+    set(COMPILER_RT_LIBDIR "${COMPILER_RT_LIBDIR}/windows")
+endif()
+if(NOT EXISTS "${COMPILER_RT_LIBDIR}")
+    message(WARNING "Expected compiler-rt directory '${COMPILER_RT_LIBDIR}' does not exist. To include PGO and sanitizers support, COMPILER_RT_BASE_DIR and/or COMPILER_RT_LIBDIR_OS might need to be set explicitly. See docs/compiler_rt.md.")
+endif()
 if(LLVM_IS_SHARED)
     set(LDC_INSTALL_LLVM_RUNTIME_LIBS_DEFAULT OFF)
 else()
@@ -814,11 +859,7 @@ else()
 endif()
 set(LDC_INSTALL_LLVM_RUNTIME_LIBS ${LDC_INSTALL_LLVM_RUNTIME_LIBS_DEFAULT} CACHE BOOL "Copy/install LLVM compiler-rt libraries (ASan, libFuzzer, ...) from LLVM/Clang into LDC lib dir when available.")
 function(copy_compilerrt_lib llvm_lib_name ldc_lib_name fixup_dylib)
-    if(LDC_LLVM_VER LESS 1600)
-        set(llvm_lib_path ${LLVM_LIBRARY_DIRS}/clang/${LLVM_VERSION_BASE_STRING}/lib/${llvm_lib_name})
-    else()
-        set(llvm_lib_path ${LLVM_LIBRARY_DIRS}/clang/${LLVM_VERSION_MAJOR}/lib/${llvm_lib_name})
-    endif()
+    set(llvm_lib_path ${COMPILER_RT_LIBDIR}/${llvm_lib_name})
     if(EXISTS ${llvm_lib_path})
         message(STATUS "--  - ${llvm_lib_path} --> ${ldc_lib_name}")
         copy_and_install_llvm_library(${llvm_lib_path} ${ldc_lib_name} ${fixup_dylib})
@@ -831,60 +872,108 @@ if (LDC_INSTALL_LLVM_RUNTIME_LIBS)
     # Locate LLVM sanitizer runtime libraries, and copy them to our lib folder
 
     if(APPLE)
-        copy_compilerrt_lib("darwin/libclang_rt.asan_osx_dynamic.dylib" "libldc_rt.asan.dylib" TRUE)
-        copy_compilerrt_lib("darwin/libclang_rt.lsan_osx_dynamic.dylib" "libldc_rt.lsan.dylib" TRUE)
-        copy_compilerrt_lib("darwin/libclang_rt.tsan_osx_dynamic.dylib" "libldc_rt.tsan.dylib" TRUE)
-        copy_compilerrt_lib("darwin/libclang_rt.osx.a"                  "libldc_rt.builtins.a" FALSE)
-        copy_compilerrt_lib("darwin/libclang_rt.profile_osx.a"          "libldc_rt.profile.a"  FALSE)
-        copy_compilerrt_lib("darwin/libclang_rt.fuzzer_osx.a"           "libldc_rt.fuzzer.a"   FALSE)
-        copy_compilerrt_lib("darwin/libclang_rt.xray_osx.a"             "libldc_rt.xray.a"     FALSE)
-        copy_compilerrt_lib("darwin/libclang_rt.xray-basic_osx.a"      "libldc_rt.xray-basic.a"     FALSE)
-        copy_compilerrt_lib("darwin/libclang_rt.xray-fdr_osx.a"        "libldc_rt.xray-fdr.a"       FALSE)
-        copy_compilerrt_lib("darwin/libclang_rt.xray-profiling_osx.a"  "libldc_rt.xray-profiling.a" FALSE)
+        copy_compilerrt_lib("libclang_rt.asan_osx_dynamic.dylib" "libldc_rt.asan.dylib" TRUE)
+        copy_compilerrt_lib("libclang_rt.lsan_osx_dynamic.dylib" "libldc_rt.lsan.dylib" TRUE)
+        copy_compilerrt_lib("libclang_rt.tsan_osx_dynamic.dylib" "libldc_rt.tsan.dylib" TRUE)
+        copy_compilerrt_lib("libclang_rt.osx.a"                  "libldc_rt.builtins.a" FALSE)
+        copy_compilerrt_lib("libclang_rt.profile_osx.a"          "libldc_rt.profile.a"  FALSE)
+        copy_compilerrt_lib("libclang_rt.fuzzer_osx.a"           "libldc_rt.fuzzer.a"   FALSE)
+        copy_compilerrt_lib("libclang_rt.xray_osx.a"             "libldc_rt.xray.a"     FALSE)
+        copy_compilerrt_lib("libclang_rt.xray-basic_osx.a"      "libldc_rt.xray-basic.a"     FALSE)
+        copy_compilerrt_lib("libclang_rt.xray-fdr_osx.a"        "libldc_rt.xray-fdr.a"       FALSE)
+        copy_compilerrt_lib("libclang_rt.xray-profiling_osx.a"  "libldc_rt.xray-profiling.a" FALSE)
     elseif(UNIX)
-        if(LDC_LLVM_VER LESS 1500)
-            set(LDC_INSTALL_LLVM_RUNTIME_LIBS_OS_DEFAULT "linux")
-            set(LDC_INSTALL_LLVM_RUNTIME_LIBS_ARCH_DEFAULT "x86_64")
-        else()
-            set(LDC_INSTALL_LLVM_RUNTIME_LIBS_OS_DEFAULT "x86_64-unknown-linux-gnu")
-            set(LDC_INSTALL_LLVM_RUNTIME_LIBS_ARCH_DEFAULT "")
-        endif()
-        set(LDC_INSTALL_LLVM_RUNTIME_LIBS_OS   "${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS_DEFAULT}"   CACHE STRING "Non-Mac Posix: OS used as directory name for the compiler-rt source libraries, e.g., 'freebsd'.")
-        set(LDC_INSTALL_LLVM_RUNTIME_LIBS_ARCH "${LDC_INSTALL_LLVM_RUNTIME_LIBS_ARCH_DEFAULT}" CACHE STRING "Non-Mac Posix: architecture used as libname suffix for the compiler-rt source libraries, e.g., 'aarch64'.")
+        set(LDC_INSTALL_LLVM_RUNTIME_LIBS_ARCH "" CACHE STRING
+            "Non-Mac Posix: architecture used as libname suffix for the compiler-rt source libraries, e.g., 'aarch64'.")
         if(LDC_INSTALL_LLVM_RUNTIME_LIBS_ARCH STREQUAL "")
             set(compilerrt_suffix "")
         else()
             set(compilerrt_suffix "-${LDC_INSTALL_LLVM_RUNTIME_LIBS_ARCH}")
         endif()
 
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.asan${compilerrt_suffix}.a"       "libldc_rt.asan.a"     FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.lsan${compilerrt_suffix}.a"       "libldc_rt.lsan.a"     FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.msan${compilerrt_suffix}.a"       "libldc_rt.msan.a"     FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.tsan${compilerrt_suffix}.a"       "libldc_rt.tsan.a"     FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.builtins${compilerrt_suffix}.a"   "libldc_rt.builtins.a" FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.profile${compilerrt_suffix}.a"    "libldc_rt.profile.a"  FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.xray${compilerrt_suffix}.a"       "libldc_rt.xray.a"     FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.fuzzer${compilerrt_suffix}.a"     "libldc_rt.fuzzer.a"   FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.xray-basic${compilerrt_suffix}.a"      "libldc_rt.xray-basic.a"     FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.xray-fdr${compilerrt_suffix}.a"        "libldc_rt.xray-fdr.a"       FALSE)
-        copy_compilerrt_lib("${LDC_INSTALL_LLVM_RUNTIME_LIBS_OS}/libclang_rt.xray-profiling${compilerrt_suffix}.a"  "libldc_rt.xray-profiling.a" FALSE)
+        copy_compilerrt_lib("libclang_rt.asan${compilerrt_suffix}.a"           "libldc_rt.asan.a"     FALSE)
+        copy_compilerrt_lib("libclang_rt.lsan${compilerrt_suffix}.a"           "libldc_rt.lsan.a"     FALSE)
+        copy_compilerrt_lib("libclang_rt.msan${compilerrt_suffix}.a"           "libldc_rt.msan.a"     FALSE)
+        copy_compilerrt_lib("libclang_rt.tsan${compilerrt_suffix}.a"           "libldc_rt.tsan.a"     FALSE)
+        copy_compilerrt_lib("libclang_rt.builtins${compilerrt_suffix}.a"       "libldc_rt.builtins.a" FALSE)
+        copy_compilerrt_lib("libclang_rt.profile${compilerrt_suffix}.a"        "libldc_rt.profile.a"  FALSE)
+        copy_compilerrt_lib("libclang_rt.xray${compilerrt_suffix}.a"           "libldc_rt.xray.a"     FALSE)
+        copy_compilerrt_lib("libclang_rt.fuzzer${compilerrt_suffix}.a"         "libldc_rt.fuzzer.a"   FALSE)
+        copy_compilerrt_lib("libclang_rt.xray-basic${compilerrt_suffix}.a"     "libldc_rt.xray-basic.a"     FALSE)
+        copy_compilerrt_lib("libclang_rt.xray-fdr${compilerrt_suffix}.a"       "libldc_rt.xray-fdr.a"       FALSE)
+        copy_compilerrt_lib("libclang_rt.xray-profiling${compilerrt_suffix}.a" "libldc_rt.xray-profiling.a" FALSE)
     elseif(WIN32)
         set(compilerrt_arch_suffix "x86_64")
         if(CMAKE_SIZEOF_VOID_P EQUAL 4)
             set(compilerrt_arch_suffix "i386")
         endif()
-        copy_compilerrt_lib("windows/clang_rt.asan-${compilerrt_arch_suffix}.lib"       "ldc_rt.asan.lib"     FALSE)
-        copy_compilerrt_lib("windows/clang_rt.lsan-${compilerrt_arch_suffix}.lib"       "ldc_rt.lsan.lib"     FALSE)
-        copy_compilerrt_lib("windows/clang_rt.builtins-${compilerrt_arch_suffix}.lib"   "ldc_rt.builtins.lib" FALSE)
-        copy_compilerrt_lib("windows/clang_rt.profile-${compilerrt_arch_suffix}.lib"    "ldc_rt.profile.lib"  FALSE)
-        copy_compilerrt_lib("windows/clang_rt.fuzzer-${compilerrt_arch_suffix}.lib"     "ldc_rt.fuzzer.lib"   FALSE)
+        if(LDC_LLVM_VER LESS 2000)
+            copy_compilerrt_lib("clang_rt.asan-${compilerrt_arch_suffix}.lib" "ldc_rt.asan.lib" FALSE)
+            copy_compilerrt_lib("clang_rt.lsan-${compilerrt_arch_suffix}.lib" "ldc_rt.lsan.lib" FALSE)
+        else()
+            copy_compilerrt_lib("clang_rt.asan_static_runtime_thunk-${compilerrt_arch_suffix}.lib"  "ldc_rt.asan_static_runtime_thunk.lib"                FALSE)
+            copy_compilerrt_lib("clang_rt.asan_dynamic_runtime_thunk-${compilerrt_arch_suffix}.lib" "ldc_rt.asan_dynamic_runtime_thunk.lib"               FALSE)
+            copy_compilerrt_lib("clang_rt.asan_dynamic-${compilerrt_arch_suffix}.lib"               "ldc_rt.asan.lib"                                     FALSE)
+            copy_compilerrt_lib("clang_rt.asan_dynamic-${compilerrt_arch_suffix}.dll"               "clang_rt.asan_dynamic-${compilerrt_arch_suffix}.dll" FALSE)
+        endif()
+        copy_compilerrt_lib("clang_rt.builtins-${compilerrt_arch_suffix}.lib" "ldc_rt.builtins.lib" FALSE)
+        copy_compilerrt_lib("clang_rt.profile-${compilerrt_arch_suffix}.lib"  "ldc_rt.profile.lib"  FALSE)
+        copy_compilerrt_lib("clang_rt.fuzzer-${compilerrt_arch_suffix}.lib"   "ldc_rt.fuzzer.lib"   FALSE)
     endif()
+endif()
+
+# If everything else if insufficient, the user can specify
+# -DCOMPILER_RT_LIBDIR_CONFIG to embed an arbitrary value.
+if(NOT DEFINED COMPILER_RT_LIBDIR_CONFIG)
+    if(NOT LDC_INSTALL_LLVM_RUNTIME_LIBS)
+        set(COMPILER_RT_LIBDIR_CONFIG "${COMPILER_RT_LIBDIR}")
+    endif()
+endif()
+if(DEFINED COMPILER_RT_LIBDIR_CONFIG)
+    message(STATUS "Adding ${COMPILER_RT_LIBDIR_CONFIG} to lib-dirs in configuration file")
+    set(OPTIONAL_COMPILER_RT_DIR "\n        \"${COMPILER_RT_LIBDIR_CONFIG}\", // compiler-rt directory")
 endif()
 
 #
 # Auxiliary build and test utils.
 #
 add_subdirectory(utils)
+
+# auto-generate ldc/gccbuiltins_*.di headers, depending on LLVM version and enabled LLVM backends
+set(GCCBUILTINS "")
+if(TARGET gen_gccbuiltins)
+    file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/import/ldc")
+
+    function(gen_gccbuiltins name)
+        set(module "${PROJECT_BINARY_DIR}/import/ldc/gccbuiltins_${name}.di")
+        if (GCCBUILTINS STREQUAL "")
+            set(GCCBUILTINS "${module}" PARENT_SCOPE)
+        else()
+            set(GCCBUILTINS "${GCCBUILTINS};${module}" PARENT_SCOPE)
+        endif()
+        add_custom_command(
+            OUTPUT ${module}
+            COMMAND gen_gccbuiltins ${module} "${name}"
+            DEPENDS gen_gccbuiltins
+        )
+    endfunction()
+
+    set(target_arch "AArch64;AMDGPU;ARM;Mips;RISCV;NVPTX;PowerPC;SystemZ;X86")
+    set(target_name "aarch64;amdgcn;arm;mips;riscv;nvvm;ppc;s390;x86")
+
+    foreach(target ${LLVM_TARGETS_TO_BUILD})
+        list(FIND target_arch ${target} idx)
+        if(idx GREATER -1)
+            list(GET target_name ${idx} name)
+            gen_gccbuiltins(${name})
+        endif()
+    endforeach()
+
+    add_custom_target(gccbuiltins DEPENDS ${GCCBUILTINS})
+
+    # make sure they are generated when building the compiler (as link-time dependency)
+    add_dependencies(${LDC_EXE} gccbuiltins)
+endif()
 
 #
 # Auxiliary tools.
@@ -905,7 +994,7 @@ build_d_executable(
     "${LDC_UNITTEST_EXE_FULL}"
     "${LDC_D_SOURCE_FILES}"
     "-g -unittest ${DFLAGS_LDC}"
-    "${LDC_LINKERFLAG_LIST}"
+    "${LDC_LINKERFLAG_LIST};${FULLY_STATIC_LDFLAG}"
     ""
     "${LDC_LIB}"
     ${COMPILE_D_MODULES_SEPARATELY}
@@ -915,11 +1004,18 @@ add_test(NAME build-ldc2-unittest COMMAND "${CMAKE_COMMAND}" --build ${CMAKE_BIN
 add_test(NAME ldc2-unittest COMMAND ${LDC_UNITTEST_EXE_FULL} --version)
 set_tests_properties(ldc2-unittest PROPERTIES DEPENDS build-ldc2-unittest)
 
-if(EXISTS "${PROJECT_SOURCE_DIR}/runtime/druntime/src/object.d")
+set(_LDC_BUILD_RUNTIME_DEFAULT ON)
+if(CMAKE_CROSSCOMPILING)
+    set(_LDC_BUILD_RUNTIME_DEFAULT OFF)
+endif()
+option(LDC_BUILD_RUNTIME "Build the runtime libraries" ${_LDC_BUILD_RUNTIME_DEFAULT})
+
+if(LDC_BUILD_RUNTIME)
     add_subdirectory(runtime)
 else()
-    message(STATUS "Runtime file runtime/druntime/src/object.d not found, will build ldc binaries but not the standard library.")
+    message(STATUS "NOT building the runtime libraries (LDC_BUILD_RUNTIME=OFF)")
 endif()
+
 if(D_VERSION EQUAL 2)
     add_subdirectory(tests/dmd)
 endif()
@@ -935,7 +1031,7 @@ build_d_executable(
     "${LDC_BUILD_RUNTIME_EXE_FULL}"
     "${PROJECT_BINARY_DIR}/ldc-build-runtime.d"
     "${DFLAGS_BUILD_TYPE}"
-    ""
+    "" # must not be fully static for std.net.curl support (loading libcurl dynamically)
     "${PROJECT_SOURCE_DIR}/runtime/ldc-build-runtime.d.in"
     ""
     ${COMPILE_D_MODULES_SEPARATELY}
@@ -954,7 +1050,6 @@ if(${BUILD_SHARED})
     # as well, for the time being this just bloats the normal packages.
     install(TARGETS ${LDC_LIB} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib${LIB_SUFFIX})
 endif()
-install(FILES ${PROJECT_BINARY_DIR}/bin/${LDC_EXE}_install.conf DESTINATION ${CONF_INST_DIR} RENAME ${LDC_EXE}.conf)
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     if(NOT DEFINED BASH_COMPLETION_COMPLETIONSDIR)
@@ -968,6 +1063,17 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     endif()
     install(DIRECTORY packaging/bash_completion.d/ DESTINATION ${BASH_COMPLETION_COMPLETIONSDIR})
 endif()
+
+# imports/includes
+install(FILES runtime/druntime/src/object.d runtime/druntime/src/__importc_builtins.di runtime/druntime/src/importc.h DESTINATION ${INCLUDE_INSTALL_DIR})
+foreach(p core etc ldc)
+    install(DIRECTORY runtime/druntime/src/${p} DESTINATION ${INCLUDE_INSTALL_DIR} FILES_MATCHING PATTERN "*.d")
+    install(DIRECTORY runtime/druntime/src/${p} DESTINATION ${INCLUDE_INSTALL_DIR} FILES_MATCHING PATTERN "*.di")
+endforeach()
+install(DIRECTORY runtime/phobos/std DESTINATION ${INCLUDE_INSTALL_DIR} FILES_MATCHING PATTERN "*.d")
+install(DIRECTORY runtime/phobos/etc DESTINATION ${INCLUDE_INSTALL_DIR} FILES_MATCHING PATTERN "*.d")
+install(DIRECTORY runtime/jit-rt/d/ldc DESTINATION ${INCLUDE_INSTALL_DIR} FILES_MATCHING PATTERN "*.d")
+install(FILES ${GCCBUILTINS} DESTINATION ${INCLUDE_INSTALL_DIR}/ldc)
 
 #
 # Packaging

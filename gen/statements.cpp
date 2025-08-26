@@ -204,7 +204,7 @@ public:
       } else if (funcType->getReturnType()->isVoidTy()) {
         // if the IR function's return type is void (but not the D one), it uses
         // sret
-        assert(!f->type->isref());
+        assert(!f->type->isRef());
 
         LLValue *sretPointer = f->sretArg;
         assert(sretPointer);
@@ -241,7 +241,7 @@ public:
         }
         DValue *dval = nullptr;
         // call postblit if necessary
-        if (!f->type->isref()) {
+        if (!f->type->isRef()) {
           dval = toElem(stmt->exp);
           LLValue *vthis =
               (DtoIsInMemoryOnly(dval->type) ? DtoLVal(dval) : DtoRVal(dval));
@@ -261,14 +261,6 @@ public:
             DtoIsInMemoryOnly(rt) && isaPointer(returnValue)) {
           Logger::println("Loading value for return");
           returnValue = DtoLoad(funcType->getReturnType(), returnValue);
-        }
-
-        // can happen for classes
-        if (returnValue->getType() != funcType->getReturnType()) {
-          returnValue =
-              irs->ir->CreateBitCast(returnValue, funcType->getReturnType());
-          IF_LOG Logger::cout()
-              << "return value after cast: " << *returnValue << '\n';
         }
       }
     } else {
@@ -1441,13 +1433,13 @@ public:
     irs->DBuilder.EmitBlockStart(stmt->loc);
 
     // evaluate lwr/upr
-    assert(stmt->lwr->type->isintegral());
+    assert(stmt->lwr->type->isIntegral());
     LLValue *lower = DtoRVal(toElemDtor(stmt->lwr));
-    assert(stmt->upr->type->isintegral());
+    assert(stmt->upr->type->isIntegral());
     LLValue *upper = DtoRVal(toElemDtor(stmt->upr));
 
     // handle key
-    assert(stmt->key->type->isintegral());
+    assert(stmt->key->type->isIntegral());
     LLValue *keyval  = DtoRawVarDeclaration(stmt->key);
     LLType  *keytype = DtoType(stmt->key->type);
     // store initial value in key

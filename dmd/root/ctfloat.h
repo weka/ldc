@@ -1,5 +1,5 @@
 
-/* Copyright (C) 1999-2024 by The D Language Foundation, All Rights Reserved
+/* Copyright (C) 1999-2025 by The D Language Foundation, All Rights Reserved
  * written by Walter Bright
  * https://www.digitalmars.com
  * Distributed under the Boost Software License, Version 1.0.
@@ -53,6 +53,8 @@ struct CTFloat
 #if IN_LLVM
     static real_t rint(real_t x);
     static real_t nearbyint(real_t x);
+    static int64_t llround(real_t x);
+    static int64_t llrint(real_t x);
 
     // implemented in gen/ctfloat.cpp
     static void toAPFloat(real_t src, llvm::APFloat &dst);

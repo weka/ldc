@@ -39,13 +39,8 @@ struct TempDisableDiscardValueNames {
 /// Note: don't add function _parameter_ attributes
 void copyFnAttributes(llvm::Function *wannabe, llvm::Function *idol) {
   auto attrSet = idol->getAttributes();
-#if LDC_LLVM_VER >= 1400
   auto fnAttrSet = attrSet.getFnAttrs();
   wannabe->addFnAttrs(llvm::AttrBuilder(getGlobalContext(), fnAttrSet));
-#else
-  auto fnAttrSet = attrSet.getFnAttributes();
-  wannabe->addAttributes(LLAttributeList::FunctionIndex, fnAttrSet);
-#endif
 }
 
 llvm::StringRef exprToString(StringExp *strexp) {
@@ -106,7 +101,7 @@ void DtoCheckInlineIRPragma(Identifier *ident, Dsymbol *s) {
   }
 }
 
-DValue *DtoInlineIRExpr(const Loc &loc, FuncDeclaration *fdecl,
+DValue *DtoInlineIRExpr(Loc loc, FuncDeclaration *fdecl,
                         Expressions *arguments, LLValue *sretPointer) {
   IF_LOG Logger::println("DtoInlineIRExpr @ %s", loc.toChars());
   LOG_SCOPE;
@@ -243,7 +238,7 @@ DValue *DtoInlineIRExpr(const Loc &loc, FuncDeclaration *fdecl,
     Type *type = fdecl->type->nextOf();
 
     if (sretPointer) {
-      DtoStore(rv, DtoBitCast(sretPointer, getPtrToType(rv->getType())));
+      DtoStore(rv, sretPointer);
       return new DLValue(type, sretPointer);
     }
 

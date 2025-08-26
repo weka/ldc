@@ -2,6 +2,24 @@
  * This module contains UDA's (User Defined Attributes) either used in
  * the runtime or special UDA's recognized by compiler.
  *
+ * $(SCRIPT inhibitQuickIndex = 1;)
+ * $(BOOKTABLE Cheat Sheet,
+ * $(THEAD Attribute Name, Linkage, Description)
+ * $(TROW $(LREF gnuAbiTag), C++,
+ *         Declares an ABI tag on a C++ symbol.)
+ * $(TROW $(LREF mustuse),,
+ *          Ensures that values of a struct or union type are not discarded.)
+ * $(TROW $(LREF optional), Objective-C,
+ *         Makes an Objective-C interface method optional.)
+ * $(TROW $(LREF selector), Objective-C,
+ *          Attaches an Objective-C selector to a method.)
+ * $(TROW $(LREF standalone),,
+ *          Marks a shared module constructor as not depending on any
+ *          other module constructor being run first.)
+ * $(TROW $(LREF weak),,
+ *         Specifies that a global symbol should be emitted with weak linkage.)
+ * )
+ *
  * Copyright: Copyright Jacob Carlborg 2015.
  * License:   $(LINK2 http://www.boost.org/LICENSE_1_0.txt, Boost License 1.0)
  * Authors:   Jacob Carlborg
@@ -25,6 +43,7 @@ version (D_ObjectiveC)
 {
     version = UdaOptional;
     version = UdaSelector;
+    version = UdaSwift;
 }
 
 version (Posix)
@@ -35,6 +54,7 @@ version (CoreDdoc)
     version = UdaGNUAbiTag;
     version = UdaOptional;
     version = UdaSelector;
+    version = UdaSwift;
 }
 
 /**
@@ -167,6 +187,16 @@ version (UdaSelector) struct selector
  */
 version (UdaOptional)
     enum optional;
+
+
+/**
+ * Use this attribute to indicate that a Objective-C class is a Swift stub class.
+ * 
+ * This is only allowed on classes, and classes marked as swift Objective-C classes
+ * cannot be subclassed.
+ */
+version (UdaSwift)
+    enum swift;
 
 /**
  * Use this attribute to declare an ABI tag on a C++ symbol.

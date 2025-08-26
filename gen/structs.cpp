@@ -33,7 +33,7 @@
 
 void DtoResolveStruct(StructDeclaration *sd) { DtoResolveStruct(sd, sd->loc); }
 
-void DtoResolveStruct(StructDeclaration *sd, const Loc &callerLoc) {
+void DtoResolveStruct(StructDeclaration *sd, Loc callerLoc) {
   // Make sure to resolve each struct type exactly once.
   if (sd->ir->isResolved()) {
     return;
@@ -152,7 +152,6 @@ LLValue *DtoUnpaddedStruct(Type *dty, LLValue *v) {
       fieldval = DtoUnpaddedStruct(fields[i]->type, fieldptr);
     } else {
       assert(!fields[i]->isBitFieldDeclaration());
-      fieldptr = DtoBitCast(fieldptr, DtoPtrToType(fields[i]->type));
       fieldval = DtoLoad(DtoType(fields[i]->type), fieldptr);
     }
     newval = DtoInsertValue(newval, fieldval, i);
@@ -174,7 +173,6 @@ void DtoPaddedStruct(Type *dty, LLValue *v, LLValue *lval) {
       DtoPaddedStruct(fields[i]->type, fieldval, fieldptr);
     } else {
       assert(!fields[i]->isBitFieldDeclaration());
-      fieldptr = DtoBitCast(fieldptr, DtoPtrToType(fields[i]->type));
       DtoStoreZextI8(fieldval, fieldptr);
     }
   }

@@ -73,7 +73,7 @@ FlattenedFields visitStructFields(Type *ty, unsigned baseOffset) {
     result.length = 2;
     break;
   default:
-    if (ty->toBasetype()->size() > 8) {
+    if (size(ty->toBasetype()) > 8) {
       // field larger than XLEN and FLEN
       result.length = -1;
       break;
@@ -93,8 +93,8 @@ bool requireHardfloatRewrite(Type *ty) {
   if (result.length <= 0)
     return false;
   if (result.length == 1)
-    return result.fields[0].ty->isfloating();
-  return result.fields[0].ty->isfloating() || result.fields[1].ty->isfloating();
+    return result.fields[0].ty->isFloating();
+  return result.fields[0].ty->isFloating() || result.fields[1].ty->isFloating();
 }
 
 struct HardfloatRewrite : ABIRewrite {
@@ -110,9 +110,8 @@ struct HardfloatRewrite : ABIRewrite {
         DtoRawAlloca(asType, alignment, ".HardfloatRewrite_arg_storage");
     for (unsigned i = 0; i < (unsigned)flat.length; ++i) {
       DtoMemCpy(DtoGEP(asType, buffer, 0, i),
-                DtoGEP1(getI8Type(), DtoBitCast(address, getVoidPtrType()),
-                        flat.fields[i].offset),
-                DtoConstSize_t(flat.fields[i].ty->size()));
+                DtoGEP1(getI8Type(), address, flat.fields[i].offset),
+                DtoConstSize_t(size(flat.fields[i].ty)));
     }
     return DtoLoad(asType, buffer, ".HardfloatRewrite_arg");
   }
@@ -126,10 +125,9 @@ struct HardfloatRewrite : ABIRewrite {
     LLValue *ret = DtoRawAlloca(DtoType(dty), alignment,
                                 ".HardfloatRewrite_param_storage");
     for (unsigned i = 0; i < (unsigned)flat.length; ++i) {
-      DtoMemCpy(DtoGEP1(getI8Type(), DtoBitCast(ret, getVoidPtrType()),
-                        flat.fields[i].offset),
+      DtoMemCpy(DtoGEP1(getI8Type(), ret, flat.fields[i].offset),
                 DtoGEP(asType, buffer, 0, i),
-                DtoConstSize_t(flat.fields[i].ty->size()));
+                DtoConstSize_t(size(flat.fields[i].ty)));
     }
     return ret;
   }
@@ -141,10 +139,10 @@ struct HardfloatRewrite : ABIRewrite {
     assert(flat.length == 2);
     LLType *t[2];
     for (unsigned i = 0; i < 2; ++i) {
-      t[i] = flat.fields[i].ty->isfloating()
+      t[i] = flat.fields[i].ty->isFloating()
                  ? DtoType(flat.fields[i].ty)
                  : LLIntegerType::get(gIR->context(),
-                                      flat.fields[i].ty->size() * 8);
+                                      size(flat.fields[i].ty) * 8);
     }
     return LLStructType::get(gIR->context(), {t[0], t[1]}, false);
   }
@@ -160,56 +158,47 @@ private:
   IntegerRewrite integerRewrite;
 
 public:
+  llvm::UWTableKind defaultUnwindTableKind() override {
+    return global.params.targetTriple->isOSLinux() ? llvm::UWTableKind::Async
+                                                   : llvm::UWTableKind::None;
+  }
+
   Type *vaListType() override {
     // va_list is void*
     return pointerTo(Type::tvoid);
   }
   bool returnInArg(TypeFunction *tf, bool) override {
-    if (tf->isref()) {
-      return false;
-    }
     Type *rt = tf->next->toBasetype();
-    if (!rt->size())
-      return false;
-    if (!isPOD(rt))
-      return true;
-    return rt->size() > 16;
+    return !isPOD(rt) || size(rt) > 16;
   }
   bool passByVal(TypeFunction *, Type *t) override {
-    if (!t->size())
-      return false;
-    if (t->toBasetype()->ty == TY::Tcomplex80) {
+    t = t->toBasetype();
+    if (t->ty == TY::Tcomplex80) {
       // rewrite it later to bypass the RVal problem
       return false;
     }
-    return t->size() > 16;
+    return isPOD(t) && size(t) > 16;
   }
-  void rewriteFunctionType(IrFuncTy &fty) override {
-    if (!fty.ret->byref) {
-      if (!skipReturnValueRewrite(fty)) {
-        if (!fty.ret->byref && isPOD(fty.ret->type) &&
-            requireHardfloatRewrite(fty.ret->type)) {
-          // rewrite here because we should not apply this to variadic arguments
-          hardfloatRewrite.applyTo(*fty.ret);
-        } else {
-          rewriteArgument(fty, *fty.ret);
-        }
-      }
-    }
 
-    for (auto arg : fty.args) {
-      if (!arg->byref && isPOD(arg->type) &&
-          requireHardfloatRewrite(arg->type)) {
-        // rewrite here because we should not apply this to variadic arguments
-        hardfloatRewrite.applyTo(*arg);
-      } else {
-        rewriteArgument(fty, *arg);
-      }
+  void rewriteVarargs(IrFuncTy &fty,
+                      std::vector<IrFuncTyArg *> &args) override {
+    for (auto arg : args) {
+      if (!arg->byref)
+        rewriteArgument(fty, *arg, /*isVararg=*/true);
     }
   }
 
   void rewriteArgument(IrFuncTy &fty, IrFuncTyArg &arg) override {
-    if (arg.byref) {
+    rewriteArgument(fty, arg, /*isVararg=*/false);
+  }
+
+  void rewriteArgument(IrFuncTy &fty, IrFuncTyArg &arg, bool isVararg) {
+    TargetABI::rewriteArgument(fty, arg);
+    if (arg.rewrite)
+      return;
+
+    if (!isVararg && requireHardfloatRewrite(arg.type)) {
+      hardfloatRewrite.applyTo(arg);
       return;
     }
 
@@ -220,14 +209,8 @@ public:
       return;
     }
 
-    if (!isPOD(arg.type)) {
-      // non-PODs should be passed in memory
-      indirectByvalRewrite.applyTo(arg);
-      return;
-    }
-
-    if (isAggregate(ty) && ty->size() && ty->size() <= 16) {
-      if (ty->size() > 8 && DtoAlignment(ty) < 16) {
+    if (isAggregate(ty) && size(ty) && size(ty) <= 16) {
+      if (size(ty) > 8 && DtoAlignment(ty) < 16) {
         // pass the aggregate as {int64, int64} to avoid wrong alignment
         integer2Rewrite.applyToIfNotObsolete(arg);
       } else {

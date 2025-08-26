@@ -42,7 +42,7 @@ void addMscrtLibs(bool useInternalToolchain, std::vector<std::string> &args) {
 #if LDC_LLVM_VER >= 1700
 #define contains_lower contains_insensitive
 #define endswith_lower ends_with_insensitive
-#elif LDC_LLVM_VER >= 1300
+#else
 #define contains_lower contains_insensitive
 #define endswith_lower endswith_insensitive
 #endif
@@ -73,9 +73,18 @@ void addLibIfFound(std::vector<std::string> &args, const llvm::Twine &name) {
   }
 }
 
-void addSanitizerLibs(std::vector<std::string> &args) {
+void addSanitizerLibs(bool useInternalToolchain,
+                      std::vector<std::string> &args) {
   if (opts::isSanitizerEnabled(opts::AddressSanitizer)) {
     args.push_back("ldc_rt.asan.lib");
+#if LDC_LLVM_VER >= 2000 // extra library since LLVM 20
+    const bool linkStaticCRT =
+        getMscrtLibName(&useInternalToolchain).contains_lower("libcmt");
+    args.push_back((llvm::Twine("ldc_rt.asan_") +
+                    (linkStaticCRT ? "static" : "dynamic") +
+                    "_runtime_thunk.lib")
+                       .str());
+#endif
   } else if (opts::isSanitizerEnabled(opts::LeakSanitizer)) {
     // If ASan is enabled, it includes LSan. So only add LSan link flags if ASan is _not_ enabled already.
     args.push_back("ldc_rt.lsan.lib");
@@ -187,7 +196,7 @@ int linkObjToBinaryMSVC(llvm::StringRef outputPath,
 
   // LLVM compiler-rt libs
   addLibIfFound(args, "ldc_rt.builtins.lib");
-  addSanitizerLibs(args);
+  addSanitizerLibs(useInternalToolchain, args);
   if (opts::isInstrumentingForPGO()) {
     args.push_back("ldc_rt.profile.lib");
     // it depends on ws2_32 for symbol `gethostname`
@@ -278,18 +287,8 @@ int linkObjToBinaryMSVC(llvm::StringRef outputPath,
         getFullArgs("lld-link", args, global.params.v.verbose);
 
     const bool canExitEarly = false;
-    const bool success = lld::coff::link(fullArgs
-#if LDC_LLVM_VER < 1400
-                                         ,
-                                         canExitEarly
-#endif
-                                         ,
-                                         llvm::outs(), llvm::errs()
-#if LDC_LLVM_VER >= 1400
-                                                           ,
-                                         canExitEarly, false
-#endif
-    );
+    const bool success = lld::coff::link(fullArgs, llvm::outs(), llvm::errs(),
+                                         canExitEarly, false);
 
     if (!success)
       error(Loc(), "linking with LLD failed");
@@ -302,8 +301,11 @@ int linkObjToBinaryMSVC(llvm::StringRef outputPath,
   std::string linker = opts::linker;
   if (linker.empty()) {
 #ifdef _WIN32
-    // default to lld-link.exe for LTO
-    linker = opts::isUsingLTO() ? "lld-link.exe" : "link.exe";
+    // Default to lld-link.exe for LTO, otherwise Microsoft's link.exe.
+    // Try not to accidentally use a GNU link.exe (if in PATH before the MSVC
+    // bin dir).
+    linker = opts::isUsingLTO() ? "lld-link.exe"
+                                : msvcEnv.tryResolveToolPath("link.exe");
 #else
     linker = "lld-link";
 #endif

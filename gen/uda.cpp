@@ -92,7 +92,7 @@ StructLiteralExp *getMagicAttribute(Dsymbol *sym, const Identifier *id,
     return nullptr;
 
   // Loop over all UDAs and early return the expression if a match was found.
-  Expressions *attrs = sym->userAttribDecl()->getAttributes();
+  Expressions *attrs = getAttributes(sym->userAttribDecl());
   expandTuples(attrs);
   for (auto attr : *attrs) {
     if (auto sle = attr->isStructLiteralExp())
@@ -113,7 +113,7 @@ StructLiteralExp *getLastMagicAttribute(Dsymbol *sym, const Identifier *id,
 
   // Loop over all UDAs and find the last match
   StructLiteralExp *lastMatch = nullptr;
-  Expressions *attrs = sym->userAttribDecl()->getAttributes();
+  Expressions *attrs = getAttributes(sym->userAttribDecl());
   expandTuples(attrs);
   for (auto attr : *attrs) {
     if (auto sle = attr->isStructLiteralExp())
@@ -134,7 +134,7 @@ void callForEachMagicAttribute(Dsymbol &sym, const Identifier *id,
     return;
 
   // Loop over all UDAs and call `action` if a match was found.
-  Expressions *attrs = sym.userAttribDecl()->getAttributes();
+  Expressions *attrs = getAttributes(sym.userAttribDecl());
   expandTuples(attrs);
   for (auto attr : *attrs) {
     if (auto sle = attr->isStructLiteralExp())
@@ -206,11 +206,7 @@ void applyAttrAllocSize(StructLiteralExp *sle, IrFunction *irFunc) {
   const auto llvmSizeIdx = sizeArgIdx + offset;
   const auto llvmNumIdx = numArgIdx + offset;
 
-#if LDC_LLVM_VER >= 1400
   llvm::AttrBuilder builder(getGlobalContext());
-#else
-  llvm::AttrBuilder builder;
-#endif
   if (numArgIdx >= 0) {
     builder.addAllocSizeAttr(llvmSizeIdx, llvmNumIdx);
   } else {
@@ -223,11 +219,7 @@ void applyAttrAllocSize(StructLiteralExp *sle, IrFunction *irFunc) {
 
   llvm::Function *func = irFunc->getLLVMFunc();
 
-#if LDC_LLVM_VER >= 1400
   func->addFnAttrs(builder);
-#else
-  func->addAttributes(LLAttributeList::FunctionIndex, builder);
-#endif
 }
 
 // @llvmAttr("key", "value")
@@ -417,9 +409,7 @@ bool parseCallingConvention(llvm::StringRef name,
           .Case("preserve_most", llvm::CallingConv::PreserveMost)
           .Case("preserve_all", llvm::CallingConv::PreserveAll)
           .Case("swiftcall", llvm::CallingConv::Swift)
-#if LDC_LLVM_VER >= 1300
           .Case("swiftasynccall", llvm::CallingConv::SwiftTail)
-#endif
 
           // Names recognized in LLVM IR (see LLVM's
           // LLParser::parseOptionalCallingConv):
@@ -458,9 +448,7 @@ bool parseCallingConvention(llvm::StringRef name,
           .Case("preserve_allcc", llvm::CallingConv::PreserveAll)
           .Case("ghccc", llvm::CallingConv::GHC)
           .Case("swiftcc", llvm::CallingConv::Swift)
-#if LDC_LLVM_VER >= 1300
           .Case("swifttailcc", llvm::CallingConv::SwiftTail)
-#endif
           .Case("x86_intrcc", llvm::CallingConv::X86_INTR)
 #if LDC_LLVM_VER >= 1700
           .Case("hhvmcc", llvm::CallingConv::DUMMY_HHVM)
@@ -471,9 +459,7 @@ bool parseCallingConvention(llvm::StringRef name,
 #endif
           .Case("cxx_fast_tlscc", llvm::CallingConv::CXX_FAST_TLS)
           .Case("amdgpu_vs", llvm::CallingConv::AMDGPU_VS)
-#if LDC_LLVM_VER >= 1200
           .Case("amdgpu_gfx", llvm::CallingConv::AMDGPU_Gfx)
-#endif
           .Case("amdgpu_ls", llvm::CallingConv::AMDGPU_LS)
           .Case("amdgpu_hs", llvm::CallingConv::AMDGPU_HS)
           .Case("amdgpu_es", llvm::CallingConv::AMDGPU_ES)
@@ -498,7 +484,7 @@ void applyVarDeclUDAs(VarDeclaration *decl, llvm::GlobalVariable *gvar) {
   if (!decl->userAttribDecl())
     return;
 
-  Expressions *attrs = decl->userAttribDecl()->getAttributes();
+  Expressions *attrs = getAttributes(decl->userAttribDecl());
   expandTuples(attrs);
   for (auto &attr : *attrs) {
     auto sle = getLdcAttributesStruct(attr);
@@ -541,7 +527,7 @@ void applyFuncDeclUDAs(FuncDeclaration *decl, IrFunction *irFunc) {
     llvm::Function *func = irFunc->getLLVMFunc();
     assert(func);
 
-    Expressions *attrs = decl->userAttribDecl()->getAttributes();
+    Expressions *attrs = getAttributes(decl->userAttribDecl());
     expandTuples(attrs);
     for (auto &attr : *attrs) {
       auto sle = getLdcAttributesStruct(attr);
@@ -552,17 +538,9 @@ void applyFuncDeclUDAs(FuncDeclaration *decl, IrFunction *irFunc) {
       if (ident == Id::udaAllocSize) {
         applyAttrAllocSize(sle, irFunc);
       } else if (ident == Id::udaLLVMAttr) {
-#if LDC_LLVM_VER >= 1400
         llvm::AttrBuilder attrs(getGlobalContext());
-#else
-        llvm::AttrBuilder attrs;
-#endif
         applyAttrLLVMAttr(sle, attrs);
-#if LDC_LLVM_VER >= 1400
         func->addFnAttrs(attrs);
-#else
-        func->addAttributes(LLAttributeList::FunctionIndex, attrs);
-#endif
       } else if (ident == Id::udaHidden) {
         if (!decl->isExport()) // export visibility is stronger
           func->setVisibility(LLGlobalValue::HiddenVisibility);
@@ -609,7 +587,7 @@ void applyFuncDeclUDAs(FuncDeclaration *decl, IrFunction *irFunc) {
     if (!param->userAttribDecl)
       continue;
 
-    Expressions *attrs = param->userAttribDecl->getAttributes();
+    Expressions *attrs = getAttributes(param->userAttribDecl);
     expandTuples(attrs);
     for (auto &attr : *attrs) {
       auto sle = getLdcAttributesStruct(attr);

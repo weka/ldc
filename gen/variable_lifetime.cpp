@@ -16,6 +16,7 @@
 
 #include "driver/cl_options.h"
 #include "gen/irstate.h"
+#include "gen/llvm.h"
 
 #include <vector>
 #include <utility>
@@ -30,8 +31,8 @@ static llvm::cl::opt<bool> fEmitLocalVarLifetime(
 LocalVariableLifetimeAnnotator::LocalVariableLifetimeAnnotator(IRState &irs)
     : irs(irs) {
   allocaType =
-      llvm::Type::getInt8Ty(irs.context())
-          ->getPointerTo(irs.module.getDataLayout().getAllocaAddrSpace());
+      LLPointerType::get(LLType::getInt8Ty(irs.context()),
+                         irs.module.getDataLayout().getAllocaAddrSpace());
 }
 
 void LocalVariableLifetimeAnnotator::pushScope() { scopes.emplace_back(); }
@@ -51,7 +52,6 @@ void LocalVariableLifetimeAnnotator::addLocalVariable(llvm::Value *address,
   scopes.back().variables.emplace_back(size, address);
 
   // Emit lifetime start
-  address = irs.ir->CreateBitCast(address, allocaType);
   irs.CreateCallOrInvoke(getLLVMLifetimeStartFn(), {size, address}, "",
                          true /*nothrow*/);
 }
@@ -65,7 +65,6 @@ void LocalVariableLifetimeAnnotator::popScope() {
     auto size = var.first;
     auto address = var.second;
 
-    address = irs.ir->CreateBitCast(address, allocaType);
     assert(address);
 
     irs.CreateCallOrInvoke(getLLVMLifetimeEndFn(), {size, address}, "",

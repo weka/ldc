@@ -2343,7 +2343,7 @@ struct AsmProcessor {
     if (sc->func->isNaked()) {
       switch (type) {
       case Arg_Integer:
-        if (e->type->isunsigned()) {
+        if (e->type->isUnsigned()) {
           insnTemplate << "$" << e->toUInteger();
         } else {
 #ifndef ASM_X86_64
@@ -3232,7 +3232,7 @@ struct AsmProcessor {
           operand->hasNumber = 1;
         }
       } else {
-        if (v && v->type->isscalar()) {
+        if (v && v->type->isScalar()) {
           // DMD doesn't check Tcomplex*, and counts Tcomplex32 as
           // Tfloat64
           TY ty = v->type->toBasetype()->ty;
@@ -3240,7 +3240,7 @@ struct AsmProcessor {
               (ty == TY::Tfloat80 || ty == TY::Timaginary80) &&
                       !global.params.targetTriple->isWindowsMSVCEnvironment()
                   ? Extended_Ptr
-                  : static_cast<PtrType>(v->type->size(Loc()));
+                  : static_cast<PtrType>(dmd::size(v->type));
         }
 
         if (!operand->symbolDisplacement.length) {
@@ -3742,13 +3742,11 @@ struct AsmProcessor {
       if (e->op == EXP::identifier) {
         for (int i = 0; i < N_Regs; i++) {
           const auto reg = regInfo[i].ident;
-          const auto matchesRegister = stmt->caseSensitive ?
-            ident == reg :
-#if LDC_LLVM_VER >= 1300
-            reg && llvm::StringRef(ident->toChars()).equals_insensitive(reg->toChars());
-#else
-            reg && llvm::StringRef(ident->toChars()).equals_lower(reg->toChars());
-#endif
+          const auto matchesRegister =
+              stmt->caseSensitive
+                  ? ident == reg
+                  : reg && llvm::StringRef(ident->toChars())
+                               .equals_insensitive(reg->toChars());
           if (matchesRegister) {
             if (static_cast<Reg>(i) == Reg_ST &&
                 token->value == TOK::leftParenthesis) {

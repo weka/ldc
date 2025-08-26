@@ -47,19 +47,10 @@ bool DtoIsInMemoryOnly(Type *type) {
   return (t == TY::Tstruct || t == TY::Tsarray);
 }
 
-bool DtoIsReturnInArg(CallExp *ce) {
-  Type *t = ce->e1->type->toBasetype();
-  if (t->ty == TY::Tfunction && (!ce->f || !DtoIsIntrinsic(ce->f))) {
-    return gABI->returnInArg(static_cast<TypeFunction *>(t),
-                             ce->f && ce->f->needThis());
-  }
-  return false;
-}
-
 void DtoAddExtendAttr(Type *type, llvm::AttrBuilder &attrs) {
   type = type->toBasetype();
-  if (type->isintegral() && type->ty != TY::Tvector && type->size() <= 2) {
-    attrs.addAttribute(type->isunsigned() ? LLAttribute::ZExt
+  if (type->isIntegral() && type->ty != TY::Tvector && size(type) <= 2) {
+    attrs.addAttribute(type->isUnsigned() ? LLAttribute::ZExt
                                           : LLAttribute::SExt);
   }
 }
@@ -148,7 +139,7 @@ LLType *DtoType(Type *t) {
        */
       IF_LOG {
         Logger::println("Aggregate with multiple Types detected: %s (%s)",
-                        ad->toPrettyChars(), ad->locToChars());
+                        ad->toPrettyChars(), ad->loc.toChars());
         LOG_SCOPE;
         Logger::println("Existing deco:    %s", adType->deco);
         Logger::println("Mismatching deco: %s", t->deco);
@@ -187,7 +178,7 @@ LLType *DtoType(Type *t) {
 
   // associative arrays
   case TY::Taarray:
-    return getVoidPtrType();
+    return getOpaquePtrType();
 
   case TY::Tvector:
     return IrTypeVector::get(t)->getLLType();
@@ -199,8 +190,6 @@ LLType *DtoType(Type *t) {
 }
 
 LLType *DtoMemType(Type *t) { return i1ToI8(voidToI8(DtoType(t))); }
-
-LLPointerType *DtoPtrToType(Type *t) { return DtoMemType(t)->getPointerTo(); }
 
 LLType *voidToI8(LLType *t) {
   return t->isVoidTy() ? LLType::getInt8Ty(t->getContext()) : t;
@@ -419,10 +408,6 @@ LLValue *DtoGEP1i64(LLType *pointeeTy, LLValue *ptr, uint64_t i0, const char *na
 ////////////////////////////////////////////////////////////////////////////////
 
 void DtoMemSet(LLValue *dst, LLValue *val, LLValue *nbytes, unsigned align) {
-  LLType *VoidPtrTy = getVoidPtrType();
-
-  dst = DtoBitCast(dst, VoidPtrTy);
-
   gIR->ir->CreateMemSet(dst, val, nbytes, llvm::MaybeAlign(align),
                         false /*isVolatile*/);
 }
@@ -441,11 +426,6 @@ void DtoMemSetZero(LLType *type, LLValue *dst, unsigned align) {
 ////////////////////////////////////////////////////////////////////////////////
 
 void DtoMemCpy(LLValue *dst, LLValue *src, LLValue *nbytes, unsigned align) {
-  LLType *VoidPtrTy = getVoidPtrType();
-
-  dst = DtoBitCast(dst, VoidPtrTy);
-  src = DtoBitCast(src, VoidPtrTy);
-
   auto A = llvm::MaybeAlign(align);
   gIR->ir->CreateMemCpy(dst, A, src, A, nbytes, false /*isVolatile*/);
 }
@@ -461,18 +441,15 @@ void DtoMemCpy(LLType *type, LLValue *dst, LLValue *src, bool withPadding, unsig
 LLValue *DtoMemCmp(LLValue *lhs, LLValue *rhs, LLValue *nbytes) {
   // int memcmp ( const void * ptr1, const void * ptr2, size_t num );
 
-  LLType *VoidPtrTy = getVoidPtrType();
   LLFunction *fn = gIR->module.getFunction("memcmp");
   if (!fn) {
-    LLType *Tys[] = {VoidPtrTy, VoidPtrTy, DtoSize_t()};
+    LLType *ptrTy = getOpaquePtrType();
+    LLType *Tys[] = {ptrTy, ptrTy, DtoSize_t()};
     LLFunctionType *fty =
         LLFunctionType::get(LLType::getInt32Ty(gIR->context()), Tys, false);
     fn = LLFunction::Create(fty, LLGlobalValue::ExternalLinkage, "memcmp",
                             &gIR->module);
   }
-
-  lhs = DtoBitCast(lhs, VoidPtrTy);
-  rhs = DtoBitCast(rhs, VoidPtrTy);
 
   return gIR->ir->CreateCall(fn, {lhs, rhs, nbytes});
 }
@@ -527,13 +504,13 @@ LLConstant *DtoConstFP(Type *t, const real_t value) {
 LLConstant *DtoConstCString(const char *str) {
   llvm::StringRef s(str ? str : "");
   LLGlobalVariable *gvar = gIR->getCachedStringLiteral(s);
-  return DtoGEP(gvar->getValueType(), gvar, 0u, 0u);
+  return gvar;
 }
 
 LLConstant *DtoConstString(const char *str) {
   LLConstant *cString = DtoConstCString(str);
   LLConstant *length = DtoConstSize_t(str ? strlen(str) : 0);
-  return DtoConstSlice(length, cString, arrayOf(Type::tchar));
+  return DtoConstSlice(length, cString);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -607,37 +584,7 @@ LLType *stripAddrSpaces(LLType *t)
   if (!pt)
     return t;
 
-#if LDC_LLVM_VER >= 1700
-  return getVoidPtrType();
-#elif LDC_LLVM_VER >= 1400
-  if (pt->isOpaque())
-    return getVoidPtrType();
-  else {
-    int indirections = 0;
-    while (t->isPointerTy()) {
-      indirections++;
-// Disable [[deprecated]] warning on getPointerElementType. We solved the
-// deprecation for versions >= LLVM 16 above (8 lines up).
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-      t = t->getPointerElementType();
-#pragma GCC diagnostic pop
-    }
-    while (indirections-- != 0)
-      t = t->getPointerTo(0);
-  }
-  return t;
-#else
-  int indirections = 0;
-  while (t->isPointerTy()) {
-    indirections++;
-    t = t->getPointerElementType();
-  }
-  while (indirections-- != 0)
-    t = t->getPointerTo(0);
-
-  return t;
-#endif
+  return getOpaquePtrType();
 }
 
 LLValue *DtoBitCast(LLValue *v, LLType *t, const llvm::Twine &name) {
@@ -741,28 +688,133 @@ llvm::GlobalVariable *isaGlobalVar(LLValue *v) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+LLGlobalVariable *makeGlobal(LLStringRef name, LLType* type, LLStringRef section, bool extern_, bool externInit) {
+  if (!type)
+    type = getOpaquePtrType();
+
+  auto var = new LLGlobalVariable(
+    gIR->module,
+    type,
+    false,
+    extern_ ? LLGlobalValue::ExternalLinkage : LLGlobalValue::PrivateLinkage,
+    nullptr,
+    name,
+    nullptr,
+    LLGlobalValue::NotThreadLocal,
+    0u,
+    externInit
+  );
+
+  if (!section.empty())
+    var->setSection(section);
+    
+  return var;
+}
+
+LLGlobalVariable *makeGlobalWithBytes(LLStringRef name, LLConstantList packedContents, LLStructType* type, bool extern_, bool externInit) {
+  if (packedContents.empty()) {
+    packedContents.push_back(getNullPtr());
+  }
+
+  // Handle initializer.
+  LLConstant *init;
+  if (type) {
+    init = LLConstantStruct::get(
+      type,
+      packedContents
+    );
+  } else {
+    init = LLConstantStruct::getAnon(
+      packedContents,
+      true
+    );
+    type = reinterpret_cast<LLStructType *>(init->getType());
+  }
+
+  auto var = new LLGlobalVariable(
+    gIR->module,
+    type,
+    false,
+    extern_ ? LLGlobalValue::ExternalLinkage : LLGlobalValue::PrivateLinkage,
+    init,
+    name,
+    nullptr,
+    LLGlobalValue::NotThreadLocal,
+    0u,
+    externInit
+  );
+  
+  return var;
+}
+
+LLGlobalVariable *makeGlobalRef(LLGlobalVariable *to, LLStringRef name, LLStringRef section, bool extern_, bool externInit) {
+  auto var = makeGlobal(name, to->getType(), section, extern_, externInit);
+  var->setInitializer(to);
+  return var;
+}
+
+LLGlobalVariable *makeGlobalStr(LLStringRef text, LLStringRef name, LLStringRef section, bool extern_, bool externInit) {
+  auto init = llvm::ConstantDataArray::getString(gIR->context(), text);
+  auto var = new LLGlobalVariable(
+    gIR->module,
+    init->getType(),
+    false,
+    extern_ ? LLGlobalValue::ExternalLinkage : LLGlobalValue::PrivateLinkage,
+    init,
+    name,
+    nullptr,
+    LLGlobalValue::NotThreadLocal,
+    0u,
+    externInit
+  );
+
+  if (!section.empty())
+    var->setSection(section);
+  return var;
+}
+
+LLGlobalVariable *getOrCreate(LLStringRef name, LLType* type, LLStringRef section, bool extInitializer) {
+  auto global = gIR->module.getGlobalVariable(name, true);
+  if (global)
+    return global;
+
+  return makeGlobal(name, type, section, true, extInitializer);
+}
+
+LLGlobalVariable *getOrCreateWeak(LLStringRef name, LLType* type, LLStringRef section, bool extInitializer) {
+  auto global = gIR->module.getGlobalVariable(name, true);
+  if (global)
+    return global;
+
+  global = makeGlobal(name, type, section, false, extInitializer);
+  global->setLinkage(llvm::GlobalValue::LinkageTypes::WeakAnyLinkage);
+  global->setVisibility(llvm::GlobalValue::VisibilityTypes::HiddenVisibility);
+  return global;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 LLType *getI8Type() { return LLType::getInt8Ty(gIR->context()); }
 
-LLPointerType *getPtrToType(LLType *t) {
-  if (t == LLType::getVoidTy(gIR->context()))
-    t = LLType::getInt8Ty(gIR->context());
-  return t->getPointerTo();
+LLType *getI16Type() { return LLType::getInt16Ty(gIR->context()); }
+
+LLType *getI32Type() { return LLType::getInt32Ty(gIR->context()); }
+
+LLType *getI64Type() { return LLType::getInt64Ty(gIR->context()); }
+
+LLType *getSizeTType() { return DtoSize_t(); }
+
+LLPointerType *getOpaquePtrType(unsigned addressSpace) {
+  return LLPointerType::get(gIR->context(), addressSpace);
 }
 
-LLPointerType *getVoidPtrType() {
-  return getVoidPtrType(gIR->context());
-}
-
-LLPointerType *getVoidPtrType(llvm::LLVMContext &C) {
-  return LLType::getInt8Ty(C)->getPointerTo();
-}
-
-llvm::ConstantPointerNull *getNullPtr(LLType *t) {
-  LLPointerType *pt = llvm::cast<LLPointerType>(t);
-  return llvm::ConstantPointerNull::get(pt);
+llvm::ConstantPointerNull *getNullPtr() {
+  return llvm::ConstantPointerNull::get(getOpaquePtrType());
 }
 
 LLConstant *getNullValue(LLType *t) { return LLConstant::getNullValue(t); }
+
+LLConstant *wrapNull(LLConstant *v) { return v ? v : getNullPtr(); }
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -771,6 +823,10 @@ size_t getTypeBitSize(LLType *t) { return gDataLayout->getTypeSizeInBits(t); }
 size_t getTypeStoreSize(LLType *t) { return gDataLayout->getTypeStoreSize(t); }
 
 size_t getTypeAllocSize(LLType *t) { return gDataLayout->getTypeAllocSize(t); }
+
+size_t getPointerSize() { return gDataLayout->getPointerSize(0); }
+
+size_t getPointerSizeInBits() { return gDataLayout->getPointerSizeInBits(0); }
 
 unsigned int getABITypeAlign(LLType *t) {
   return gDataLayout->getABITypeAlign(t).value();
@@ -783,16 +839,10 @@ LLStructType *DtoModuleReferenceType() {
     return gIR->moduleRefType;
   }
 
-  // this is a recursive type so start out with a struct without body
-  LLStructType *st = LLStructType::create(gIR->context(), "ModuleReference");
+  auto ptrType = getOpaquePtrType();
+  LLType *elems[] = {ptrType, ptrType};
+  auto st = LLStructType::get(gIR->context(), elems, "ModuleReference");
 
-  // add members
-  LLType *types[] = {getPtrToType(st), DtoPtrToType(getModuleInfoType())};
-
-  // resolve type
-  st->setBody(types);
-
-  // done
   gIR->moduleRefType = st;
   return st;
 }

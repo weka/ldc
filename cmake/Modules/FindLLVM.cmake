@@ -32,14 +32,12 @@
 # We also want an user-specified LLVM_ROOT_DIR to take precedence over the
 # system default locations such as /usr/local/bin. Executing find_program()
 # multiples times is the approach recommended in the docs.
-set(llvm_config_names llvm-config-18.1 llvm-config181 llvm-config-18
+set(llvm_config_names llvm-config-20.1 llvm-config201 llvm-config-20
+                      llvm-config-19.1 llvm-config191 llvm-config-19
+                      llvm-config-18.1 llvm-config181 llvm-config-18
                       llvm-config-17.0 llvm-config170 llvm-config-17
                       llvm-config-16.0 llvm-config160 llvm-config-16
                       llvm-config-15.0 llvm-config150 llvm-config-15
-                      llvm-config-14.0 llvm-config140 llvm-config-14
-                      llvm-config-13.0 llvm-config130 llvm-config-13
-                      llvm-config-12.0 llvm-config120 llvm-config-12
-                      llvm-config-11.0 llvm-config110 llvm-config-11
                       llvm-config)
 find_program(LLVM_CONFIG
     NAMES ${llvm_config_names}
@@ -50,15 +48,13 @@ if(APPLE)
     # extra fallbacks for MacPorts & Homebrew
     find_program(LLVM_CONFIG
         NAMES ${llvm_config_names}
-        PATHS /opt/local/libexec/llvm-18/bin /opt/local/libexec/llvm-17/bin
+        PATHS /opt/local/libexec/llvm-20/bin /opt/local/libexec/llvm-19/bin
+              /opt/local/libexec/llvm-18/bin /opt/local/libexec/llvm-17/bin
               /opt/local/libexec/llvm-16/bin /opt/local/libexec/llvm-15/bin
-              /opt/local/libexec/llvm-14/bin /opt/local/libexec/llvm-13/bin
-              /opt/local/libexec/llvm-12/bin /opt/local/libexec/llvm-11/bin
               /opt/local/libexec/llvm/bin
+              /usr/local/opt/llvm@20/bin /usr/local/opt/llvm@19/bin
               /usr/local/opt/llvm@18/bin /usr/local/opt/llvm@17/bin
               /usr/local/opt/llvm@16/bin /usr/local/opt/llvm@15/bin
-              /usr/local/opt/llvm@14/bin /usr/local/opt/llvm@13/bin
-              /usr/local/opt/llvm@12/bin /usr/local/opt/llvm@11/bin
               /usr/local/opt/llvm/bin
         NO_DEFAULT_PATH)
 endif()
@@ -85,9 +81,16 @@ else()
        if(LLVM_FIND_QUIETLY)
             set(_quiet_arg ERROR_QUIET)
         endif()
+        if(DEFINED LLVM_IS_SHARED)
+            if(LLVM_IS_SHARED)
+                set(_sharedstatic "--link-shared")
+            else()
+                set(_sharedstatic "--link-static")
+            endif()
+        endif()
         set(result_code)
         execute_process(
-            COMMAND ${LLVM_CONFIG} --${flag}
+            COMMAND ${LLVM_CONFIG} ${_sharedstatic} --${flag}
             RESULT_VARIABLE result_code
             OUTPUT_VARIABLE LLVM_${var}
             OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -105,9 +108,14 @@ else()
        if(LLVM_FIND_QUIETLY)
             set(_quiet_arg ERROR_QUIET)
         endif()
+        if (LLVM_IS_SHARED)
+            set(_sharedstatic "--link-shared")
+        else()
+            set(_sharedstatic "--link-static")
+        endif()
         set(result_code)
         execute_process(
-            COMMAND ${LLVM_CONFIG} --${flag} ${components}
+            COMMAND ${LLVM_CONFIG} ${_sharedstatic} --${flag} ${components}
             RESULT_VARIABLE result_code
             OUTPUT_VARIABLE tmplibs
             OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -121,34 +129,32 @@ else()
         endif()
     endmacro()
 
+    if (NOT DEFINED LLVM_IS_SHARED)
+        llvm_set(SHARED_MODE shared-mode)
+        if(LLVM_SHARED_MODE STREQUAL "shared")
+            set(LLVM_IS_SHARED ON)
+        else()
+            set(LLVM_IS_SHARED OFF)
+        endif()
+    endif()
+
     llvm_set(VERSION_STRING version)
     llvm_set(CXXFLAGS cxxflags)
     llvm_set(INCLUDE_DIRS includedir true)
     llvm_set(ROOT_DIR prefix true)
     llvm_set(ENABLE_ASSERTIONS assertion-mode)
+    llvm_set(HOST_TARGET host-target)
 
     # The LLVM version string _may_ contain a git/svn suffix, so match only the x.y.z part
     string(REGEX MATCH "^[0-9]+[.][0-9]+[.][0-9]+" LLVM_VERSION_BASE_STRING "${LLVM_VERSION_STRING}")
     string(REGEX REPLACE "([0-9]+).*" "\\1" LLVM_VERSION_MAJOR "${LLVM_VERSION_STRING}" )
     string(REGEX REPLACE "[0-9]+\\.([0-9]+).*[A-Za-z]*" "\\1" LLVM_VERSION_MINOR "${LLVM_VERSION_STRING}" )
 
-    llvm_set(SHARED_MODE shared-mode)
-    if(LLVM_SHARED_MODE STREQUAL "shared")
-        set(LLVM_IS_SHARED ON)
-    else()
-        set(LLVM_IS_SHARED OFF)
-    endif()
-
     llvm_set(LDFLAGS ldflags)
     llvm_set(SYSTEM_LIBS system-libs)
     string(REPLACE "\n" " " LLVM_LDFLAGS "${LLVM_LDFLAGS} ${LLVM_SYSTEM_LIBS}")
     if(APPLE) # unclear why/how this happens
         string(REPLACE "-llibxml2.tbd" "-lxml2" LLVM_LDFLAGS ${LLVM_LDFLAGS})
-    endif()
-
-    if(${LLVM_VERSION_MAJOR} LESS "15")
-        # Versions below 15.0 do not support component windowsdriver
-        list(REMOVE_ITEM LLVM_FIND_COMPONENTS "windowsdriver")
     endif()
 
     llvm_set(LIBRARY_DIRS libdir true)

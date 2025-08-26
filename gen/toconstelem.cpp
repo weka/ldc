@@ -79,8 +79,7 @@ public:
     }
 
     if (TypeInfoDeclaration *ti = e->var->isTypeInfoDeclaration()) {
-      result = DtoTypeInfoOf(e->loc, ti->tinfo, /*base=*/false);
-      result = DtoBitCast(result, DtoType(e->type));
+      result = DtoTypeInfoOf(e->loc, ti->tinfo);
       return;
     }
 
@@ -119,7 +118,7 @@ public:
     } else {
       assert(llvm::isa<LLIntegerType>(t));
       result = LLConstantInt::get(t, static_cast<uint64_t>(e->getInteger()),
-                                  !e->type->isunsigned());
+                                  !e->type->isUnsigned());
       assert(result);
       IF_LOG Logger::cout() << "value = " << *result << '\n';
     }
@@ -176,13 +175,11 @@ public:
     }
 
     llvm::GlobalVariable *gvar = p->getCachedStringLiteral(e);
-    LLConstant *arrptr = DtoGEP(gvar->getValueType(), gvar, 0u, 0u);
 
     if (t->ty == TY::Tpointer) {
-      result = DtoBitCast(arrptr, DtoType(t));
+      result = gvar;
     } else if (t->ty == TY::Tarray) {
-      LLConstant *clen = LLConstantInt::get(DtoSize_t(), e->len, false);
-      result = DtoConstSlice(clen, arrptr, e->type);
+      result = DtoConstSlice(DtoConstSize_t(e->len), gvar);
     } else {
       llvm_unreachable("Unknown type for StringExp.");
     }
@@ -193,7 +190,7 @@ public:
   // very similar to emitPointerOffset() in binops.cpp
   LLConstant *tryEmitPointerOffset(BinExp *e, bool negateOffset) {
     Type *t1b = e->e1->type->toBasetype();
-    if (t1b->ty != TY::Tpointer || !e->e2->type->isintegral())
+    if (t1b->ty != TY::Tpointer || !e->e2->type->isIntegral())
       return nullptr;
 
     Type *const pointeeType = t1b->nextOf();
@@ -202,7 +199,7 @@ public:
     const dinteger_t byteOffset = e->e2->toInteger();
 
     LLConstant *llResult = nullptr;
-    const auto pointeeSize = pointeeType->size(e->loc);
+    const auto pointeeSize = size(pointeeType, e->loc);
     if (pointeeSize && byteOffset % pointeeSize == 0) { // can do a nice GEP
       LLConstant *llOffset = DtoConstSize_t(byteOffset / pointeeSize);
       if (negateOffset)
@@ -210,7 +207,6 @@ public:
       llResult = llvm::ConstantExpr::getGetElementPtr(DtoMemType(pointeeType),
                                                       llBase, llOffset);
     } else { // need to cast base to i8*
-      llBase = DtoBitCast(llBase, getVoidPtrType());
       LLConstant *llOffset = DtoConstSize_t(byteOffset);
       if (negateOffset)
         llOffset = llvm::ConstantExpr::getNeg(llOffset);
@@ -218,7 +214,7 @@ public:
           llvm::ConstantExpr::getGetElementPtr(getI8Type(), llBase, llOffset);
     }
 
-    return DtoBitCast(llResult, DtoType(e->type));
+    return llResult;
   }
 
   void visit(AddExp *e) override {
@@ -290,11 +286,11 @@ public:
             StringExp *strexp = static_cast<StringExp*>(e1);
             size_t datalen = strexp->sz * strexp->len;
             Type* eltype = tb->nextOf()->toBasetype();
-            if (datalen % eltype->size() != 0) {
+            if (datalen % size(eltype) != 0) {
                 error("the sizes don't line up");
                 return e1->toConstElem(p);
             }
-            size_t arrlen = datalen / eltype->size();
+            size_t arrlen = datalen / size(eltype);
 #endif
       error(
           e->loc,
@@ -323,7 +319,7 @@ public:
       if (type->ty == TY::Tarray || type->ty == TY::Tdelegate) {
         value = DtoGEP(irg->getType(), value, 0u, 1u);
       }
-      result = DtoBitCast(value, DtoType(tb));
+      result = value;
     } else if (tb->ty == TY::Tclass && e->e1->type->ty == TY::Tclass &&
                e->e1->op == EXP::classReference) {
       auto cd = static_cast<ClassReferenceExp *>(e->e1)->originalClass();
@@ -341,7 +337,7 @@ public:
         // offset pointer
         instance = DtoGEP(DtoType(e->e1->type), instance, 0, i_index);
       }
-      result = DtoBitCast(instance, DtoType(tb));
+      result = instance;
     } else {
       goto Lerr;
     }
@@ -384,14 +380,10 @@ public:
       } else {
         // Offset isn't a multiple of base type size, just cast to i8* and
         // apply the byte offset.
-        auto i8 = LLType::getInt8Ty(gIR->context());
         result = llvm::ConstantExpr::getGetElementPtr(
-            i8, DtoBitCast(base, i8->getPointerTo()),
-            DtoConstSize_t(e->offset));
+            getI8Type(), base, DtoConstSize_t(e->offset));
       }
     }
-
-    result = DtoBitCast(result, DtoType(e->type));
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -400,46 +392,9 @@ public:
     IF_LOG Logger::println("AddrExp::toConstElem: %s @ %s", e->toChars(),
                            e->type->toChars());
     LOG_SCOPE;
-    // FIXME: this should probably be generalized more so we don't
-    // need to have a case for each thing we can take the address of
-
-    // address of global variable
-    if (auto vexp = e->e1->isVarExp()) {
-      LLConstant *c = DtoConstSymbolAddress(e->loc, vexp->var);
-      result = c ? DtoBitCast(c, DtoType(e->type)) : nullptr;
-      return;
-    }
-
-    // address of indexExp
-    if (auto iexp = e->e1->isIndexExp()) {
-      // indexee must be global static array var
-      VarExp *vexp = iexp->e1->isVarExp();
-      assert(vexp);
-      VarDeclaration *vd = vexp->var->isVarDeclaration();
-      assert(vd);
-      assert(vd->type->toBasetype()->ty == TY::Tsarray);
-      DtoResolveVariable(vd);
-      assert(isIrGlobalCreated(vd));
-
-      // get index
-      LLConstant *index = toConstElem(iexp->e2, p);
-      assert(index->getType() == DtoSize_t());
-
-      // gep
-      LLConstant *idxs[2] = {DtoConstSize_t(0), index};
-      LLConstant *val = isaConstant(getIrGlobal(vd)->value);
-      val = DtoBitCast(val, DtoType(pointerTo(vd->type)));
-      LLConstant *gep = llvm::ConstantExpr::getGetElementPtr(
-          DtoType(vd->type), val, idxs, true);
-
-      // bitcast to requested type
-      assert(e->type->toBasetype()->ty == TY::Tpointer);
-      result = DtoBitCast(gep, DtoType(e->type));
-      return;
-    }
 
     if (auto se = e->e1->isStructLiteralExp()) {
-      result = p->getStructLiteralConstant(se);
+      result = p->getStructLiteralGlobal(se);
       if (result) {
         IF_LOG Logger::cout()
             << "Returning existing global: " << *result << '\n';
@@ -451,21 +406,16 @@ public:
           llvm::GlobalValue::InternalLinkage, nullptr, ".structliteral");
       globalVar->setAlignment(llvm::MaybeAlign(DtoAlignment(se->type)));
 
-      p->setStructLiteralConstant(se, globalVar);
+      p->setStructLiteralGlobal(se, globalVar);
       llvm::Constant *constValue = toConstElem(se, p);
-      constValue = p->setGlobalVarInitializer(globalVar, constValue, nullptr);
-      p->setStructLiteralConstant(se, constValue);
+      globalVar = p->setGlobalVarInitializer(globalVar, constValue, nullptr);
+      p->setStructLiteralGlobal(se, globalVar);
 
-      result = constValue;
+      result = globalVar;
       return;
     }
 
-    if (e->e1->op == EXP::slice || e->e1->op == EXP::dotVariable) {
-      visit(static_cast<Expression *>(e));
-      return;
-    }
-
-    llvm_unreachable("unsupported AddrExp in ToConstElemVisitor");
+    visit(static_cast<Expression *>(e));
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -504,7 +454,7 @@ public:
     assert(result);
 
     if (fd->tok != TOK::function_) {
-      auto contextPtr = getNullPtr(getVoidPtrType());
+      auto contextPtr = getNullPtr();
       result = LLConstantStruct::getAnon(gIR->context(), {contextPtr, result});
     }
   }
@@ -518,11 +468,6 @@ public:
 
     // extract D types
     Type *bt = e->type->toBasetype();
-    Type *elemt = bt->nextOf();
-
-    // build llvm array type
-    LLArrayType *arrtype =
-        LLArrayType::get(DtoMemType(elemt), e->elements->length);
 
     // dynamic arrays can occur here as well ...
     bool dyn = (bt->ty != TY::Tsarray);
@@ -541,18 +486,16 @@ public:
         llvm::GlobalValue::InternalLinkage, initval, ".dynarrayStorage");
     gvar->setUnnamedAddr(canBeConst ? llvm::GlobalValue::UnnamedAddr::Global
                                     : llvm::GlobalValue::UnnamedAddr::None);
-    llvm::Constant *store = DtoBitCast(gvar, getPtrToType(arrtype));
 
     if (bt->ty == TY::Tpointer) {
       // we need to return pointer to the static array.
-      result = store;
+      result = gvar;
       return;
     }
 
     // build a constant dynamic array reference with the .ptr field pointing
     // into store
-    LLConstant *globalstorePtr = DtoGEP(arrtype, store, 0u, 0u);
-    result = DtoConstSlice(DtoConstSize_t(e->elements->length), globalstorePtr);
+    result = DtoConstSlice(DtoConstSize_t(e->elements->length), gvar);
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -563,7 +506,7 @@ public:
                          e->toChars(), e->type ? e->type->toChars() : "(null)");
     LOG_SCOPE;
 
-    if (e->useStaticInit) {
+    if (e->useStaticInit()) {
       DtoResolveStruct(e->sd);
       result = getIrAggr(e->sd)->getDefaultInit();
     } else {
@@ -605,14 +548,14 @@ public:
     DtoResolveClass(origClass);
     StructLiteralExp *value = e->value;
 
-    result = p->getStructLiteralConstant(value);
+    result = p->getStructLiteralGlobal(value);
     if (result) {
       IF_LOG Logger::cout() << "Using existing global: " << *result << '\n';
     } else {
       auto globalVar = new llvm::GlobalVariable(
           p->module, getIrType(origClass->type)->isClass()->getMemoryLLType(),
           false, llvm::GlobalValue::InternalLinkage, nullptr, ".classref");
-      p->setStructLiteralConstant(value, globalVar);
+      p->setStructLiteralGlobal(value, globalVar);
 
       std::map<VarDeclaration *, llvm::Constant *> varInits;
 
@@ -651,10 +594,10 @@ public:
 
       llvm::Constant *constValue =
           getIrAggr(origClass)->createInitializerConstant(varInits);
-      constValue = p->setGlobalVarInitializer(globalVar, constValue, nullptr);
-      p->setStructLiteralConstant(value, constValue);
+      globalVar = p->setGlobalVarInitializer(globalVar, constValue, nullptr);
+      p->setStructLiteralGlobal(value, globalVar);
 
-      result = constValue;
+      result = globalVar;
     }
 
     if (e->type->ty == TY::Tclass) {
@@ -673,7 +616,6 @@ public:
     }
 
     assert(e->type->ty == TY::Tclass || e->type->ty == TY::Tenum);
-    result = DtoBitCast(result, DtoType(e->type));
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -710,11 +652,7 @@ public:
       // cast.
       // FIXME: Check DMD source to understand why two different ASTs are
       //        constructed.
-#if LDC_LLVM_VER >= 1200
       const auto elementCount = llvm::ElementCount::getFixed(elemCount);
-#else
-      const auto elementCount = llvm::ElementCount(elemCount, false);
-#endif
       result = llvm::ConstantVector::getSplat(
           elementCount, toConstElem(optimize(e->e1, WANTvalue), p));
     }
@@ -732,8 +670,7 @@ public:
       return;
     }
 
-    result = DtoTypeInfoOf(e->loc, t, /*base=*/false);
-    result = DtoBitCast(result, DtoType(e->type));
+    result = DtoTypeInfoOf(e->loc, t);
   }
 
   //////////////////////////////////////////////////////////////////////////////

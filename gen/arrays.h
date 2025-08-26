@@ -25,8 +25,6 @@ struct IRState;
 struct Loc;
 class Type;
 
-llvm::StructType *DtoArrayType(Type *arrayTy);
-llvm::StructType *DtoArrayType(LLType *elemTy);
 llvm::ArrayType *DtoStaticArrayType(Type *sarrayTy);
 
 /// Creates a (global) constant with the element data for the given arary
@@ -35,8 +33,7 @@ llvm::ArrayType *DtoStaticArrayType(Type *sarrayTy);
 LLConstant *DtoConstArrayInitializer(ArrayInitializer *si, Type *targetType,
                                      const bool isCfile);
 
-LLConstant *DtoConstSlice(LLConstant *dim, LLConstant *ptr,
-                          Type *type = nullptr);
+LLConstant *DtoConstSlice(LLConstant *dim, LLConstant *ptr);
 
 /// Returns the element at position idx of the literal (assumed to be in range).
 Expression *indexArrayLiteral(ArrayLiteralExp *ale, unsigned idx);
@@ -56,36 +53,35 @@ llvm::Constant *arrayLiteralToConst(IRState *p, ArrayLiteralExp *ale);
 void initializeArrayLiteral(IRState *p, ArrayLiteralExp *ale,
                             LLValue *dstMem, LLType *dstType);
 
-void DtoArrayAssign(const Loc &loc, DValue *lhs, DValue *rhs, EXP op,
+void DtoArrayAssign(Loc loc, DValue *lhs, DValue *rhs, EXP op,
                     bool canSkipPostblit);
 void DtoSetArrayToNull(DValue *v);
 
-DSliceValue *DtoNewDynArray(const Loc &loc, Type *arrayType, DValue *dim,
+DSliceValue *DtoNewDynArray(Loc loc, Type *arrayType, DValue *dim,
                             bool defaultInit = true);
 
-DSliceValue *DtoCatArrays(const Loc &loc, Type *type, Expression *e1,
+DSliceValue *DtoCatArrays(Loc loc, Type *type, Expression *e1,
                           Expression *e2);
-DSliceValue *DtoAppendDCharToString(const Loc &loc, DValue *arr,
-                                    Expression *exp);
-DSliceValue *DtoAppendDCharToUnicodeString(const Loc &loc, DValue *arr,
+DSliceValue *DtoAppendDCharToString(Loc loc, DValue *arr, Expression *exp);
+DSliceValue *DtoAppendDCharToUnicodeString(Loc loc, DValue *arr,
                                            Expression *exp);
 
-LLValue *DtoArrayEquals(const Loc &loc, EXP op, DValue *l, DValue *r);
+LLValue *DtoArrayEquals(Loc loc, EXP op, DValue *l, DValue *r);
 
 LLValue *DtoDynArrayIs(EXP op, DValue *l, DValue *r);
 
 LLValue *DtoArrayLen(DValue *v);
 LLValue *DtoArrayPtr(DValue *v);
 
-DValue *DtoCastArray(const Loc &loc, DValue *val, Type *to);
+DValue *DtoCastArray(Loc loc, DValue *val, Type *to);
 
 // generates an array bounds check
-void DtoIndexBoundsCheck(const Loc &loc, DValue *arr, DValue *index);
+void DtoIndexBoundsCheck(Loc loc, DValue *arr, DValue *index);
 
 /// Inserts a call to the druntime function that throws the range error, with
 /// the given location.
-void emitRangeError(IRState *irs, const Loc &loc);
-void emitArraySliceError(IRState *irs, const Loc &loc, LLValue *lower,
+void emitRangeError(IRState *irs, Loc loc);
+void emitArraySliceError(IRState *irs, Loc loc, LLValue *lower,
                          LLValue *upper, LLValue *length);
-void emitArrayIndexError(IRState *irs, const Loc &loc, LLValue *index,
+void emitArrayIndexError(IRState *irs, Loc loc, LLValue *index,
                          LLValue *length);

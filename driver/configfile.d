@@ -12,16 +12,16 @@
 //===----------------------------------------------------------------------===//
 module driver.configfile;
 
+import dmd.globals;
 import dmd.root.array;
+import dmd.root.string : toDString, toCString, toCStringThen;
 import driver.config;
 import core.stdc.stdio;
-import core.stdc.string;
 
 
-string prepareBinDir(const(char)* binDir)
+string normalizeSlashes(const(char)* binDir)
 {
-    immutable len = strlen(binDir);
-    auto res = binDir[0 .. len].dup;
+    auto res = binDir.toDString.dup;
     foreach (ref c; res)
     {
         if (c == '\\') c = '/';
@@ -29,28 +29,38 @@ string prepareBinDir(const(char)* binDir)
     return cast(string)res; // assumeUnique
 }
 
-T findSetting(T)(GroupSetting[] sections, Setting.Type type, string name)
+const(string)[] findArraySetting(GroupSetting[] sections, string name)
 {
-    // lexically later sections dominate earlier ones
-    foreach_reverse (section; sections)
+    const(string)[] result = null;
+    foreach (section; sections)
     {
         foreach (c; section.children)
         {
-            if (c.type == type && c.name == name)
-                return cast(T) c;
+            if (c.type == Setting.Type.array && c.name == name)
+            {
+                auto as = cast(ArraySetting) c;
+                if (as.isAppending)
+                    result ~= as.vals;
+                else
+                    result = as.vals;
+            }
         }
     }
-    return null;
+    return result;
 }
 
-ArraySetting findArraySetting(GroupSetting[] sections, string name)
+string findScalarSetting(GroupSetting[] sections, string name)
 {
-    return findSetting!ArraySetting(sections, Setting.Type.array, name);
-}
-
-ScalarSetting findScalarSetting(GroupSetting[] sections, string name)
-{
-    return findSetting!ScalarSetting(sections, Setting.Type.scalar, name);
+    string result = null;
+    foreach (section; sections)
+    {
+        foreach (c; section.children)
+        {
+            if (c.type == Setting.Type.scalar && c.name == name)
+                result = (cast(ScalarSetting) c).val;
+        }
+    }
+    return result;
 }
 
 string replace(string str, string pattern, string replacement)
@@ -96,6 +106,27 @@ unittest
     assert(replace(test4, pattern, "word") == "a word, yet other words");
 }
 
+struct CfgPaths
+{
+    string cfgBaseDir; /// ldc2.conf directory
+    string ldcBinaryDir; /// ldc2.exe binary dir
+
+    this(const(char)* cfPath, const(char)* binDir)
+    {
+        import dmd.root.filename: FileName;
+
+        cfgBaseDir = normalizeSlashes(FileName.path(cfPath));
+        ldcBinaryDir = normalizeSlashes(binDir);
+    }
+}
+
+string replacePlaceholders(string str, CfgPaths cfgPaths)
+{
+    return str
+        .replace("%%ldcbinarypath%%", cfgPaths.ldcBinaryDir)
+        .replace("%%ldcconfigpath%%", cfgPaths.cfgBaseDir)
+        .replace("%%ldcversion%%", cast(string) global.ldc_version);
+}
 
 extern(C++) struct ConfigFile
 {
@@ -111,14 +142,11 @@ private:
     Array!(const(char)*) _libDirs;
     const(char)* rpathcstr;
 
-    static bool sectionMatches(const(char)* section, const(char)* triple);
+    static bool sectionMatches(const(char)* section, const(char)* triple) nothrow;
 
     bool readConfig(const(char)* cfPath, const(char)* triple, const(char)* binDir)
     {
-        switches.setDim(0);
-        postSwitches.setDim(0);
-
-        immutable dBinDir = prepareBinDir(binDir);
+        const cfgPaths = CfgPaths(cfPath, binDir);
 
         try
         {
@@ -126,7 +154,7 @@ private:
             foreach (s; parseConfigFile(cfPath))
             {
                 if (s.type == Setting.Type.group &&
-                    (s.name == "default" || sectionMatches((s.name ~ '\0').ptr, triple)))
+                    (s.name == "default" || s.name.toCStringThen!(name => sectionMatches(name.ptr, triple))))
                 {
                     sections ~= cast(GroupSetting) s;
                 }
@@ -134,29 +162,23 @@ private:
 
             if (sections.length == 0)
             {
-                const dTriple = triple[0 .. strlen(triple)];
-                const dCfPath = cfPath[0 .. strlen(cfPath)];
-                throw new Exception("No matching section for triple '" ~ cast(string) dTriple
-                                    ~ "' in " ~ cast(string) dCfPath);
+                throw new Exception("No matching section for triple '" ~ cast(string) triple.toDString
+                                    ~ "'");
             }
 
-            auto switches = findArraySetting(sections, "switches");
-            auto postSwitches = findArraySetting(sections, "post-switches");
-            if (!switches && !postSwitches)
-            {
-                const dCfPath = cfPath[0 .. strlen(cfPath)];
-                throw new Exception("Could not look up switches in " ~ cast(string) dCfPath);
-            }
+            const switches = findArraySetting(sections, "switches");
+            const postSwitches = findArraySetting(sections, "post-switches");
+            if (switches.length + postSwitches.length == 0)
+                throw new Exception("Could not look up switches");
 
-            void applyArray(ref Array!(const(char)*) output, ArraySetting input)
+            void applyArray(ref Array!(const(char)*) output, const(string)[] input)
             {
-                if (!input)
-                    return;
+                output.setDim(0);
 
-                output.reserve(input.vals.length);
-                foreach (sw; input.vals)
+                output.reserve(input.length);
+                foreach (sw; input)
                 {
-                    const finalSwitch = sw.replace("%%ldcbinarypath%%", dBinDir) ~ '\0';
+                    const finalSwitch = sw.replacePlaceholders(cfgPaths).toCString;
                     output.push(finalSwitch.ptr);
                 }
             }
@@ -164,17 +186,17 @@ private:
             applyArray(this.switches, switches);
             applyArray(this.postSwitches, postSwitches);
 
-            auto libDirs = findArraySetting(sections, "lib-dirs");
+            const libDirs = findArraySetting(sections, "lib-dirs");
             applyArray(_libDirs, libDirs);
 
-            if (auto rpath = findScalarSetting(sections, "rpath"))
-                this.rpathcstr = (rpath.val.replace("%%ldcbinarypath%%", dBinDir) ~ '\0').ptr;
+            const rpath = findScalarSetting(sections, "rpath");
+            this.rpathcstr = rpath.length == 0 ? null : rpath.replacePlaceholders(cfgPaths).toCString.ptr;
 
             return true;
         }
         catch (Exception ex)
         {
-            fprintf(stderr, "Error: %.*s\n", cast(int) ex.msg.length, ex.msg.ptr);
+            fprintf(stderr, "Error while reading config file: %s\n%.*s\n", cfPath, cast(int) ex.msg.length, ex.msg.ptr);
             return false;
         }
     }

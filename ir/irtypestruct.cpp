@@ -11,6 +11,7 @@
 
 #include "dmd/aggregate.h"
 #include "dmd/declaration.h"
+#include "dmd/errors.h"
 #include "dmd/init.h"
 #include "dmd/mtype.h"
 #include "dmd/template.h"
@@ -79,7 +80,7 @@ IrTypeStruct *IrTypeStruct::get(StructDeclaration *sd) {
     int realAS = gIR->dcomputetarget->mapping[p->addrspace];
 
     llvm::SmallVector<LLType *, 1> body;
-    body.push_back(DtoMemType(p->type)->getPointerTo(realAS));
+    body.push_back(LLPointerType::get(DtoMemType(p->type), realAS));
 
     isaStruct(t->type)->setBody(body, false);
     VarGEPIndices v;
@@ -92,6 +93,11 @@ IrTypeStruct *IrTypeStruct::get(StructDeclaration *sd) {
     bool packed = builder.isPacked() || IrTypeAggr::isPacked(sd);
     isaStruct(t->type)->setBody(builder.defaultTypes(), packed);
     t->varGEPIndices = builder.varGEPIndices();
+
+    if (getTypeAllocSize(t->type) != sd->structsize) {
+      error(sd->loc, "ICE: struct IR size does not match the frontend size");
+      fatal();
+    }
   }
 
   IF_LOG Logger::cout() << "final struct type: " << *t->type << std::endl;

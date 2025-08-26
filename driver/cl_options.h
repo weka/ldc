@@ -77,6 +77,7 @@ extern cl::list<std::string> linkerSwitches;
 extern cl::list<std::string> ccSwitches;
 extern cl::list<std::string> cppSwitches;
 extern cl::list<std::string> includeModulePatterns;
+extern cl::opt<bool> printErrorContext;
 
 extern cl::opt<bool> m32bits;
 extern cl::opt<bool> m64bits;
@@ -90,8 +91,6 @@ extern cl::opt<DLLImport, true> dllimport;
 extern cl::opt<bool> noPLT;
 extern cl::opt<bool> useDIP25;
 extern cl::opt<bool> useDIP1000;
-
-bool isUsingLegacyPassManager();
 
 // Math options
 extern bool fFastMath;
@@ -122,9 +121,7 @@ enum class CoverageIncrement
 extern cl::opt<CoverageIncrement> coverageIncrement;
 
 // Compilation time tracing options
-extern cl::opt<bool> fTimeTrace;
 extern cl::opt<std::string> fTimeTraceFile;
-extern cl::opt<unsigned> fTimeTraceGranularity;
 
 // LTO options
 enum LTOKind {
@@ -139,9 +136,7 @@ extern cl::opt<bool> ltoFatObjects;
 
 extern cl::opt<std::string> saveOptimizationRecord;
 
-#if LDC_LLVM_VER >= 1300
 extern cl::opt<unsigned> fWarnStackSize;
-#endif
 
 #if LDC_LLVM_SUPPORTED_TARGET_SPIRV || LDC_LLVM_SUPPORTED_TARGET_NVPTX
 extern cl::list<std::string> dcomputeTargets;
@@ -153,9 +148,5 @@ extern cl::opt<bool> enableDynamicCompile;
 extern cl::opt<bool> dynamicCompileTlsWorkaround;
 #else
 constexpr bool enableDynamicCompile = false;
-#endif
-
-#if LDC_LLVM_VER >= 1400
-extern bool enableOpaqueIRPointers;
 #endif
 }
