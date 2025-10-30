@@ -26,7 +26,9 @@ runs:
         arch='aarch64'
         triple="$arch-linux-gnu"
 
-        export CC=clang
+        export CC=$PWD/clang/bin/clang
+        $CC --version
+
         ./installed/bin/ldc-build-runtime --ninja \
           --buildDir="build-libs-$arch" \
           --dFlags="-mtriple=$triple -gcc=clang" \

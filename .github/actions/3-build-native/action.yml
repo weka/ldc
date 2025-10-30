@@ -15,6 +15,9 @@ runs:
     - name: 'Posix: Build mimalloc'
       if: runner.os != 'Windows'
       uses: ./.github/actions/helper-mimalloc
+      with:
+        cmake_flags: >-
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 
     - name: Build LDC & LDC D unittests & defaultlib unittest runners
       uses: ./.github/actions/helper-build-ldc
