@@ -23,9 +23,12 @@ jobs:
           - job_name: Linux x86_64
             os: ubuntu-22.04
             arch: x86_64
-            bootstrap_cmake_flags: -DBUILD_LTO_LIBS=ON
+            bootstrap_cmake_flags: >-
+              -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+              -DBUILD_LTO_LIBS=ON
             # To improve portability of the generated binaries, link the C++ standard library statically.
             extra_cmake_flags: >-
+              -DCMAKE_POLICY_VERSION_MINIMUM=3.5
               -DMULTILIB=OFF
               -DBUILD_LTO_LIBS=ON
               -DCMAKE_C_COMPILER=/home/runner/work/ldc/clang/bin/clang
@@ -40,12 +43,14 @@ jobs:
             os: macos-13
             arch: x86_64
             bootstrap_cmake_flags: >-
+              -DCMAKE_POLICY_VERSION_MINIMUM=3.5
               -DBUILD_LTO_LIBS=ON
               -DD_COMPILER_FLAGS=-gcc=/usr/bin/c++
             # https://github.com/ldc-developers/ldc/issues/4462:
             # When using LTO, we need to explicitly export ~all symbols for plugin support via `ld64 -exported_symbol '__*'`.
             # Additionally `-w` to suppress resulting linker warnings.
             extra_cmake_flags: >-
+              -DCMAKE_POLICY_VERSION_MINIMUM=3.5
               -DBUILD_LTO_LIBS=ON
               -DD_COMPILER_FLAGS="-gcc=/usr/bin/c++ -O -L-exported_symbol '-L__*' -L-w"
             with_pgo: true
@@ -54,6 +59,7 @@ jobs:
             os: macos-14
             arch: arm64
             bootstrap_cmake_flags: >-
+              -DCMAKE_POLICY_VERSION_MINIMUM=3.5
               -DBUILD_LTO_LIBS=ON
               -DD_COMPILER_FLAGS=-gcc=/usr/bin/c++
             # Don't do LTO, since Apple's clang produces bitcode with opaque pointers, which
@@ -61,6 +67,7 @@ jobs:
             # TODO(yanok): find a way to enable opaque pointers in LLVM 14, or maybe just bump
             # LLVM version?
             extra_cmake_flags: >-
+              -DCMAKE_POLICY_VERSION_MINIMUM=3.5
               -DBUILD_LTO_LIBS=ON
               -DD_COMPILER_FLAGS="-gcc=/usr/bin/c++ -O -L-exported_symbol '-L__*' -L-w"
             with_pgo: true
