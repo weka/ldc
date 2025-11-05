@@ -166,9 +166,9 @@ shared static this()
 /**
  * get an array of size_t values that indicate possible pointer words in memory
  *  if interpreted as the type given as argument
- * Returns: the size of the type in bytes, ulong.max on error
+ * Returns: the size of the type in bytes, count of enabled bits, ulong.max on error
  */
-ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data)
+ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data, out uint count)
 {
     ulong sz;
     if (t.ty == Tclass && !(cast(TypeClass)t).sym.isInterfaceDeclaration())
@@ -192,18 +192,28 @@ ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data)
     data.setDim(cast(size_t)cntdata);
     data.zero();
 
+    class HasPointers : Exception {
+        this() { super("HasPointers"); }
+    }
+
     extern (C++) final class PointerBitmapVisitor : Visitor
     {
+        bool preCheck;
         alias visit = Visitor.visit;
     public:
         extern (D) this(Array!(ulong)* _data, ulong _sz_size_t)
         {
             this.data = _data;
             this.sz_size_t = _sz_size_t;
+            this.preCheck = false;
         }
 
         void setpointer(ulong off)
         {
+            if(preCheck) {
+                throw new HasPointers();
+            }
+            count++;
             ulong ptroff = off / sz_size_t;
             (*data)[cast(size_t)(ptroff / (8 * sz_size_t))] |= 1L << (ptroff % (8 * sz_size_t));
         }
@@ -247,10 +257,24 @@ ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data)
             if (nextsize == SIZE_INVALID)
                 error = true;
             ulong dim = t.dim.toInteger();
-            for (ulong i = 0; i < dim; i++)
-            {
-                offset = arrayoff + i * nextsize;
+            if (preCheck) {
                 t.next.accept(this);
+            } else {
+                preCheck = true;
+                bool hasPointers;
+                try {
+                    t.next.accept(this);
+                } catch (HasPointers) {
+                    hasPointers = true;
+                }
+                preCheck = false;
+                if(hasPointers) {
+                    for (ulong i = 0; i < dim; i++)
+                    {
+                        offset = arrayoff + i * nextsize;
+                        t.next.accept(this);
+                    }
+                }
             }
             offset = arrayoff;
         }
@@ -390,6 +414,7 @@ ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data)
  *  architecture). If set the corresponding memory might contain a pointer/reference.
  *
  *  Returns: [T.sizeof, pointerbit0-31/63, pointerbit32/64-63/128, ...]
+ *       OR: [T.sizeof] if no pointers
  */
 private Expression pointerBitmap(TraitsExp e)
 {
@@ -407,10 +432,16 @@ private Expression pointerBitmap(TraitsExp e)
     }
 
     Array!(ulong) data;
-    ulong sz = getTypePointerBitmap(e.loc, t, &data);
+    uint count;
+    ulong sz = getTypePointerBitmap(e.loc, t, &data, count);
     if (sz == ulong.max)
         return ErrorExp.get();
 
+    if(count == 0) {
+        auto exps = new Expressions(1);
+        (*exps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
+        return new ArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(1), exps);
+    }
     auto exps = new Expressions(data.dim + 1);
     (*exps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
     foreach (size_t i; 1 .. exps.dim)
