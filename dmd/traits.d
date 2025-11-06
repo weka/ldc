@@ -169,10 +169,13 @@ ulong getTypePointerBitmap(Loc loc, Type t, ref Array!(ulong) data, ErrorSink eS
             if (nextsize == SIZE_INVALID)
                 error = true;
             ulong dim = t.dim.toInteger();
-            for (ulong i = 0; i < dim; i++)
+            if (t.hasPointers)
             {
-                offset = arrayoff + i * nextsize;
-                visit(t.next);
+                for (ulong i = 0; i < dim; i++)
+                {
+                    offset = arrayoff + i * nextsize;
+                    visit(t.next);
+                }
             }
             offset = arrayoff;
         }
@@ -234,6 +237,8 @@ ulong getTypePointerBitmap(Loc loc, Type t, ref Array!(ulong) data, ErrorSink eS
 
         void visitStruct(TypeStruct t)
         {
+            if (!t.hasPointers)
+                return;
             ulong structoff = offset;
             foreach (v; t.sym.fields)
             {
