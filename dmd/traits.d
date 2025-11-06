@@ -166,9 +166,9 @@ shared static this()
 /**
  * get an array of size_t values that indicate possible pointer words in memory
  *  if interpreted as the type given as argument
- * Returns: the size of the type in bytes, ulong.max on error
+ * Returns: the size of the type in bytes, count of enabled bits, ulong.max on error
  */
-ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data)
+ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data, out uint count)
 {
     ulong sz;
     if (t.ty == Tclass && !(cast(TypeClass)t).sym.isInterfaceDeclaration())
@@ -192,8 +192,13 @@ ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data)
     data.setDim(cast(size_t)cntdata);
     data.zero();
 
+    class HasPointers : Exception {
+        this() { super("HasPointers"); }
+    }
+
     extern (C++) final class PointerBitmapVisitor : Visitor
     {
+        bool preCheck;
         alias visit = Visitor.visit;
     public:
         extern (D) this(Array!(ulong)* _data, ulong _sz_size_t)
@@ -204,6 +209,7 @@ ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data)
 
         void setpointer(ulong off)
         {
+            count++;
             ulong ptroff = off / sz_size_t;
             (*data)[cast(size_t)(ptroff / (8 * sz_size_t))] |= 1L << (ptroff % (8 * sz_size_t));
         }
@@ -247,10 +253,12 @@ ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data)
             if (nextsize == SIZE_INVALID)
                 error = true;
             ulong dim = t.dim.toInteger();
-            for (ulong i = 0; i < dim; i++)
-            {
-                offset = arrayoff + i * nextsize;
-                t.next.accept(this);
+            if(t.hasPointers) {
+                for (ulong i = 0; i < dim; i++)
+                {
+                    offset = arrayoff + i * nextsize;
+                    t.next.accept(this);
+                }
             }
             offset = arrayoff;
         }
@@ -340,6 +348,7 @@ ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data)
 
         override void visit(TypeStruct t)
         {
+            if (!t.hasPointers) return;
             ulong structoff = offset;
             foreach (v; t.sym.fields)
             {
@@ -407,7 +416,8 @@ private Expression pointerBitmap(TraitsExp e)
     }
 
     Array!(ulong) data;
-    ulong sz = getTypePointerBitmap(e.loc, t, &data);
+    uint count;
+    ulong sz = getTypePointerBitmap(e.loc, t, &data, count);
     if (sz == ulong.max)
         return ErrorExp.get();
 
