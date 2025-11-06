@@ -399,6 +399,7 @@ ulong getTypePointerBitmap(Loc loc, Type t, Array!(ulong)* data, out uint count)
  *  architecture). If set the corresponding memory might contain a pointer/reference.
  *
  *  Returns: [T.sizeof, pointerbit0-31/63, pointerbit32/64-63/128, ...]
+ *       OR: [T.sizeof] if no pointers
  */
 private Expression pointerBitmap(TraitsExp e)
 {
@@ -421,6 +422,11 @@ private Expression pointerBitmap(TraitsExp e)
     if (sz == ulong.max)
         return ErrorExp.get();
 
+    if(count == 0) {
+        auto exps = new Expressions(1);
+        (*exps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
+        return new ArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(1), exps);
+    }
     auto exps = new Expressions(data.dim + 1);
     (*exps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
     foreach (size_t i; 1 .. exps.dim)
