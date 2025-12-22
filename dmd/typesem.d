@@ -1201,6 +1201,9 @@ extern(C++) Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
         if (sc.stc & STC.scopeinferred)
             tf.isscopeinferred = true;
 
+        if (sc.stc & STC.ctonly)
+            tf.isCtonly = true;
+
 //        if (tf.isreturn && !tf.isref)
 //            tf.isScopeQual = true;                                  // return by itself means 'return scope'
 

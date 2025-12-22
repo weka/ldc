@@ -290,6 +290,11 @@ public:
   //////////////////////////////////////////////////////////////////////////
 
   void visit(FuncDeclaration *decl) override {
+    auto type = decl->type;
+    // don't generate code marked or inferred with @__ctfe
+    if (type && type->toTypeFunction()->isCtonly()) {
+      return;
+    }
     // don't touch function aliases, they don't contribute any new symbols
     if (!decl->isFuncAliasDeclaration()) {
       DtoDefineFunction(decl);
