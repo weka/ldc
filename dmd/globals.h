@@ -361,6 +361,7 @@ struct Param
 #if IN_WEKA
     bool enableWekaMods; // Enable specific Weka mods like the template instantiation mods
     uint32_t templateCodegenDepth;
+    bool doHdrGenerationOnly; // generate 'header' file and exit
 #endif
 #endif // IN_LLVM
 };
