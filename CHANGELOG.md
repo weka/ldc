@@ -1,9 +1,6 @@
 # LDC master
 
 #### Big news
-- LLVM for prebuilt packages bumped to v18.1.8 (incl. macOS arm64). (#4712)
-- Android: NDK for prebuilt package bumped from r26d to r27. (#4711)
-- ldc2.conf: %%ldcconfigpath%% placeholder added - specifies the directory where current configuration file is located. (#4717)
 - Frontend, druntime and Phobos are at version [2.112.1+](https://dlang.org/changelog/2.112.0.html), incl. new command-line options `-extI`, `-dllimport=externalOnly` and `-edition`. (#4949, #4962, #4988, #5029, #5042, #5046)
 - Support for [LLVM 21](https://releases.llvm.org/21.1.0/docs/ReleaseNotes.html). Beware that patch versions before v21.1.8 seem to misoptimize `std.json`. (#4950, #5033)
 - New prebuilt package for Alpine Linux aarch64 with musl libc, analogous to the existing x86_64 package. (#4943)
@@ -23,19 +20,6 @@
 - Supports LLVM 15 - 21.
 
 #### Bug fixes
-- Fix potentially corrupt IR layouts for bit fields. (#4646, #4708)
-- Fix potentially corrupt IR layouts for explicitly under-aligned aggregates, a regression introduced in LDC v1.31. (#4734, #4736)
-- ELF: Emit (most) instantiated symbols in COMDATs for proper link-time culling. (#3589, #4748)
-
-# LDC 1.39.0 (2024-07-04)
-
-#### Big news
-- Frontend, druntime and Phobos are at version [2.109.1](https://dlang.org/changelog/2.109.0.html). (#4660, #4692)
-- LLVM for prebuilt packages bumped to v18.1.6 (except for macOS arm64). (#4678)
-- Added CI testing of Alpine Linux with musl libc (including some bug fixes). Removed the libunwind dependency when linking with musl libc. (#4650, #4691)
-
-#### Platform support
-- Supports LLVM 15 - 18. Support for LLVM 11 - 14 was dropped. The CLI options `-passmanager` and `-opaque-pointers` were removed.
 
 # LDC 1.41.0 (2025-06-07)
 
