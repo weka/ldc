@@ -43,7 +43,11 @@ public:
         llvm::Reloc::Static, llvm::CodeModel::Medium, codeGenOptLevel(), false);
 
     _ir = new IRState("dcomputeTargetCUDA", ctx);
+#if LDC_LLVM_VER >= 2100
+    _ir->module.setTargetTriple(llvm::Triple(tripleString));
+#else
     _ir->module.setTargetTriple(tripleString);
+#endif
     _ir->module.setDataLayout(targetMachine->createDataLayout());
     _ir->dcomputetarget = this;
   }
@@ -52,7 +56,7 @@ public:
     // sm version?
   }
 
-  void addKernelMetadata(FuncDeclaration *df, llvm::Function *llf) override {
+  void addKernelMetadata(FuncDeclaration *df, llvm::Function *llf, StructLiteralExp *_unused_) override {
     // TODO: Handle Function attibutes
     llvm::NamedMDNode *na =
         _ir->module.getOrInsertNamedMetadata("nvvm.annotations");

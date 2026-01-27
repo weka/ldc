@@ -174,7 +174,7 @@ immutable(EnvData) processEnvironment()
     envData.exe            = envGetRequired ("EXE");
     envData.os             = environment.get("OS");
     envData.dmd            = replace(envGetRequired("DMD"), "/", envData.sep);
-    envData.compiler       = "dmd"; //should be replaced for other compilers
+    envData.compiler       = "ldc"; //should be replaced for other compilers
     envData.ccompiler      = environment.get("CC");
     envData.cxxcompiler    = environment.get("CXX");
     envData.model          = envGetRequired("MODEL");
@@ -740,9 +740,9 @@ bool gatherTestParameters(ref TestArgs testArgs, string input_dir, string input_
 
     version (LDC)
     {
-        // *.c tests: make sure not to pull in ldc_rt.dso.o for BUILD_SHARED_LIBS=ON builds
+        // *.{c,i} tests: make sure not to pull in ldc_rt.dso.o for BUILD_SHARED_LIBS=ON builds
         // (with implicit -link-defaultlib-shared)
-        if (input_file.extension() == ".c")
+        if (input_file.extension() == ".c" || input_file.extension() == ".i")
         {
             if (testArgs.requiredArgs.length)
                 testArgs.requiredArgs ~= " -defaultlib=";
@@ -801,6 +801,11 @@ bool gatherTestParameters(ref TestArgs testArgs, string input_dir, string input_
     }
 
     findTestParameter(envData, file, "CXXFLAGS", testArgs.cxxflags);
+    version (OSX) {
+        if (envData.compiler == "dmd")
+            testArgs.cxxflags ~= " -arch x86_64";
+    }
+
     string extraCppSourcesStr;
     findTestParameter(envData, file, "EXTRA_CPP_SOURCES", extraCppSourcesStr);
     testArgs.cppSources = split(extraCppSourcesStr);

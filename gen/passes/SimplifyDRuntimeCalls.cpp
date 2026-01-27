@@ -18,6 +18,7 @@
 
 #include "gen/passes/Passes.h"
 #include "gen/passes/SimplifyDRuntimeCalls.h"
+#include "gen/llvmhelpers.h"
 #include "gen/tollvm.h"
 #include "gen/runtime.h"
 #include "llvm/ADT/Statistic.h"
@@ -62,55 +63,6 @@ Value *LibCallOptimization::EmitMemCpy(Value *Dst, Value *Src, Value *Len,
 //===----------------------------------------------------------------------===//
 // Miscellaneous LibCall Optimizations
 //===----------------------------------------------------------------------===//
-
-//===---------------------------------------===//
-// '_d_arraysetlengthT'/'_d_arraysetlengthiT' Optimizations
-
-Value *ArraySetLengthOpt::CallOptimizer(Function *Callee, CallInst *CI,
-                     IRBuilder<> &B) {
-  // Verify we have a reasonable prototype for _d_arraysetlength[i]T
-  const FunctionType *FT = Callee->getFunctionType();
-  if (Callee->arg_size() != 4 || !isa<PointerType>(FT->getReturnType()) ||
-      !isa<IntegerType>(FT->getParamType(1)) ||
-      FT->getParamType(1) != FT->getParamType(2) ||
-      FT->getParamType(3) != FT->getReturnType()) {
-    return nullptr;
-  }
-
-  // Whether or not this allocates is irrelevant if the result isn't used.
-  // Just delete if that's the case.
-  if (CI->use_empty()) {
-    return CI;
-  }
-
-  Value *NewLen = CI->getOperand(1);
-  if (Constant *NewCst = dyn_cast<Constant>(NewLen)) {
-    Value *Data = CI->getOperand(3);
-
-    // For now, we just catch the simplest of cases.
-    //
-    // TODO: Implement a more general way to compare old and new
-    //       lengths, to catch cases like "arr.length = arr.length - 1;"
-    //       (But beware of unsigned overflow! For example, we can't
-    //       safely transform that example if arr.length may be 0)
-
-    // Setting length to 0 never reallocates, so replace by data argument
-    if (NewCst->isNullValue()) {
-      return Data;
-    }
-
-    // If both lengths are constant integers, see if NewLen <= OldLen
-    Value *OldLen = CI->getOperand(2);
-    if (ConstantInt *OldInt = dyn_cast<ConstantInt>(OldLen)) {
-      if (ConstantInt *NewInt = dyn_cast<ConstantInt>(NewCst)) {
-        if (NewInt->getValue().ule(OldInt->getValue())) {
-          return Data;
-        }
-      }
-    }
-  }
-  return nullptr;
-}
 
 /// AllocationOpt - Common optimizations for various GC allocations.
 Value *AllocationOpt::CallOptimizer(Function *Callee, CallInst *CI,
@@ -183,7 +135,7 @@ Value *ArraySliceCopyOpt::CallOptimizer(Function *Callee, CallInst *CI,
                      IRBuilder<> &B) {
   // Verify we have a reasonable prototype for _d_array_slice_copy
   const FunctionType *FT = Callee->getFunctionType();
-  const llvm::Type *VoidPtrTy = PointerType::getUnqual(B.getInt8Ty());
+  const llvm::Type *VoidPtrTy = PointerType::get(Callee->getContext(), 0);
   if (Callee->arg_size() != 5 || FT->getReturnType() != B.getVoidTy() ||
       FT->getParamType(0) != VoidPtrTy ||
       !isa<IntegerType>(FT->getParamType(1)) ||
@@ -208,8 +160,16 @@ Value *ArraySliceCopyOpt::CallOptimizer(Function *Callee, CallInst *CI,
     Sz = (Int->getValue() * ElemSz->getValue()).getZExtValue();
   }
 
+#if LDC_LLVM_VER >= 2100
+  llvm::LocationSize Sz2 =
+      (Sz == llvm::MemoryLocation::UnknownSize)
+          ? llvm::LocationSize::beforeOrAfterPointer()
+          : llvm::LocationSize::precise(Sz);
+#else
+  std::uint64_t Sz2 = Sz;
+#endif
   // Check if the pointers may alias
-  if (AA->alias(CI->getOperand(0), Sz, CI->getOperand(2), Sz)) {
+  if (AA->alias(CI->getOperand(0), Sz2, CI->getOperand(2), Sz2)) {
     return nullptr;
   }
 
@@ -265,8 +225,6 @@ FunctionPass *createSimplifyDRuntimeCalls() {
 /// we know.
 void SimplifyDRuntimeCalls::InitOptimizations() {
   // Some array-related optimizations
-  Optimizations["_d_arraysetlengthT"] = &ArraySetLength;
-  Optimizations["_d_arraysetlengthiT"] = &ArraySetLength;
   Optimizations["_d_array_slice_copy"] = &ArraySliceCopy;
 
   /* Delete calls to runtime functions which aren't needed if their result is

@@ -1,10 +1,13 @@
 // LDC: add -disable-linker-strip-dead
-// REQUIRED_ARGS: -gf -mixin=${RESULTS_DIR}/runnable/testpdb.mixin -disable-linker-strip-dead
+// REQUIRED_ARGS: -gf -mixin=${RESULTS_DIR}/runnable/testpdb.mixin -preview=bitfields -disable-linker-strip-dead
 // PERMUTE_ARGS:
 
 import core.time;
 import core.demangle;
 import ldc.attributes;
+
+version(LDC) version(X86_64) version = LDC_X86_64;
+version(LDC_X86_64) version(D_Optimized) version = LDC_X86_64_Optimized;
 
 @optStrategy("none") // LDC
 void main(string[] args)
@@ -61,6 +64,7 @@ void main(string[] args)
         testLineNumbers15432(session, globals);
         testLineNumbers19747(session, globals);
         testLineNumbers19719(session, globals);
+        testLineNumbers19587(session, globals);
 
         S18984 s = test18984(session, globals);
 
@@ -72,7 +76,13 @@ void main(string[] args)
 
         test20253(session, globals);
 
+        test21384(session, globals);
+
         test18147(session, globals);
+
+        test21382(session, globals);
+
+        test21665(session, globals);
 
         source.Release();
         session.Release();
@@ -150,6 +160,30 @@ void testLineNumbers19747(IDiaSession session, IDiaSymbol globals)
         found = found || ln.line == lineScopeExitTest19747;
     assert(found);
   }
+}
+
+// https://github.com/dlang/dmd/issues/19587
+enum lineReturnTest19587 = __LINE__ + 4;
+void test19587(string col) @optStrategy("none") // LDC: UDA
+{
+    if (col.length == 0)
+        return; // does this line have an entry in the debug info?
+    col = col;
+}
+
+void testLineNumbers19587(IDiaSession session, IDiaSymbol globals)
+{
+    IDiaSymbol funcsym = searchSymbol(globals, cPrefix ~ test19587.mangleof);
+    assert(funcsym, "symbol test19587 not found");
+    ubyte[] funcRange;
+    Line[] lines = findSymbolLineNumbers(session, funcsym, &funcRange);
+    assert(lines, "no line number info for test19587");
+
+    dumpLineNumbers(lines, funcRange);
+    bool found = false;
+    foreach(ln; lines)
+        found = found || ln.line == lineReturnTest19587;
+    assert(found);
 }
 
 int test19719()
@@ -465,6 +499,94 @@ void test20253(IDiaSession session, IDiaSymbol globals)
 }
 
 ///////////////////////////////////////////////
+// https://github.com/dlang/dmd/issues/21384
+int sum21384(int a, int b, int c)
+{
+	int s = a + b + c;
+	return s;
+}
+
+struct S21384
+{
+	long x, y;
+}
+
+S21384 makeS21384(int a, int b)
+{
+	S21384 s = S21384(a, b);
+	return s;
+}
+
+class T21384
+{
+	S21384 genS21384(int a, int b)
+	{
+		S21384 s = S21384(a, b);
+		return s;
+	}
+}
+
+void testVar(IDiaSymbol var, string name, DWORD kind, string msg)
+{
+    BSTR varname;
+    var.get_name(&varname) == S_OK || assert(false, "testpdb.sum21384: vars[0]: no name");
+    scope(exit) SysFreeString(varname);
+    auto vname = toUTF8(varname[0..wcslen(varname)]);
+    vname == name || assert(false, msg ~ " name " ~ vname ~ ", expected " ~ name);
+
+    DWORD vkind;
+    var.get_dataKind(&vkind) == S_OK || assert(false, msg ~ " cannot retrieve data kind");
+    vkind == kind || assert(false, msg ~ " unexpected data kind");
+}
+
+DWORD getFuncVars(IDiaSymbol globals, const(wchar)* func, IDiaSymbol[] vars)
+{
+    IDiaSymbol funcSym = searchSymbol(globals, func);
+    funcSym || assert(false, "testpdb.sum21384 not found");
+
+    auto sfunc = toUTF8(func[0..wcslen(func)]);
+    IDiaEnumSymbols pEnumSymbols;
+    HRESULT hr = funcSym.findChildrenEx(SymTagEnum.SymTagData, NULL, NameSearchOptions.nsNone, &pEnumSymbols);
+    hr == S_OK && pEnumSymbols || assert(false, sfunc ~ ": no children found");
+
+    DWORD fetched;
+    hr = pEnumSymbols.Next(cast(uint)vars.length, vars.ptr, &fetched);
+    hr == S_OK || assert(false, sfunc ~ ": failed to fetch any vars");
+    return fetched;
+}
+
+void test21384(IDiaSession session, IDiaSymbol globals)
+{
+    IDiaSymbol[5] vars;
+    DWORD cnt = getFuncVars(globals, "testpdb.sum21384", vars[]);
+    cnt == 4 || assert(false, "testpdb.sum21384: failed to fetch 4 vars");
+
+    testVar(vars[0], "a", DataKind.DataIsParam, "testpdb.sum21384: arg1:");
+    testVar(vars[1], "b", DataKind.DataIsParam, "testpdb.sum21384: arg2:");
+    testVar(vars[2], "c", DataKind.DataIsParam, "testpdb.sum21384: arg3:");
+    testVar(vars[3], "s", DataKind.DataIsLocal, "testpdb.sum21384: local:");
+
+    // LDC: extra var with enabled optimizations for make/genS21384() on x86_64
+    version (LDC_X86_64_Optimized) enum numExtraVarsWithEnabledOptimizations = 1;
+    else                           enum numExtraVarsWithEnabledOptimizations = 0;
+
+    cnt = getFuncVars(globals, "testpdb.makeS21384", vars[]) - numExtraVarsWithEnabledOptimizations;
+    cnt == 3 || assert(false, "testpdb.makeS21384: failed to fetch 3 vars");
+
+    testVar(vars[0], "a", DataKind.DataIsParam, "testpdb.makeS21384: arg1:");
+    testVar(vars[1], "b", DataKind.DataIsParam, "testpdb.makeS21384: arg2:");
+    testVar(vars[2], "s", DataKind.DataIsLocal, "testpdb.makeS21384: hidden:");
+
+    cnt = getFuncVars(globals, "testpdb.T21384.genS21384", vars[]) - numExtraVarsWithEnabledOptimizations;
+    cnt == 4 || assert(false, "testpdb.T21384.genS21384: failed to fetch 4 vars");
+
+    testVar(vars[0], "this", DataKind.DataIsObjectPtr, "testpdb.T21384.genS21384: this:");
+    testVar(vars[1], "a", DataKind.DataIsParam, "testpdb.T21384.genS21384: arg1:");
+    testVar(vars[2], "b", DataKind.DataIsParam, "testpdb.T21384.genS21384: arg2:");
+    testVar(vars[3], "s", DataKind.DataIsLocal, "testpdb.T21384.genS21384: hidden:");
+}
+
+///////////////////////////////////////////////
 // https://issues.dlang.org/show_bug.cgi?id=18147
 string genMembers18147()
 {
@@ -553,6 +675,98 @@ void test18147(IDiaSession session, IDiaSymbol globals)
     classMember9999.get_offset(&off);
     off == Class18147.member9999.offsetof || assert(false, "testpdb.Class18147.member9999 bad offset");
   } // !LDC
+}
+
+// https://github.com/dlang/dmd/issues/21382
+class Dsym21382
+{
+    final int finalFun() { return 7; }
+    int virtualFun() { return 13; }
+}
+
+void test21382(IDiaSession session, IDiaSymbol globals)
+{
+    IDiaSymbol dSym = searchSymbol(globals, "testpdb.Dsym21382");
+    dSym || assert(false, "testpdb.Dsym21382 not found");
+
+  version (LDC_X86_64)
+  {
+    // FIXME: no methods
+  }
+  else
+  {
+    BOOL virt;
+    IDiaSymbol finalSym = searchSymbol(dSym, "finalFun");
+    finalSym || assert(false, "testpdb.Dsym21382.finalFun not found");
+    finalSym.get_virtual(&virt) == S_OK && !virt || assert(false, "testpdb.Dsym21382.finalFun is virtual");
+
+    IDiaSymbol virtualSym = searchSymbol(dSym, "virtualFun");
+    virtualSym || assert(false, "testpdb.Dsym21382.virtualFun not found");
+    virtualSym.get_virtual(&virt) == S_OK && virt || assert(false, "testpdb.Dsym21382.virtualFun is virtual");
+  }
+}
+
+// https://github.com/dlang/dmd/issues/18950
+int x18950;
+ref int foo18950() { return x18950; }
+
+void test18950(IDiaSession session, IDiaSymbol globals)
+{
+    IDiaSymbol dSym = searchSymbol(globals, "testpdb.foo18950");
+    dSym || assert(false, "testpdb.foo18950 not found");
+
+    IDiaSymbol funcType;
+    dSym.get_type(&funcType) == S_OK || assert(false, "testpdb.foo18950: no type");
+    IDiaSymbol retType;
+    funcType.get_type(&retType) == S_OK || assert(false, "testpdb.foo18950: no return type");
+    DWORD tag;
+    // ref returned as pointer to hidden return value
+    retType.get_symTag(&tag) == S_OK && tag == SymTagEnum.SymTagPointerType
+        || assert(false, "testpdb.foo18950: bad return type");
+}
+
+// https://github.com/dlang/dmd/issues/21665
+struct S21665
+{
+    int itg;
+    int a:3;
+    uint b:6;
+}
+void test21665(IDiaSession session, IDiaSymbol globals)
+{
+  version (LDC)
+  {
+    // FIXME: bitfields
+  }
+  else
+  {
+    IDiaSymbol dSym = searchSymbol(globals, "testpdb.S21665");
+    dSym || assert(false, "testpdb.S21665 not found");
+
+    void checkBitField(string name, uint pos, uint len)()
+    {
+        IDiaSymbol aMember = searchSymbol(dSym, name);
+        string fqn = "testpdb.S21665." ~ name;
+        aMember || assert(false, fqn ~ " not found");
+
+        DWORD loc;
+        LONG off;
+        DWORD bitPos;
+        ULONGLONG bitLen;
+
+        aMember.get_locationType(&loc) == S_OK || assert(false, fqn ~ ": no location type");
+        loc == LocationType.LocIsBitField || assert(false, fqn ~ ": not a bitfield");
+
+        aMember.get_offset(&off) == S_OK || assert(false, fqn ~ ": no offset");
+        off == 4 || assert(false, fqn ~ ": not at offset 4");
+        aMember.get_bitPosition(&bitPos) == S_OK || assert(false, fqn ~ ": no bit position");
+        bitPos == pos || assert(false, fqn ~ ": not at bit position " ~ pos.stringof);
+        aMember.get_length(&bitLen) == S_OK || assert(false, fqn ~ ": no bit length");
+        bitLen == len || assert(false, fqn ~ ": not bit length " ~ len.stringof);
+    }
+    checkBitField!("a", 0, 3);
+    checkBitField!("b", 3, 6);
+  }
 }
 
 ///////////////////////////////////////////////

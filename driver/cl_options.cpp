@@ -77,9 +77,13 @@ cl::opt<DLLImport, true> dllimport(
     cl::values(
         clEnumValN(DLLImport::none, "none",
                    "None (default with -link-defaultlib-shared=false)"),
+        clEnumValN(
+            DLLImport::externalOnly, "externalOnly",
+            "Only symbols from modules imported from an -extI import root"),
         clEnumValN(DLLImport::defaultLibsOnly, "defaultLibsOnly",
-                   "Only druntime/Phobos symbols (default with "
-                   "-link-defaultlib-shared and -fvisibility=hidden)."),
+                   "Only druntime/Phobos symbols and symbols from modules "
+                   "imported from an -extI import root (default with "
+                   "-link-defaultlib-shared and -fvisibility=hidden)"),
         clEnumValN(DLLImport::all, "all",
                    "All (default with -link-defaultlib-shared and "
                    "-fvisibility=public)")));
@@ -551,7 +555,9 @@ llvm::FastMathFlags defaultFMF;
 void setDefaultMathOptions(llvm::TargetOptions &targetOptions) {
   if (fFastMath) {
     defaultFMF.setFast();
+#if LDC_LLVM_VER < 2200
     targetOptions.UnsafeFPMath = true;
+#endif
   }
 }
 

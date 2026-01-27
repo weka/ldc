@@ -62,22 +62,15 @@ static void buildRuntimeModule();
 static void checkForImplicitGCCall(Loc loc, const char *name) {
   if (nogc) {
     static const std::string GCNAMES[] = {
-        "_aaDelX",
-        "_aaGetY",
         "_aaKeys",
-        "_aaNew",
         "_aaRehash",
         "_aaValues",
         "_d_allocmemory",
         "_d_allocmemoryT",
         "_d_array_slice_copy",
         "_d_arrayappendT",
-        "_d_arrayappendcTX",
         "_d_arrayappendcd",
         "_d_arrayappendwd",
-        "_d_arraysetlengthT",
-        "_d_arraysetlengthiT",
-        "_d_assocarrayliteralTX",
         "_d_callfinalizer",
         "_d_delarray_t",
         "_d_delclass",
@@ -89,7 +82,7 @@ static void checkForImplicitGCCall(Loc loc, const char *name) {
         "_d_newarrayU",
         "_d_newclass",
         "_d_allocclass",
-        // TODO: _d_newitemT and _d_newarraymTX instantiations
+        // TODO: _d_newitemT, _d_newarraymTX, _d_arrayappendcTX instantiations
     };
 
     if (binary_search(&GCNAMES[0],
@@ -343,6 +336,8 @@ llvm::Function *getRuntimeFunction(Loc loc, llvm::Module &target,
 // C assert function:
 // OSX:     void __assert_rtn(const char *func, const char *file, unsigned line,
 //                            const char *msg)
+// FreeBSD: void __assert(const char *func, const char *file, int line,
+//                        const char *msg)
 // Android: void __assert(const char *file, int line, const char *msg)
 // MSVC:    void  _assert(const char *msg, const char *file, unsigned line)
 // Solaris: void __assert_c99(const char *assertion, const char *filename, int line_num,
@@ -378,8 +373,9 @@ static std::vector<PotentiallyLazyType> getCAssertFunctionParamTypes() {
   const auto voidPtr = Type::tvoidptr;
   const auto uint = Type::tuns32;
 
-  if (triple.isOSDarwin() || triple.isOSSolaris() || triple.isMusl() ||
-      global.params.isUClibcEnvironment || triple.isGNUEnvironment()) {
+  if (triple.isOSDarwin() || triple.isOSFreeBSD() || triple.isOSSolaris() ||
+      triple.isMusl() || global.params.isUClibcEnvironment ||
+      triple.isGNUEnvironment()) {
     return {voidPtr, voidPtr, uint, voidPtr};
   }
   if (triple.getEnvironment() == llvm::Triple::Android) {
@@ -490,52 +486,80 @@ static void buildRuntimeModule() {
   Type *wstringTy = arrayOf(Type::twchar);
   Type *dstringTy = arrayOf(Type::tdchar);
 
-  // LDC's AA type is rt.aaA.Impl*; use void* for the prototypes
-  Type *aaTy = voidPtrTy;
-
   //////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////
 
   // Construct some attribute lists used below (possibly multiple times)
-  AttrSet NoAttrs,
-      Attr_NoUnwind(NoAttrs, LLAttributeList::FunctionIndex,
-                    llvm::Attribute::NoUnwind),
+  AttrSet NoAttrs, Attr_NoUnwind, Attr_ReadOnly, Attr_ReadOnly_NoUnwind, Attr_Cold, Attr_Cold_NoReturn, Attr_Cold_NoReturn_NoUnwind,
+          Attr_ReadOnly_1_NoCapture, Attr_ReadOnly_1_3_NoCapture, Attr_ReadOnly_NoUnwind_1_NoCapture,
+          Attr_ReadOnly_NoUnwind_1_2_NoCapture, Attr_1_NoCapture, Attr_1_2_NoCapture, Attr_1_3_NoCapture,
+          Attr_1_4_NoCapture;
+  // `nounwind`
+  {
+    auto addNoUnwind = [&](AttrSet& a) {
+      llvm::AttrBuilder ab(context);
+      ab.addAttribute(llvm::Attribute::NoUnwind);
+      a.addToFunction(ab);
+    };
+    addNoUnwind(Attr_NoUnwind);
+    addNoUnwind(Attr_Cold_NoReturn_NoUnwind);
+    addNoUnwind(Attr_ReadOnly_NoUnwind);
+    addNoUnwind(Attr_ReadOnly_NoUnwind_1_NoCapture);
+    addNoUnwind(Attr_ReadOnly_NoUnwind_1_2_NoCapture);
+  }
+  // `readonly`
+  {
+    auto addReadOnly = [&](AttrSet& a) {
 #if LDC_LLVM_VER >= 1600
-      Attr_ReadOnly(llvm::AttributeList().addFnAttribute(
-          context, llvm::Attribute::getWithMemoryEffects(
-                       context, llvm::MemoryEffects::readOnly()))),
+      a = a.merge(AttrSet(llvm::AttributeList().addFnAttribute(
+                          context, llvm::Attribute::getWithMemoryEffects(
+                            context, llvm::MemoryEffects::readOnly()))));
 #else
-      Attr_ReadOnly(NoAttrs, LLAttributeList::FunctionIndex,
-                    llvm::Attribute::ReadOnly),
+      llvm::AttrBuilder ab(context);
+      ab.addAttribute(llvm::Attribute::ReadOnly);
+      a = a.addToFunction(ab);
 #endif
-      Attr_Cold(NoAttrs, LLAttributeList::FunctionIndex, llvm::Attribute::Cold),
-      Attr_Cold_NoReturn(Attr_Cold, LLAttributeList::FunctionIndex,
-                         llvm::Attribute::NoReturn),
-      Attr_Cold_NoReturn_NoUnwind(Attr_Cold_NoReturn,
-                                  LLAttributeList::FunctionIndex,
-                                  llvm::Attribute::NoUnwind),
-      Attr_ReadOnly_NoUnwind(Attr_ReadOnly, LLAttributeList::FunctionIndex,
-                             llvm::Attribute::NoUnwind),
-      Attr_ReadOnly_1_NoCapture(Attr_ReadOnly, LLAttributeList::FirstArgIndex,
-                                llvm::Attribute::NoCapture),
-      Attr_ReadOnly_1_3_NoCapture(Attr_ReadOnly_1_NoCapture,
-                                  LLAttributeList::FirstArgIndex + 2,
-                                  llvm::Attribute::NoCapture),
-      Attr_ReadOnly_NoUnwind_1_NoCapture(Attr_ReadOnly_1_NoCapture,
-                                         LLAttributeList::FunctionIndex,
-                                         llvm::Attribute::NoUnwind),
-      Attr_ReadOnly_NoUnwind_1_2_NoCapture(Attr_ReadOnly_NoUnwind_1_NoCapture,
-                                           LLAttributeList::FirstArgIndex + 1,
-                                           llvm::Attribute::NoCapture),
-      Attr_1_NoCapture(NoAttrs, LLAttributeList::FirstArgIndex,
-                       llvm::Attribute::NoCapture),
-      Attr_1_2_NoCapture(Attr_1_NoCapture, LLAttributeList::FirstArgIndex + 1,
-                         llvm::Attribute::NoCapture),
-      Attr_1_3_NoCapture(Attr_1_NoCapture, LLAttributeList::FirstArgIndex + 2,
-                         llvm::Attribute::NoCapture),
-      Attr_1_4_NoCapture(Attr_1_NoCapture, LLAttributeList::FirstArgIndex + 3,
-                         llvm::Attribute::NoCapture);
+    };
+    addReadOnly(Attr_ReadOnly);
+    addReadOnly(Attr_ReadOnly_NoUnwind);
+    addReadOnly(Attr_ReadOnly_1_NoCapture);
+    addReadOnly(Attr_ReadOnly_1_3_NoCapture);
+    addReadOnly(Attr_ReadOnly_NoUnwind_1_NoCapture);
+    addReadOnly(Attr_ReadOnly_NoUnwind_1_2_NoCapture);
+  }
+  // `cold`
+  {
+    auto addCold = [&](AttrSet& a) {
+      llvm::AttrBuilder ab(context);
+      ab.addAttribute(llvm::Attribute::Cold);
+    };
+    addCold(Attr_Cold);
+    addCold(Attr_Cold_NoReturn);
+    addCold(Attr_Cold_NoReturn_NoUnwind);
+  }
+  // `nocapture`/ `captures(none)`
+  {
+    auto addCapturesNone = [&](int extra, AttrSet& a) {
+      llvm::AttrBuilder ab(context);
+#if LDC_LLVM_VER >= 2100
+      ab.addCapturesAttr(llvm::CaptureInfo::none());
+#else
+      ab.addAttribute(llvm::Attribute::NoCapture);
+#endif
+      a.addToParam(0, ab);
+      if (extra)
+        a.addToParam(extra-1, ab);
+    };
+    addCapturesNone(0, Attr_ReadOnly_1_NoCapture);
+    addCapturesNone(3, Attr_ReadOnly_1_3_NoCapture);
+    addCapturesNone(0, Attr_ReadOnly_NoUnwind_1_NoCapture);
+    addCapturesNone(2, Attr_ReadOnly_NoUnwind_1_2_NoCapture);
+    addCapturesNone(0, Attr_1_NoCapture);
+    addCapturesNone(2, Attr_1_2_NoCapture);
+    addCapturesNone(3, Attr_1_3_NoCapture);
+    addCapturesNone(4, Attr_1_4_NoCapture);
+  }
 
   //////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////
@@ -677,59 +701,6 @@ static void buildRuntimeModule() {
   // void* _d_arraysetassign(void* p, void* value, int count, TypeInfo ti)
   createFwdDecl(LINK::c, voidPtrTy, {"_d_arraysetassign"},
                 {voidPtrTy, voidPtrTy, intTy, typeInfoTy});
-
-  //////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////
-
-  // cast interface
-  // void* _d_interface_cast(void* p, ClassInfo c)
-  createFwdDecl(LINK::c, voidPtrTy, {"_d_interface_cast"},
-                {voidPtrTy, classInfoTy}, {}, Attr_ReadOnly_NoUnwind);
-
-  // dynamic cast
-  // void* _d_dynamic_cast(Object o, ClassInfo c)
-  createFwdDecl(LINK::c, voidPtrTy, {"_d_dynamic_cast"}, {objectTy, classInfoTy},
-                {}, Attr_ReadOnly_NoUnwind);
-
-  //////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////
-
-  // int _adEq2(void[] a1, void[] a2, TypeInfo ti)
-  createFwdDecl(LINK::c, intTy, {"_adEq2"},
-                {voidArrayTy, voidArrayTy, typeInfoTy}, {}, Attr_ReadOnly);
-
-  //////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////
-
-  // void* _aaGetY(AA* aa, const TypeInfo aati, in size_t valuesize,
-  //               in void* pkey)
-  createFwdDecl(LINK::c, voidPtrTy, {"_aaGetY"},
-                {pointerTo(aaTy), aaTypeInfoTy, sizeTy, voidPtrTy},
-                {0, STCconst, STCin, STCin}, Attr_1_4_NoCapture);
-
-  // inout(void)* _aaInX(inout AA aa, in TypeInfo keyti, in void* pkey)
-  // FIXME: "inout" storageclass is not applied to return type
-  createFwdDecl(LINK::c, voidPtrTy, {"_aaInX"}, {aaTy, typeInfoTy, voidPtrTy},
-                {STCin | STCout, STCin, STCin}, Attr_ReadOnly_1_3_NoCapture);
-
-  // bool _aaDelX(AA aa, in TypeInfo keyti, in void* pkey)
-  createFwdDecl(LINK::c, boolTy, {"_aaDelX"}, {aaTy, typeInfoTy, voidPtrTy},
-                {0, STCin, STCin}, Attr_1_3_NoCapture);
-
-  // int _aaEqual(in TypeInfo tiRaw, in AA e1, in AA e2)
-  createFwdDecl(LINK::c, intTy, {"_aaEqual"}, {typeInfoTy, aaTy, aaTy},
-                {STCin, STCin, STCin}, Attr_1_2_NoCapture);
-
-  // AA _d_assocarrayliteralTX(const TypeInfo_AssociativeArray ti,
-  //                           void[] keys, void[] values)
-  createFwdDecl(LINK::c, aaTy, {"_d_assocarrayliteralTX"},
-                {aaTypeInfoTy, voidArrayTy, voidArrayTy}, {STCconst, 0, 0});
-
-  // AA _aaNew(const TypeInfo_AssociativeArray ti)
-  createFwdDecl(LINK::c, aaTy, {"_aaNew"}, {aaTypeInfoTy}, {STCconst});
 
   //////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////

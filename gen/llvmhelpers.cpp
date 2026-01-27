@@ -281,7 +281,7 @@ void DtoCAssert(Module *M, Loc loc, LLValue *msg) {
   const auto fn = getCAssertFunction(loc, gIR->module);
 
   llvm::SmallVector<LLValue *, 4> args;
-  if (triple.isOSDarwin()) {
+  if (triple.isOSDarwin() || triple.isOSFreeBSD()) {
     const auto irFunc = gIR->func();
     const auto funcName =
         irFunc && irFunc->decl ? irFunc->decl->toPrettyChars() : "";
@@ -673,6 +673,15 @@ DValue *DtoCastStruct(Loc loc, DValue *val, Type *to) {
     return new DLValue(to, lval);
   }
 
+  // A cast between fat values is possible only when the sizes match.
+  // https://github.com/ldc-developers/ldc/issues/4993
+  if (totype->ty == TY::Tsarray) {
+    if (size(totype) == size(val->type->toBasetype())) {
+      llvm::Value *lval = DtoLVal(val);
+      return new DLValue(to, lval);
+    }
+  }
+
   error(loc, "Internal Compiler Error: Invalid struct cast from `%s` to `%s`",
         val->type->toChars(), to->toChars());
   fatal();
@@ -897,27 +906,18 @@ void DtoVarDeclaration(VarDeclaration *vd) {
 
     // We also allocate a variable for zero-sized variables, because they are technically not `null` when loaded.
     // The x86_64 ABI "loads" zero-sized function arguments, and without an allocation ASan will report an error (Github #4816).
-    llvm::Value *allocainst;
-    bool isRealAlloca = false;
     LLType *lltype = DtoType(type); // void for noreturn
     if (lltype->isVoidTy()) {
-      allocainst = getNullPtr();
-    } else if (type != vd->type) {
-      allocainst = DtoAlloca(type, vd->toChars());
-      isRealAlloca = true;
+      irLocal->value = getNullPtr();
     } else {
-      allocainst = DtoAlloca(vd, vd->toChars());
-      isRealAlloca = true;
-    }
+      auto allocainst = type != vd->type ? DtoAlloca(type, vd->toChars())
+                                         : DtoAlloca(vd, vd->toChars());
 
-    irLocal->value = allocainst;
-
-    if (!lltype->isVoidTy())
+      irLocal->value = allocainst;
       gIR->DBuilder.EmitLocalVariable(allocainst, vd);
 
-    // Lifetime annotation is only valid on alloca.
-    if (isRealAlloca) {
-      // The lifetime of a stack variable starts from the point it is declared
+      // The lifetime of a stack variable starts from the
+      // point it is declared
       gIR->funcGen().localVariableLifetimeAnnotator.addLocalVariable(
           allocainst, DtoConstUlong(size(type)));
     }
@@ -935,63 +935,63 @@ void DtoVarDeclaration(VarDeclaration *vd) {
   }
 }
 
-DValue *DtoDeclarationExp(Dsymbol *declaration) {
+void DtoDeclarationExp(Dsymbol *declaration) {
   IF_LOG Logger::print("DtoDeclarationExp: %s\n", declaration->toChars());
   LOG_SCOPE;
 
-  if (VarDeclaration *vd = declaration->isVarDeclaration()) {
+  if (auto vd = declaration->isVarDeclaration()) {
     Logger::println("VarDeclaration");
 
-    // if aliasTuple is set, this VarDecl is redone as an alias to another symbol
-    // this seems to be done to rewrite Tuple!(...) v;
-    // as a TupleDecl that contains a bunch of individual VarDecls
     if (vd->aliasTuple) {
-      return DtoDeclarationExp(vd->aliasTuple);
+      Logger::println("aliasTuple");
+      DtoDeclarationExp(toAlias(vd));
+      return;
     }
 
-    if (vd->storage_class & STCmanifest) {
-      IF_LOG Logger::println("Manifest constant, nothing to do.");
-      return nullptr;
+    if (!vd->canTakeAddressOf()) {
+      Logger::println("Manifest constant, nothing to do.");
+      return;
     }
 
-    // static
-    if (vd->isDataseg()) {
+    if (vd->isDataseg()) { // global variable
       Declaration_codegen(vd);
-    } else {
+    } else { // local variable
       DtoVarDeclaration(vd);
-    }
-    return makeVarDValue(vd->type, vd);
-  }
-
-  if (StructDeclaration *s = declaration->isStructDeclaration()) {
-    Logger::println("StructDeclaration");
-    Declaration_codegen(s);
-  } else if (FuncDeclaration *f = declaration->isFuncDeclaration()) {
-    Logger::println("FuncDeclaration");
-    Declaration_codegen(f);
-  } else if (ClassDeclaration *e = declaration->isClassDeclaration()) {
-    Logger::println("ClassDeclaration");
-    Declaration_codegen(e);
-  } else if (AttribDeclaration *a = declaration->isAttribDeclaration()) {
-    Logger::println("AttribDeclaration");
-    // choose the right set in case this is a conditional declaration
-    if (auto d = include(a, nullptr)) {
-      for (unsigned i = 0; i < d->length; ++i) {
-        DtoDeclarationExp((*d)[i]);
+      if (vd->needsScopeDtor()) {
+        gIR->funcGen().scopes.pushVarDtorCleanup(vd);
       }
     }
-  } else if (TemplateMixin *m = declaration->isTemplateMixin()) {
-    Logger::println("TemplateMixin");
-    for (Dsymbol *mdsym : *m->members) {
-      DtoDeclarationExp(mdsym);
+  } else if (auto cd = declaration->isClassDeclaration()) {
+    Logger::println("ClassDeclaration");
+    Declaration_codegen(cd);
+  } else if (auto sd = declaration->isStructDeclaration()) {
+    Logger::println("StructDeclaration");
+    Declaration_codegen(sd);
+  } else if (auto fd = declaration->isFuncDeclaration()) {
+    Logger::println("FuncDeclaration");
+    Declaration_codegen(fd);
+  } else if (auto ad = declaration->isAttribDeclaration()) {
+    Logger::println("AttribDeclaration");
+    // choose the right set in case this is a conditional declaration
+    if (auto d = include(ad, nullptr)) {
+      for (auto sym : *d) {
+        DtoDeclarationExp(sym);
+      }
     }
-  } else if (TupleDeclaration *tupled = declaration->isTupleDeclaration()) {
+  } else if (auto tm = declaration->isTemplateMixin()) {
+    Logger::println("TemplateMixin");
+    for (auto sym : *tm->members) {
+      DtoDeclarationExp(sym);
+    }
+  } else if (auto td = declaration->isTupleDeclaration()) {
     Logger::println("TupleDeclaration");
-    assert(tupled->isexp && "Non-expression tuple decls not handled yet.");
-    assert(tupled->objects);
-    for (unsigned i = 0; i < tupled->objects->length; ++i) {
-      auto exp = static_cast<DsymbolExp *>((*tupled->objects)[i]);
-      DtoDeclarationExp(exp->s);
+    // mimicking `foreachVar()`
+    for (auto o : *td->objects) {
+      if (auto e = isExpression(o)) {
+        if (auto ve = e->isVarExp()) {
+          DtoDeclarationExp(ve->var);
+        }
+      }
     }
   } else {
     // Do nothing for template/alias/enum declarations and static
@@ -999,8 +999,6 @@ DValue *DtoDeclarationExp(Dsymbol *declaration) {
     // even bother to check.
     IF_LOG Logger::println("Ignoring Symbol: %s", declaration->kind());
   }
-
-  return nullptr;
 }
 
 // does pretty much the same as DtoDeclarationExp, except it doesn't initialize,
@@ -1676,25 +1674,35 @@ static bool isDefaultLibSymbol(Dsymbol *sym) {
             (md->packages.length > 1 && md->packages.ptr[1] == Id::io)));
 }
 
+static bool isExplicitlyOutOfBinary(Dsymbol *sym) {
+  if (auto mod = sym->getModule())
+    return mod->isExplicitlyOutOfBinary;
+  return false;
+}
+
 bool defineOnDeclare(Dsymbol *sym, bool isFunction) {
   // -linkonce-templates: all instantiated symbols
   if (global.params.linkonceTemplates != LinkonceTemplates::no)
     return sym->isInstantiated();
 
-  // -dllimport=defaultLibsOnly: all data symbols instantiated from
-  // druntime/Phobos templates
+  // -dllimport=externalOnly|defaultLibsOnly: all data symbols instantiated from
+  // binary-external modules, e.g., druntime/Phobos templates
   // see https://github.com/ldc-developers/ldc/issues/3931
-  return !isFunction && global.params.dllimport == DLLImport::defaultLibsOnly &&
-         sym->isInstantiated() && isDefaultLibSymbol(sym);
+  const auto di = global.params.dllimport;
+  return !isFunction && sym->isInstantiated() &&
+         ((di == DLLImport::externalOnly && isExplicitlyOutOfBinary(sym)) ||
+          (di == DLLImport::defaultLibsOnly &&
+           (isExplicitlyOutOfBinary(sym) || isDefaultLibSymbol(sym))));
 }
 
 bool dllimportDataSymbol(Dsymbol *sym) {
   if (!global.params.targetTriple->isOSWindows())
     return false;
 
-  if (sym->isExport() || global.params.dllimport == DLLImport::all ||
-      (global.params.dllimport == DLLImport::defaultLibsOnly &&
-       isDefaultLibSymbol(sym))) {
+  const auto di = global.params.dllimport;
+  if (sym->isExport() || di == DLLImport::all ||
+      (di >= DLLImport::externalOnly && isExplicitlyOutOfBinary(sym)) ||
+      (di == DLLImport::defaultLibsOnly && isDefaultLibSymbol(sym))) {
     // Okay, this symbol is a candidate. Use dllimport unless we have a
     // guaranteed-codegen'd definition in a root module.
     if (auto mod = sym->isModule())

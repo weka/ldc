@@ -169,17 +169,28 @@ private void resolveHelper(TypeQualified mt, Loc loc, Scope* sc, Dsymbol s, Dsym
          */
         const p = mt.mutableOf().unSharedOf().toChars();
         auto id = Identifier.idPool(p[0 .. strlen(p)]);
-        if (const n = importHint(id.toString()))
-            error(loc, "`%s` is not defined, perhaps `import %.*s;` ?", p, cast(int)n.length, n.ptr);
-        else if (auto s2 = sc.search_correct(id))
-            error(loc, "undefined identifier `%s`, did you mean %s `%s`?", p, s2.kind(), s2.toChars());
-        else if (const q = Scope.search_correct_C(id))
-            error(loc, "undefined identifier `%s`, did you mean `%s`?", p, q);
-        else if ((id == Id.This   && sc.getStructClassScope()) ||
-                 (id == Id._super && sc.getClassScope()))
-            error(loc, "undefined identifier `%s`, did you mean `typeof(%s)`?", p, p);
-        else
-            error(loc, "undefined identifier `%s`", p);
+        if (!(sc && sc.inCfile))
+        {
+            if (const n = importHint(id.toString()))
+                error(loc, "`%s` is not defined, perhaps `import %.*s;` ?", p, cast(int)n.length, n.ptr);
+            else if (auto s2 = sc.search_correct(id))
+                error(loc, "undefined identifier `%s`, did you mean %s `%s`?", p, s2.kind(), s2.toChars());
+            else if (const q = Scope.search_correct_C(id))
+                error(loc, "undefined identifier `%s`, did you mean `%s`?", p, q);
+            else if ((id == Id.This   && sc.getStructClassScope()) ||
+                     (id == Id._super && sc.getClassScope()))
+                error(loc, "undefined identifier `%s`, did you mean `typeof(%s)`?", p, p);
+            else
+                error(mt.loc, "undefined identifier `%s`", p);
+        }
+        else {
+            if (const n = cIncludeHint(id.toString()))
+                error(loc, "`%s` is not defined, perhaps `#include %.*s` ?", p, cast(int)n.length, n.ptr);
+            else if (auto s2 = sc.search_correct(id))
+                error(loc, "undefined identifier `%s`, did you mean %s `%s`?", p, s2.kind(), s2.toChars());
+            else
+                error(loc, "undefined identifier `%s`", p);
+        }
 
         pt = Type.terror;
         return;
@@ -229,7 +240,7 @@ private void resolveHelper(TypeQualified mt, Loc loc, Scope* sc, Dsymbol s, Dsym
             break;
         }
 
-        Type t = s.getType(); // type symbol, type alias, or type tuple?
+        Type t = dmd.dsymbolsem.getType(s); // type symbol, type alias, or type tuple?
         const errorsave = global.errors;
         SearchOptFlags flags = t is null ? SearchOpt.localsOnly : SearchOpt.ignorePrivateImports;
 
@@ -353,7 +364,7 @@ private void resolveHelper(TypeQualified mt, Loc loc, Scope* sc, Dsymbol s, Dsym
     Type t;
     while (1)
     {
-        t = s.getType();
+        t = dmd.dsymbolsem.getType(s);
         if (t)
             break;
         ps = s;
@@ -456,14 +467,67 @@ bool isCopyable(Type t)
             assert(ctor);
             scope el = new IdentifierExp(Loc.initial, Id.p); // dummy lvalue
             el.type = cast() ts;
-            Expressions* args = new Expressions();
-            args.push(el);
+            Expressions* args = new Expressions(el);
             FuncDeclaration f = resolveFuncCall(Loc.initial, null, ctor, null, cast()ts, ArgumentList(args), FuncResolveFlag.quiet);
             if (!f || f.storage_class & STC.disable)
                 return false;
         }
     }
     return true;
+}
+
+/**************************
+ * When T is mutable,
+ * Given:
+ *      T a, b;
+ * Can we bitwise assign:
+ *      a = b;
+ * ?
+ */
+bool isAssignable(Type t)
+{
+    if (auto te = t.isTypeEnum())
+        t = te.memType();
+    TypeStruct ts = t.isTypeStruct();
+    if (!ts)
+        return true;
+
+    bool assignable = true;
+    uint offset = ~0; // dead-store initialize to prevent spurious warning
+
+    auto sym = ts.sym;
+    sym.determineSize(sym.loc);
+
+    /* If any of the fields are const or immutable,
+     * then one cannot assign this struct.
+     */
+    for (size_t i = 0; i < sym.fields.length; i++)
+    {
+        VarDeclaration v = sym.fields[i];
+        //printf("%s [%d] v = (%s) %s, v.offset = %d, v.parent = %s\n", sym.toChars(), i, v.kind(), v.toChars(), v.offset, v.parent.kind());
+        if (i == 0)
+        {
+        }
+        else if (v.offset == offset)
+        {
+            /* If any fields of anonymous union are assignable,
+             * then regard union as assignable.
+             * This is to support unsafe things like Rebindable templates.
+             */
+            if (assignable)
+                continue;
+        }
+        else
+        {
+            if (!assignable)
+                return false;
+        }
+        assignable = v.type.isMutable() && v.type.isAssignable();
+        offset = v.offset;
+        //printf(" -> assignable = %d\n", assignable);
+    }
+
+    return assignable;
 }
 
 /************************************
@@ -677,6 +741,129 @@ extern (D) bool checkComplexTransition(Type type, Loc loc, Scope* sc)
     return false;
 }
 
+/**
+ * Look for the index of parameter `ident` in the parameter list
+ *
+ * Params:
+ *   tf = function type
+ *   ident = identifier of parameter to search for
+ * Returns: index of parameter with name `ident` or -1 if not found
+ */
+private extern(D) ptrdiff_t findParameterIndex(TypeFunction tf, Identifier ident)
+{
+    foreach (i, p; tf.parameterList)
+    {
+        if (p.ident == ident)
+            return i;
+    }
+    return -1;
+}
+
+/*********************************
+ * Append error message to buf.
+ * Input:
+ *  buf = message sink
+ *  format = printf format
+ */
+private extern(C) void getMatchError(ref OutBuffer buf, const(char)* format, ...)
+{
+    if (global.gag && !global.params.v.showGaggedErrors)
+        return;
+    va_list ap;
+    va_start(ap, format);
+    buf.vprintf(format, ap);
+    va_end(ap);
+}
+
+/********************************
+ * Convert an `argumentList`, which may contain named arguments, into
+ * a list of arguments in the order of the parameter list.
+ *
+ * Params:
+ *   tf = function type
+ *      argumentList = array of function arguments
+ *      buf = if not null, append error message to it
+ * Returns: re-ordered argument list, or `null` on error
+ */
+extern(D) Expressions* resolveNamedArgs(TypeFunction tf, ArgumentList argumentList, OutBuffer* buf)
+{
+    Expression[] args = argumentList.arguments ? (*argumentList.arguments)[] : null;
+    ArgumentLabel[] names = argumentList.names ? (*argumentList.names)[] : null;
+    const nParams = tf.parameterList.length(); // cached because O(n)
+    auto newArgs = new Expressions(nParams);
+    newArgs.zero();
+    size_t ci = 0;
+    bool hasNamedArgs = false;
+    const bool isVariadic = tf.parameterList.varargs != VarArg.none;
+    foreach (i, arg; args)
+    {
+        if (!arg)
+        {
+            ci++;
+            continue;
+        }
+        auto name = i < names.length ? names[i].name : null;
+        if (name)
+        {
+            hasNamedArgs = true;
+            const pi = tf.findParameterIndex(name);
+            if (pi == -1)
+            {
+                if (buf)
+                    getMatchError(*buf, "no parameter named `%s`", name.toChars());
+                return null;
+            }
+            ci = pi;
+        }
+        if (ci >= newArgs.length)
+        {
+            if (!isVariadic)
+            {
+                // Without named args, let the caller diagnose argument overflow
+                if (hasNamedArgs && buf)
+                    getMatchError(*buf, "argument `%s` goes past end of parameter list", arg.toChars());
+                return null;
+            }
+            while (ci >= newArgs.length)
+                newArgs.push(null);
+        }
+
+        if ((*newArgs)[ci])
+        {
+            if (buf)
+                getMatchError(*buf, "parameter `%s` assigned twice", tf.parameterList[ci].toChars());
+            return null;
+        }
+        (*newArgs)[ci++] = arg;
+    }
+    foreach (i, arg; (*newArgs)[])
+    {
+        if (arg || tf.parameterList[i].defaultArg)
+            continue;
+
+        if (isVariadic && i + 1 == newArgs.length)
+            continue;
+
+        // dtemplate sets `defaultArg=null` to avoid semantic on default arguments,
+        // don't complain about missing arguments in that case
+        if (tf.incomplete)
+            continue;
+
+        if (buf)
+            getMatchError(*buf, "missing argument for parameter #%d: `%s`",
+                          i + 1, parameterToChars(tf.parameterList[i], tf, false));
+        return null;
+    }
+    // strip trailing nulls from default arguments
+    size_t e = newArgs.length;
+    while (e > 0 && (*newArgs)[e - 1] is null)
+    {
+        --e;
+    }
+    newArgs.setDim(e);
+    return newArgs;
+}
+
 /********************************
  * 'args' are being matched to function type 'tf'
  * Determine match level.
@@ -857,8 +1044,8 @@ extern (D) MATCH callMatch(FuncDeclaration fd, TypeFunction tf, Type tthis, Argu
             if (errorHelper)
             {
                 if (u >= args.length)
-                    TypeFunction.getMatchError(buf, "missing argument for parameter #%d: `%s`",
-                        u + 1, parameterToChars(p, tf, false));
+                    getMatchError(buf, "missing argument for parameter #%d: `%s`",
+                                  u + 1, parameterToChars(p, tf, false));
                 // If an error happened previously, `pMessage` was already filled
                 else if (buf.length == 0)
                     buf.writestring(tf.getParamError(args[u], p));
@@ -875,7 +1062,7 @@ extern (D) MATCH callMatch(FuncDeclaration fd, TypeFunction tf, Type tthis, Argu
     {
         // all parameters had a match, but there are surplus args
         OutBuffer buf2;
-        TypeFunction.getMatchError(buf2, "expected %d argument(s), not %d", nparams, args.length);
+        getMatchError(buf2, "expected %d argument(s), not %d", nparams, args.length);
         errorHelper(buf2.extractChars());
         return MATCH.nomatch;
     }
@@ -933,7 +1120,7 @@ private extern(D) bool isCopyConstructorCallable (StructDeclaration argStruct,
     if (!f)
         return nocpctor();
 
-    if (f.isDisabled() && !f.isGenerated())
+    if (f.isDisabled() && !f.isGenerated)
     {
         /* https://issues.dlang.org/show_bug.cgi?id=24301
          * Copy constructor is explicitly disabled
@@ -946,7 +1133,7 @@ private extern(D) bool isCopyConstructorCallable (StructDeclaration argStruct,
 
     bool bpure = !f.isPure && sc.func.setImpure(arg.loc, null);
     bool bsafe = !f.isSafe() && !f.isTrusted() && sc.setUnsafe(false, arg.loc, null);
-    bool bnogc = !f.isNogc && sc.func.setGC(arg.loc, null);
+    bool bnogc = !f.isNogc && sc.setGC(sc.func, arg.loc, null);
     if (bpure | bsafe | bnogc)
     {
         const nullptr = "".ptr;
@@ -956,7 +1143,7 @@ private extern(D) bool isCopyConstructorCallable (StructDeclaration argStruct,
             bsafe ? "@safe ".ptr : nullptr,
             bnogc ? "nogc"  .ptr : nullptr);
     }
-    else if (f.isGenerated() && f.isDisabled())
+    else if (f.isGenerated && f.isDisabled())
     {
         /* https://issues.dlang.org/show_bug.cgi?id=23097
          * Compiler generated copy constructor failed.
@@ -1059,11 +1246,10 @@ private extern(D) MATCH argumentMatchParameter (FuncDeclaration fd, TypeFunction
         }
 
         // check if the copy constructor may be called to copy the argument
-        if (arg.isLvalue() && !isRef && argStruct && argStruct == prmStruct && argStruct.hasCopyCtor)
+        if (arg.isLvalue() && !isRef && argStruct && argStruct == prmStruct && argStruct.hasCopyCtor &&
+            !isCopyConstructorCallable(argStruct, arg, tprm, sc, pMessage))
         {
-            if (!isCopyConstructorCallable(argStruct, arg, tprm, sc, pMessage))
-                return MATCH.nomatch;
-            m = MATCH.exact;
+            return MATCH.nomatch;
         }
         else
         {
@@ -1169,6 +1355,12 @@ private extern(D) MATCH argumentMatchParameter (FuncDeclaration fd, TypeFunction
         return MATCH.nomatch;
     }
 
+    if (arg.isBitField())
+    {
+        if (pMessage) *pMessage = tf.getParamError(arg, p);
+        return MATCH.nomatch;
+    }
+
     return m;
 }
 
@@ -1182,13 +1374,21 @@ private const(char)* getParamError(TypeFunction tf, Expression arg, Parameter pa
     // when comparing the type with strcmp, we need to drop the qualifier
     bool qual = !arg.type.mutableOf().equals(par.type.mutableOf()) &&
         strcmp(arg.type.mutableOf().toChars(), par.type.mutableOf().toChars()) == 0;
-    auto at = qual ? arg.type.toPrettyChars(true) : arg.type.toChars();
     OutBuffer buf;
-    // only mention rvalue if it's relevant
-    const rv = !arg.isLvalue() && par.isReference();
-    buf.printf("cannot pass %sargument `%s` of type `%s` to parameter `%s`",
-        rv ? "rvalue ".ptr : "".ptr, arg.toErrMsg(), at,
-        parameterToChars(par, tf, qual));
+    // only mention rvalue or bitfield if it's relevant
+    if (arg.isBitField())
+    {
+        buf.printf("cannot pass bitfield argument `%s` to parameter `%s`",
+                   arg.toErrMsg(), parameterToChars(par, tf, qual));
+    }
+    else
+    {
+        auto at = qual ? arg.type.toPrettyChars(true) : arg.type.toChars();
+        const rv = !arg.isLvalue() && par.isReference() && !(par.storageClass & STC.constscoperef);
+        buf.printf("cannot pass %sargument `%s` of type `%s` to parameter `%s`",
+            rv ? "rvalue ".ptr : "".ptr, arg.toErrMsg(), at,
+            parameterToChars(par, tf, qual));
+    }
     return buf.extractChars();
 }
 
@@ -1221,7 +1421,7 @@ private extern(D) MATCH matchTypeSafeVarArgs(TypeFunction tf, Parameter p,
             if (pMessage)
             {
                 OutBuffer buf;
-                TypeFunction.getMatchError(buf, "expected %llu variadic argument(s), not %zu",
+                getMatchError(buf, "expected %llu variadic argument(s), not %zu",
                     sz, trailingArgs.length);
                 *pMessage = buf.extractChars();
             }
@@ -1274,9 +1474,48 @@ private extern(D) MATCH matchTypeSafeVarArgs(TypeFunction tf, Parameter p,
     default:
         // We can have things as `foo(int[int] wat...)` but they only match
         // with an associative array proper.
-        if (pMessage && trailingArgs.length) *pMessage = tf.getParamError(trailingArgs[0], p);
+        if (!pMessage) {}
+        else if (!trailingArgs.length)
+        {
+            OutBuffer buf;
+            getMatchError(buf, "expected an argument for parameter `%s`",
+                parameterToChars(p, tf, false));
+            *pMessage = buf.extractChars();
+        }
+        else
+            *pMessage = tf.getParamError(trailingArgs[0], p);
+
         return MATCH.nomatch;
     }
+}
+
+/// Compute cached type properties for `TypeStruct`
+void determineTypeProperties(StructDeclaration sd)
+{
+    import dmd.dsymbolsem : hasPointers;
+    if (sd.computedTypeProperties)
+        return;
+    foreach (vd; sd.fields)
+    {
+        if (vd.storage_class & STC.ref_ || vd.hasPointers())
+        {
+            sd.hasPointerField = true;
+            sd.hasUnsafeBitpatterns = true;
+        }
+
+        if (vd._init && vd._init.isVoidInitializer() && vd.hasPointers())
+            sd.hasVoidInitPointers = true;
+
+        if (vd.storage_class & STC.system || vd.type.hasUnsafeBitpatterns())
+            sd.hasUnsafeBitpatterns = true;
+
+        if (!vd._init && vd.type.hasVoidInitPointers())
+            sd.hasVoidInitPointers = true;
+
+        if (vd.type.hasInvariant())
+            sd.hasFieldWithInvariant = true;
+    }
+    sd.computedTypeProperties = true;
 }
 
 /***************************************
@@ -1499,7 +1738,11 @@ uinteger_t size(Type t, Loc loc)
         case Tinstance:
         case Ttypeof:
         case Treturn:       return visitTypeQualified(cast(TypeQualified)t);
-        case Tstruct:       return t.isTypeStruct().sym.size(loc);
+        case Tstruct:
+        {
+            import dmd.dsymbolsem: size;
+            return t.isTypeStruct().sym.size(loc);
+        }
         case Tenum:         return t.isTypeEnum().sym.getMemtype(loc).size(loc);
         case Tnull:         return t.tvoidptr.size(loc);
         case Tnoreturn:     return 0;
@@ -1934,7 +2177,19 @@ Type typeSemantic(Type type, Loc loc, Scope* sc)
             Expression e;
             Type t;
             Dsymbol s;
-            mtype.index.resolve(loc, sc, e, t, s);
+            Loc indexLoc;
+
+            switch (mtype.index.ty)
+            {
+                case Tident:    indexLoc = mtype.index.isTypeIdentifier().loc;  break;
+                case Tinstance: indexLoc = mtype.index.isTypeInstance().loc;    break;
+                case Ttypeof:   indexLoc = mtype.index.isTypeTypeof().loc;      break;
+                case Treturn:   indexLoc = mtype.index.isTypeReturn().loc;      break;
+                case Tmixin:    indexLoc = mtype.index.isTypeMixin().loc;       break;
+                default: indexLoc = mtype.loc;
+            }
+
+            mtype.index.resolve(indexLoc, sc, e, t, s);
 
             // https://issues.dlang.org/show_bug.cgi?id=15478
             if (s)
@@ -2004,7 +2259,7 @@ Type typeSemantic(Type type, Loc loc, Scope* sc)
             // duplicate a part of StructDeclaration::semanticTypeInfoMembers
             //printf("AA = %s, key: xeq = %p, xerreq = %p xhash = %p\n", toChars(), sd.xeq, sd.xerreq, sd.xhash);
 
-            if (sd.xeq && sd.xeq.isGenerated() && sd.xeq._scope && sd.xeq.semanticRun < PASS.semantic3done)
+            if (sd.xeq && sd.xeq.isGenerated && sd.xeq._scope && sd.xeq.semanticRun < PASS.semantic3done)
             {
                 uint errors = global.startGagging();
                 sd.xeq.semantic3(sd.xeq._scope);
@@ -2635,7 +2890,7 @@ Type typeSemantic(Type type, Loc loc, Scope* sc)
 
                     if (farg && (eparam.storageClass & STC.ref_))
                     {
-                        if (!farg.isLvalue())
+                        if (!farg.isLvalue() || farg.isBitField())
                             eparam.storageClass &= ~STC.ref_; // value parameter
                         eparam.storageClass &= ~STC.auto_;    // https://issues.dlang.org/show_bug.cgi?id=14656
                         eparam.storageClass |= STC.autoref;
@@ -2737,7 +2992,11 @@ Type typeSemantic(Type type, Loc loc, Scope* sc)
         Expression e;
         Dsymbol s;
         //printf("TypeIdentifier::semantic(%s)\n", mtype.toChars());
-        mtype.resolve(loc, sc, e, t, s);
+        if (mtype.loc != Loc.initial)
+            mtype.resolve(mtype.loc, sc, e, t, s);
+        else
+            mtype.resolve(loc, sc, e, t, s);
+
         if (t)
         {
             //printf("\tit's a type %d, %s, %s\n", t.ty, t.toChars(), t.deco);
@@ -2825,7 +3084,7 @@ Type typeSemantic(Type type, Loc loc, Scope* sc)
         Type t;
         Dsymbol s;
         mtype.resolve(loc, sc, e, t, s);
-        if (s && (t = s.getType()) !is null)
+        if (s && (t = dmd.dsymbolsem.getType(s)) !is null)
             t = t.addMod(mtype.mod);
         if (!t)
         {
@@ -2858,7 +3117,7 @@ Type typeSemantic(Type type, Loc loc, Scope* sc)
         Type t;
         Dsymbol s;
         mtype.resolve(loc, sc, e, t, s);
-        if (s && (t = s.getType()) !is null)
+        if (s && (t = dmd.dsymbolsem.getType(s)) !is null)
             t = t.addMod(mtype.mod);
         if (!t)
         {
@@ -3236,7 +3495,7 @@ Type trySemantic(Type type, Loc loc, Scope* sc)
         // If `typeSemantic` succeeded, there may have been deprecations that
         // were gagged due the `startGagging` above.  Run again to display
         // those deprecations.  https://issues.dlang.org/show_bug.cgi?id=19107
-        if (global.gaggedWarnings > 0)
+        if (global.gaggedDeprecations > 0)
             typeSemantic(tcopy, loc, sc);
     }
     //printf("-trySemantic(%s) %d\n", toChars(), global.errors);
@@ -3289,7 +3548,7 @@ Type merge(Type type)
             goto default;
 
         case Tfunction:
-            if (!type.nextOf())
+            if (!type.nextOf()) // don't merge if return type is unknown
                 return type;
             goto default;
 
@@ -3355,6 +3614,98 @@ Type merge2(Type type)
     return t;
 }
 
+private enum LOGDEFAULTINIT = 0;
+/***************************************
+ * Use when we prefer the default initializer to be a literal,
+ * rather than a global immutable variable.
+ */
+Expression defaultInitLiteral(Type t, Loc loc)
+{
+
+    if (t.isTypeError())
+        return ErrorExp.get();
+    if (auto ts = t.isTypeStruct())
+    {
+        static if (LOGDEFAULTINIT)
+        {
+            printf("TypeStruct::defaultInitLiteral() '%s'\n", toChars());
+        }
+        {
+            import dmd.dsymbolsem: size;
+            ts.sym.size(loc);
+        }
+        if (ts.sym.sizeok != Sizeok.done)
+            return ErrorExp.get();
+
+        auto structelems = new Expressions(ts.sym.nonHiddenFields());
+        uint offset = 0;
+        foreach (j; 0 .. structelems.length)
+        {
+            VarDeclaration vd = ts.sym.fields[j];
+            Expression e;
+            if (vd.inuse)
+            {
+                error(loc, "circular reference to `%s`", vd.toPrettyChars());
+                return ErrorExp.get();
+            }
+            if (vd.offset < offset || vd.type.size() == 0)
+                e = null;
+            else if (vd._init)
+            {
+                if (vd._init.isVoidInitializer())
+                    e = null;
+                else
+                    e = vd.getConstInitializer(false);
+            }
+            else
+                e = vd.type.defaultInitLiteral(loc);
+            if (e && e.op == EXP.error)
+                return e;
+            if (e)
+                offset = vd.offset + cast(uint)vd.type.size();
+            (*structelems)[j] = e;
+        }
+        auto structinit = new StructLiteralExp(loc, ts.sym, structelems);
+
+        /* Copy from the initializer symbol for larger symbols,
+         * otherwise the literals expressed as code get excessively large.
+         */
+        if (size(ts, loc) > target.ptrsize * 4 && !ts.needsNested())
+            structinit.useStaticInit = true;
+
+        structinit.type = ts;
+        return structinit;
+    }
+    if (auto tv = t.isTypeVector())
+    {
+        //printf("TypeVector::defaultInitLiteral()\n");
+        assert(tv.basetype.ty == Tsarray);
+        Expression e = tv.basetype.defaultInitLiteral(loc);
+        auto ve = new VectorExp(loc, e, tv);
+        ve.type = tv;
+        ve.dim = cast(int)(tv.basetype.size(loc) / tv.elementType().size(loc));
+        return ve;
+    }
+    if (auto tsa = t.isTypeSArray())
+    {
+        static if (LOGDEFAULTINIT)
+        {
+            printf("TypeSArray::defaultInitLiteral() '%s'\n", toChars());
+        }
+        size_t d = cast(size_t)tsa.dim.toInteger();
+        Expression elementinit;
+        if (tsa.next.ty == Tvoid)
+            elementinit = Type.tuns8.defaultInitLiteral(loc);
+        else
+            elementinit = tsa.next.defaultInitLiteral(loc);
+        auto elements = new Expressions(d);
+        foreach (ref e; *elements)
+            e = null;
+        auto ae = new ArrayLiteralExp(loc, tsa, elementinit, elements);
+        return ae;
+    }
+    return defaultInit(t, loc);
+}
 /***************************************
  * Calculate built-in properties which just the type is necessary.
  *
@@ -3433,8 +3784,10 @@ Expression getProperty(Type t, Scope* scope_, Loc loc, Identifier ident, int fla
         }
 
         Dsymbol s = null;
-        if (mt.ty == Tstruct || mt.ty == Tclass || mt.ty == Tenum)
-            s = mt.toDsymbol(null);
+        auto derefType = mt.isTypePointer() ? mt.nextOf() : mt;
+
+        if (derefType.isTypeStruct() || derefType.isTypeClass() || derefType.isTypeEnum())
+            s = derefType.toDsymbol(null);
         if (s)
             s = s.search_correct(ident);
         if (s && !symbolIsVisible(scope_, s))
@@ -3444,18 +3797,21 @@ Expression getProperty(Type t, Scope* scope_, Loc loc, Identifier ident, int fla
             return ErrorExp.get();
 
         if (s)
-            error(loc, "no property `%s` for type `%s`, did you mean `%s`?", ident.toChars(), mt.toChars(), s.toPrettyChars());
+        {
+            error(loc, "no property `%s` for type `%s`", ident.toErrMsg(), mt.toErrMsg());
+            errorSupplemental(s.loc, "did you mean `%s`?", ident == s.ident ? s.toPrettyChars() : s.toErrMsg());
+        }
         else if (ident == Id.opCall && mt.ty == Tclass)
-            error(loc, "no property `%s` for type `%s`, did you mean `new %s`?", ident.toChars(), mt.toChars(), mt.toPrettyChars());
+            error(loc, "no property `%s` for type `%s`, did you mean `new %s`?", ident.toErrMsg(), mt.toErrMsg(), mt.toPrettyChars());
 
         else if (const n = importHint(ident.toString()))
-                error(loc, "no property `%s` for type `%s`, perhaps `import %.*s;` is needed?", ident.toChars(), mt.toChars(), cast(int)n.length, n.ptr);
+                error(loc, "no property `%s` for type `%s`, perhaps `import %.*s;` is needed?", ident.toErrMsg(), mt.toErrMsg(), cast(int)n.length, n.ptr);
         else
         {
             if (src)
             {
                 error(loc, "no property `%s` for `%s` of type `%s`",
-                    ident.toChars(), src.toChars(), mt.toPrettyChars(true));
+                    ident.toErrMsg(), src.toErrMsg(), mt.toPrettyChars(true));
                 auto s2 = scope_.search_correct(ident);
                 // UFCS
                 if (s2 && s2.isFuncDeclaration)
@@ -3463,30 +3819,17 @@ Expression getProperty(Type t, Scope* scope_, Loc loc, Identifier ident, int fla
                     if (s2.ident == ident)
                     {
                         errorSupplemental(s2.loc, "cannot call %s `%s` with UFCS because it is not declared at module scope",
-                            s2.kind(), s2.toChars());
+                            s2.kind(), s2.toErrMsg());
                     }
                     else
                         errorSupplemental(s2.loc, "did you mean %s `%s`?",
-                            s2.kind(), s2.toChars());
-                }
-                else if (src.type.ty == Tpointer)
-                {
-                    // structPtr.field
-                    auto tn = (cast(TypeNext) src.type).nextOf();
-                    if (auto as = tn.isAggregate())
-                    {
-                        if (auto s3 = as.search_correct(ident))
-                        {
-                            errorSupplemental(s3.loc, "did you mean %s `%s`?",
-                                s3.kind(), s3.toChars());
-                        }
-                    }
+                            s2.kind(), s2.toErrMsg());
                 }
             }
             else
-                error(loc, "no property `%s` for type `%s`", ident.toChars(), mt.toPrettyChars(true));
+                error(loc, "no property `%s` for type `%s`", ident.toErrMsg(), mt.toPrettyChars(true));
 
-            if (auto dsym = mt.toDsymbol(scope_))
+            if (auto dsym = derefType.toDsymbol(scope_))
             {
                 if (auto sym = dsym.isAggregateDeclaration())
                 {
@@ -3502,8 +3845,7 @@ Expression getProperty(Type t, Scope* scope_, Loc loc, Identifier ident, int fla
                         {
                             e = mt.defaultInitLiteral(loc);
                             auto se = new StringExp(e.loc, ident.toString());
-                            auto tiargs = new Objects();
-                            tiargs.push(se);
+                            auto tiargs = new Objects(se);
                             auto dti = new DotTemplateInstanceExp(e.loc, e, Id.opDispatch, tiargs);
                             dti.ti.tempdecl = td;
                             dti.dotTemplateSemanticProp(scope_, DotExpFlag.none);
@@ -3512,7 +3854,7 @@ Expression getProperty(Type t, Scope* scope_, Loc loc, Identifier ident, int fla
                     }
                 }
                 errorSupplemental(dsym.loc, "%s `%s` defined here",
-                    dsym.kind, dsym.toChars());
+                    dsym.kind, dsym.toErrMsg());
             }
         }
 
@@ -4546,7 +4888,10 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, DotExpFlag
                 {
                     auto ad = v.isMember();
                     objc.checkOffsetof(e, ad);
-                    ad.size(e.loc);
+                    {
+                        import dmd.dsymbolsem: size;
+                        ad.size(e.loc);
+                    }
                     if (ad.sizeok != Sizeok.done)
                         return ErrorExp.get();
                     uint value;
@@ -4874,20 +5219,15 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, DotExpFlag
         }
         if (ident == Id.length)
         {
-            __gshared FuncDeclaration fd_aaLen = null;
-            if (fd_aaLen is null)
-            {
-                auto fparams = new Parameters();
-                fparams.push(new Parameter(Loc.initial, STC.const_ | STC.scope_, mt, null, null, null));
-                fd_aaLen = FuncDeclaration.genCfunc(fparams, Type.tsize_t, Id.aaLen);
-                TypeFunction tf = fd_aaLen.type.toTypeFunction();
-                tf.purity = PURE.const_;
-                tf.isNothrow = true;
-                tf.isNogc = false;
-            }
-            Expression ev = new VarExp(e.loc, fd_aaLen, false);
-            e = new CallExp(e.loc, ev, e);
-            e.type = fd_aaLen.type.toTypeFunction().next;
+            auto loc = e.loc;
+            Expression hookFunc = new IdentifierExp(loc, Id.empty);
+            hookFunc = new DotIdExp(loc, hookFunc, Id.object);
+            auto keytype = mt.index.substWildTo(MODFlags.const_);
+            auto valtype = mt.nextOf().substWildTo(MODFlags.const_);
+            auto tiargs = new Objects(keytype, valtype);
+            hookFunc = new DotTemplateInstanceExp(loc, hookFunc, Id._d_aaLen, tiargs);
+            Expression e = new CallExp(loc, hookFunc, e);
+            e = e.expressionSemantic(sc);
             return e;
         }
         else
@@ -4999,17 +5339,31 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, DotExpFlag
                 /* Rewrite e.ident as:
                  *  e.opDispatch!("ident")
                  */
-                TemplateDeclaration td = fd.isTemplateDeclaration();
-                if (!td)
-                {
-                    .error(fd.loc, "%s `%s` must be a template `opDispatch(string s)`, not a %s", fd.kind, fd.toPrettyChars, fd.kind());
-                    return returnExp(ErrorExp.get());
-                }
+
                 auto se = new StringExp(e.loc, ident.toString());
-                auto tiargs = new Objects();
-                tiargs.push(se);
+                auto tiargs = new Objects(se);
                 auto dti = new DotTemplateInstanceExp(e.loc, e, Id.opDispatch, tiargs);
-                dti.ti.tempdecl = td;
+
+                if (OverloadSet os = fd.isOverloadSet())
+                {
+                    if (!findTempDecl(dti, sc))
+                    {
+                        .error(fd.loc, "Couldn't find template declaration for opDispatch");
+                        return returnExp(ErrorExp.get());
+                    }
+                }
+                else
+                {
+                    TemplateDeclaration td = fd.isTemplateDeclaration();
+                    if (!td)
+                    {
+                        .error(fd.loc, "%s `%s` must be a template `opDispatch(string s)`, not a %s",
+                               fd.kind, fd.toPrettyChars, fd.kind());
+                        return returnExp(ErrorExp.get());
+                    }
+                    dti.ti.tempdecl = td;
+                }
+
                 /* opDispatch, which doesn't need IFTI,  may occur instantiate error.
                  * e.g.
                  *  template opDispatch(name) if (isValid!name) { ... }
@@ -5198,7 +5552,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, DotExpFlag
             }
         }
 
-        if (auto t = s.getType())
+        if (auto t = dmd.dsymbolsem.getType(s))
         {
             return (new TypeExp(e.loc, t)).expressionSemantic(sc);
         }
@@ -5389,7 +5743,10 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, DotExpFlag
              */
             e = e.expressionSemantic(sc); // do this before turning on noAccessCheck
 
-            mt.sym.size(e.loc); // do semantic of type
+            {
+                import dmd.dsymbolsem: size;
+                mt.sym.size(e.loc); // do semantic of type
+            }
 
             Expression e0;
             Expression ev = e.op == EXP.type ? null : e;
@@ -5623,7 +5980,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, DotExpFlag
             }
         }
 
-        if (auto t = s.getType())
+        if (auto t = dmd.dsymbolsem.getType(s))
         {
             return (new TypeExp(e.loc, t)).expressionSemantic(sc);
         }
@@ -5714,7 +6071,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, DotExpFlag
                 && d.isFuncDeclaration().objc.selector)
             {
                 auto classRef = new ObjcClassReferenceExp(e.loc, mt.sym);
-                classRef.type = objc.getRuntimeMetaclass(mt.sym).getType();
+                classRef.type = dmd.dsymbolsem.getType((objc.getRuntimeMetaclass(mt.sym)));
                 return new DotVarExp(e.loc, classRef, d).expressionSemantic(sc);
             }
             else if (d.needThis() && sc.intypeof != 1)
@@ -5729,7 +6086,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, DotExpFlag
                     Expression e1;
                     Type t;
                     /* returns: true to continue, false to return */
-                    if (f.hasDualContext())
+                    if (f.hasDualContext)
                     {
                         if (f.followInstantiationContext(ad))
                         {
@@ -6331,7 +6688,7 @@ Type getComplexLibraryType(Loc loc, Scope* sc, TY ty)
         return *pt;
     *pt = Type.terror;
 
-    Module mConfig = Module.loadCoreStdcConfig();
+    Module mConfig = loadCoreStdcConfig();
     if (!mConfig)
     {
         error(loc, "`core.stdc.config` is required for complex numbers");
@@ -6345,7 +6702,7 @@ Type getComplexLibraryType(Loc loc, Scope* sc, TY ty)
         return *pt;
     }
     s = s.toAlias();
-    if (auto t = s.getType())
+    if (auto t = dmd.dsymbolsem.getType(s))
     {
         if (auto ts = t.toBasetype().isTypeStruct())
         {
@@ -6452,9 +6809,9 @@ Covariant covariant(Type src, Type t, STC* pstc = null, bool cppCovariant = fals
              */
             if (t1.linkage == LINK.cpp && cppCovariant)
             {
-                notcovariant |= tp1.isNaked() != tp2.isNaked();
+                notcovariant |= tp1.isNaked != tp2.isNaked;
                 if (auto tpn1 = tp1.nextOf())
-                    notcovariant |= tpn1.isNaked() != tp2.nextOf().isNaked();
+                    notcovariant |= tpn1.isNaked != tp2.nextOf().isNaked;
             }
         }
     }
@@ -6560,7 +6917,7 @@ Lcovariant:
     /* https://issues.dlang.org/show_bug.cgi?id=23135
      * extern(C++) mutable member functions are not covariant with const.
      */
-    if (t1.linkage == LINK.cpp && cppCovariant && t1.isNaked() != t2.isNaked())
+    if (t1.linkage == LINK.cpp && cppCovariant && t1.isNaked != t2.isNaked)
         goto Lnotcovariant;
 
     /* Can convert mutable to const
@@ -6649,7 +7006,7 @@ STC parameterStorageClass(TypeFunction tf, Type tthis, Parameter p, VarDeclarati
 
     /* If haven't inferred the return type yet, can't infer storage classes
      */
-    if (!tf.nextOf() || !tf.isNothrow())
+    if (!tf.nextOf() || !tf.isNothrow)
         return stc;
 
     tf.purityLevel();
@@ -6709,6 +7066,7 @@ STC parameterStorageClass(TypeFunction tf, Type tthis, Parameter p, VarDeclarati
         // Check escaping through `this`
         if (tthis && tthis.isMutable())
         {
+            import dmd.dsymbolsem : hasPointers;
             foreach (VarDeclaration v; isAggregate(tthis).fields)
             {
                 if (v.hasPointers())
@@ -6719,6 +7077,7 @@ STC parameterStorageClass(TypeFunction tf, Type tthis, Parameter p, VarDeclarati
         // Check escaping through nested context
         if (outerVars && tf.isMutable())
         {
+            import dmd.dsymbolsem : hasPointers;
             foreach (VarDeclaration v; *outerVars)
             {
                 if (v.hasPointers())

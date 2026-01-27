@@ -52,7 +52,6 @@ public:
     bool inuse(bool v);
 
     EnumDeclaration *syntaxCopy(Dsymbol *s) override;
-    Type *getType() override;
     const char *kind() const override;
     bool isDeprecated() const override;       // is Dsymbol deprecated?
     Visibility visible() override;
@@ -60,7 +59,7 @@ public:
 
 
 #if !IN_LLVM
-    Symbol *sinit;
+    void *sinit;
 #endif
     void accept(Visitor *v) override { v->visit(this); }
 };

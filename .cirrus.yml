@@ -65,12 +65,18 @@ packaging_steps_template: &PACKAGING_STEPS_TEMPLATE
     cd build
     ninja install > /dev/null
     cd ..
-    perl -pi -e s?$PWD/install/?%%ldcbinarypath%%/../?g install/etc/ldc2.conf
+    perl -pi -e s?$PWD/install/?%%ldcbinarypath%%/../?g install/etc/ldc2.conf/*
     if [[ "$CI_OS" == "freebsd" ]]; then
-      perl -pi -e "s?,druntime-ldc\",?,druntime-ldc\", \"-gcc=$CC\",?" install/etc/ldc2.conf
+      cat > install/etc/ldc2.conf/31-compiler-default-CC.conf <<EOF
+    // Default to the clang version matching LDC's LLVM version.
+    "default":
+    {
+        switches ~= [ "-gcc=${CC}" ];
+    };
+    EOF
     fi
     cp $CIRRUS_WORKING_DIR/{LICENSE,packaging/README} install
-    cat install/etc/ldc2.conf
+    cat install/etc/ldc2.conf/*
     # Now rename the installation dir to test portability
     mv install installed
   # Run hello-world integration test with shared libs
@@ -223,9 +229,9 @@ task:
   << : *COMMON_STEPS_TEMPLATE
 
 task:
-  name: FreeBSD 13.4 x64
+  name: FreeBSD 13 x64
   freebsd_instance:
-    image_family: freebsd-13-4
+    image_family: freebsd-13-5
     cpu: 4
     memory: 8G
   timeout_in: 60m

@@ -205,7 +205,8 @@ void addPredefinedGlobalIdentifiers(const ref Target tgt)
             }
             case OS.OSX:
             {
-                predef("OSX");
+                predef("OSX");          // macOS
+                predef("Apple");        // macOS is one of Apple's operating systems
                 // For legacy compatibility
                 predef("darwin");
                 break;
@@ -472,7 +473,7 @@ else // !IN_LLVM
         DoubleProperties.initialize();
         RealProperties.initialize();
 
-        isLP64 = isX86_64;
+        isLP64 = isX86_64 || isAArch64;
 
         // These have default values for 32 bit code, they get
         // adjusted for 64 bit code.
@@ -677,6 +678,10 @@ else // !IN_LLVM
             return tvalist;
 
         if (os == Target.OS.Windows)
+        {
+            tvalist = Type.tchar.pointerTo();
+        }
+        else if (os == Target.OS.OSX && isAArch64)
         {
             tvalist = Type.tchar.pointerTo();
         }
@@ -1101,6 +1106,7 @@ else // !IN_LLVM
     {
         import dmd.id : Id;
         import dmd.argtypes_sysv_x64 : toArgTypes_sysv_x64;
+        import dmd.dsymbolsem : isPOD;
         import dmd.typesem : castMod;
 
         if (tf.isRef)
@@ -1587,10 +1593,10 @@ version (IN_LLVM)
 else
 {
     /**
-     * Indicates whether the specified bit-field contributes to the alignment
+     * Indicates whether the specified bitfield contributes to the alignment
      * of the containing aggregate.
      * E.g., (not all) ARM ABIs do NOT ignore anonymous (incl. 0-length)
-     * bit-fields.
+     * bitfields.
      */
     extern (C++) bool contributesToAggregateAlignment(BitFieldDeclaration bfd)
     {

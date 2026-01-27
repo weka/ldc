@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #include "dsymbol.h"
 
 struct ModuleDeclaration;
@@ -36,12 +38,11 @@ enum PKG
     PKGpackage  // already determined that's an actual package
 };
 
-enum class Edition : unsigned char
+enum class Edition : uint16_t
 {
-    none = 0u,
-    legacy = 1u,
-    v2024 = 2u,
-    latest = 2u,
+    v2023 = 2023,
+    v2024,
+    v2025,
 };
 
 class Package : public ScopeDsymbol
@@ -52,8 +53,6 @@ public:
     Module *mod;        // != NULL if isPkgMod == PKGmodule
 
     const char *kind() const override;
-
-    bool equals(const RootObject * const o) const override;
 
     bool isAncestorPackageOf(const Package * const pkg) const;
 
@@ -106,6 +105,8 @@ public:
     SearchOptFlags searchCacheFlags;       // cached flags
     d_bool insearch;
 
+    d_bool isExplicitlyOutOfBinary; // Is this module known to be out of binary, and must be DllImport'd?
+
     // module from command line we're imported from,
     // i.e. a module that will be taken all the
     // way to an object file
@@ -128,7 +129,6 @@ public:
     size_t namelen;             // length of module name in characters
 
     static Module* create(const char *arg, Identifier *ident, int doDocComment, int doHdrGen);
-    static const char *find(const char *filename);
     static Module *load(Loc loc, Identifiers *packages, Identifier *ident);
 
     const char *kind() const override;
@@ -137,9 +137,6 @@ public:
     int needModuleInfo();
     bool isPackageAccessible(Package *p, Visibility visibility, SearchOptFlags flags = (SearchOptFlags)SearchOpt::all) override;
     Dsymbol *symtabInsert(Dsymbol *s) override;
-    static void runDeferredSemantic();
-    static void runDeferredSemantic2();
-    static void runDeferredSemantic3();
     int imports(Module *m);
 
     bool isRoot() { return this->importedFrom == this; }
@@ -148,7 +145,6 @@ public:
     bool isCoreModule(Identifier *ident);
 
     // Back end
-
 #if IN_LLVM
     llvm::Module *genLLVMModule(llvm::LLVMContext &context);
     void checkAndAddOutputFile(const FileName &file);
@@ -164,18 +160,11 @@ public:
 
     void initCoverageDataWithCtfeCoverage(unsigned *data) const;
 #else
-    int doppelganger;           // sub-module
     Symbol *cov;                // private uint[] __coverage;
     DArray<unsigned> covb;      // bit array of valid code line numbers
 
-    Symbol *sictor;             // module order independent constructor
-    Symbol *sctor;              // module constructor
-    Symbol *sdtor;              // module destructor
-    Symbol *ssharedctor;        // module shared constructor
-    Symbol *sshareddtor;        // module shared destructor
-    Symbol *stest;              // module unit test
-
     Symbol *sfilename;          // symbol for filename
+    bool hasCDtor;
 #endif
 
     void *ctfe_cov;             // stores coverage information from ctfe

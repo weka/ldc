@@ -29,6 +29,12 @@ class Expression;
 class FuncDeclaration;
 class Parameter;
 
+namespace dmd
+{
+    bool isDiscardable(TemplateInstance*);
+    bool needsCodegen(TemplateInstance*);
+}
+
 class Tuple final : public RootObject
 {
 public:
@@ -71,6 +77,7 @@ public:
     d_bool isTrivialAliasSeq;     // matches `template AliasSeq(T...) { alias AliasSeq = T; }
     d_bool isTrivialAlias;        // matches pattern `template Alias(T) { alias Alias = qualifiers(T); }`
     d_bool deprecated_;           // this template declaration is deprecated
+    d_bool isCmacro;              // Whether this template is a translation of a C macro
     Visibility visibility;
 
     TemplatePrevious *previous;         // threaded list of previous instantiation attempts on stack
@@ -80,7 +87,6 @@ public:
 #endif
 
     TemplateDeclaration *syntaxCopy(Dsymbol *) override;
-    bool overloadInsert(Dsymbol *s) override;
     const char *kind() const override;
 
     Visibility visible() override;
@@ -129,7 +135,6 @@ public:
     virtual bool declareParameter(Scope *sc) = 0;
     virtual void print(RootObject *oarg, RootObject *oded) = 0;
     virtual RootObject *specialization() = 0;
-    virtual RootObject *defaultArg(Loc instLoc, Scope *sc) = 0;
     virtual bool hasDefaultArg() = 0;
 
     DYNCAST dyncast() const override { return DYNCAST_TEMPLATEPARAMETER; }
@@ -151,7 +156,6 @@ public:
     bool declareParameter(Scope *sc) override final;
     void print(RootObject *oarg, RootObject *oded) override final;
     RootObject *specialization() override final;
-    RootObject *defaultArg(Loc instLoc, Scope *sc) override final;
     bool hasDefaultArg() override final;
     void accept(Visitor *v) override { v->visit(this); }
 };
@@ -182,7 +186,6 @@ public:
     bool declareParameter(Scope *sc) override;
     void print(RootObject *oarg, RootObject *oded) override;
     RootObject *specialization() override;
-    RootObject *defaultArg(Loc instLoc, Scope *sc) override;
     bool hasDefaultArg() override;
     void accept(Visitor *v) override { v->visit(this); }
 };
@@ -202,7 +205,6 @@ public:
     bool declareParameter(Scope *sc) override;
     void print(RootObject *oarg, RootObject *oded) override;
     RootObject *specialization() override;
-    RootObject *defaultArg(Loc instLoc, Scope *sc) override;
     bool hasDefaultArg() override;
     void accept(Visitor *v) override { v->visit(this); }
 };
@@ -218,7 +220,6 @@ public:
     bool declareParameter(Scope *sc) override;
     void print(RootObject *oarg, RootObject *oded) override;
     RootObject *specialization() override;
-    RootObject *defaultArg(Loc instLoc, Scope *sc) override;
     bool hasDefaultArg() override;
     void accept(Visitor *v) override { v->visit(this); }
 };
@@ -250,7 +251,6 @@ public:
     Dsymbol *aliasdecl;                 // !=NULL if instance is an alias for its sole member
     TemplateInstance *inst;             // refer to existing instance
     ScopeDsymbol *argsym;               // argument symbol table
-    hash_t hash;                        // cached result of toHash()
     Expressions *fargs;                 // for function template, these are the function arguments
     Identifiers *fnames;                // for function template, argument names
 
@@ -270,13 +270,9 @@ public:
     unsigned char inuse;                 // for recursive expansion detection
 
     TemplateInstance *syntaxCopy(Dsymbol *) override;
-    Dsymbol *toAlias() override final;   // resolve real symbol
     const char *kind() const override;
     const char* toPrettyCharsHelper() override final;
     Identifier *getIdent() override final;
-
-    bool isDiscardable();
-    bool needsCodegen();
 
     void accept(Visitor *v) override { v->visit(this); }
 };
@@ -288,7 +284,6 @@ public:
 
     TemplateMixin *syntaxCopy(Dsymbol *s) override;
     const char *kind() const override;
-    bool hasPointers() override;
 
     void accept(Visitor *v) override { v->visit(this); }
 };

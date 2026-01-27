@@ -37,37 +37,39 @@
 #include "mlir/IR/MLIRContext.h"
 #endif
 
+#if LDC_LLVM_VER < 2200
+namespace llvm {
+  using LLVMRemarkFileHandle = std::unique_ptr<llvm::ToolOutputFile>;
+}
+#endif
 namespace {
 
-std::unique_ptr<llvm::ToolOutputFile>
+llvm::LLVMRemarkFileHandle
 createAndSetDiagnosticsOutputFile(IRState &irs, llvm::LLVMContext &ctx,
                                   llvm::StringRef filename) {
-  std::unique_ptr<llvm::ToolOutputFile> diagnosticsOutputFile;
-
   // Set LLVM Diagnostics outputfile if requested
-  if (opts::saveOptimizationRecord.getNumOccurrences() > 0) {
-    llvm::SmallString<128> diagnosticsFilename;
-    if (!opts::saveOptimizationRecord.empty()) {
-      diagnosticsFilename = opts::saveOptimizationRecord.getValue();
-    } else {
-      diagnosticsFilename = filename;
-      llvm::sys::path::replace_extension(diagnosticsFilename, "opt.yaml");
-    }
-
-    // If there is instrumentation data available, also output function hotness
-    const bool withHotness = opts::isUsingPGOProfile();
-
-    auto remarksFileOrError = llvm::setupLLVMOptimizationRemarks(
-        ctx, diagnosticsFilename, "", "", withHotness);
-    if (llvm::Error e = remarksFileOrError.takeError()) {
-      error(irs.dmodule->loc, "Could not create file %s: %s",
-            diagnosticsFilename.c_str(), llvm::toString(std::move(e)).c_str());
-      fatal();
-    }
-    diagnosticsOutputFile = std::move(*remarksFileOrError);
+  if (opts::saveOptimizationRecord.getNumOccurrences() == 0)
+    return llvm::LLVMRemarkFileHandle();
+  llvm::SmallString<128> diagnosticsFilename;
+  if (!opts::saveOptimizationRecord.empty()) {
+    diagnosticsFilename = opts::saveOptimizationRecord.getValue();
+  } else {
+    diagnosticsFilename = filename;
+    llvm::sys::path::replace_extension(diagnosticsFilename, "opt.yaml");
   }
 
-  return diagnosticsOutputFile;
+   // If there is instrumentation data available, also output function hotness
+   const bool withHotness = opts::isUsingPGOProfile();
+
+   auto remarksFileOrError = llvm::setupLLVMOptimizationRemarks(
+        ctx, diagnosticsFilename, "", "", withHotness);
+   if (llvm::Error e = remarksFileOrError.takeError()) {
+    error(irs.dmodule->loc, "Could not create file %s: %s",
+          diagnosticsFilename.c_str(), llvm::toString(std::move(e)).c_str());
+    fatal();
+  }
+
+  return std::move(*remarksFileOrError);
 }
 
 void addLinkerMetadata(llvm::Module &M, const char *name,
@@ -216,7 +218,11 @@ void CodeGenerator::prepareLLModule(Module *m) {
   // name, as it should not collide with a symbol name used somewhere in the
   // module.
   ir_ = new IRState(m->srcfile.toChars(), context_);
+#if LDC_LLVM_VER >= 2100
+  ir_->module.setTargetTriple(*global.params.targetTriple);
+#else
   ir_->module.setTargetTriple(global.params.targetTriple->str());
+#endif
   ir_->module.setDataLayout(*gDataLayout);
 
   // TODO: Make ldc::DIBuilder per-Module to be able to emit several CUs for
@@ -263,7 +269,7 @@ void CodeGenerator::writeAndFreeLLModule(const char *filename) {
   context_.setDiagnosticHandler(
           std::make_unique<InlineAsmDiagnosticHandler>(ir_));
 
-  std::unique_ptr<llvm::ToolOutputFile> diagnosticsOutputFile =
+  llvm::LLVMRemarkFileHandle diagnosticsOutputFile =
       createAndSetDiagnosticsOutputFile(*ir_, context_, filename);
 
   writeModule(&ir_->module, filename);

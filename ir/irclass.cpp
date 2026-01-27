@@ -216,7 +216,7 @@ LLConstant *IrClass::getVtblInit() {
     FuncDeclaration *fd = dsym->isFuncDeclaration();
     assert(fd && "vtbl entry not a function");
 
-    if (cd->isAbstract() || (fd->isAbstract() && !fd->fbody)) {
+    if (isAbstract(cd) || (fd->isAbstract() && !fd->fbody)) {
       c = getNullPtr();
     } else {
       // If inferring return type and semantic3 has not been run, do it now.
@@ -321,14 +321,14 @@ unsigned buildClassinfoFlags(ClassDeclaration *cd) {
       break;
     }
   }
-  if (cd->isAbstract()) {
+  if (isAbstract(cd)) {
     flags |= ClassFlags::isAbstract;
   }
   for (ClassDeclaration *pc = cd; pc; pc = pc->baseClass) {
     if (pc->members) {
       for (Dsymbol *sm : *pc->members) {
         // printf("sm = %s %s\n", sm->kind(), sm->toChars());
-        if (sm->hasPointers()) {
+        if (hasPointers(sm)) {
           return flags;
         }
       }
@@ -367,7 +367,7 @@ LLConstant *IrClass::getClassInfoInit() {
   if (isInterface) {
     b.push_null_void_array();
   } else {
-    b.push_void_array(cd->size(Loc()), getInitSymbol());
+    b.push_void_array(size(cd, Loc()), getInitSymbol());
   }
 
   // string name
@@ -525,7 +525,7 @@ LLConstant *IrClass::getInterfaceVtblInit(BaseClass *b,
 
   FuncDeclarations vtbl_array;
   const bool new_instance = b->sym == cd;
-  b->fillVtbl(cd, &vtbl_array, new_instance);
+  fillVtbl(b, cd, &vtbl_array, new_instance);
 
   std::vector<llvm::Constant *> constants;
   constants.reserve(vtbl_array.length);

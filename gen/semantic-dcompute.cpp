@@ -60,7 +60,7 @@ struct DComputeSemanticAnalyser : public StoppableVisitor {
       Expression *e = (Expression *)o;
       if (e->op != EXP::function_)
         continue;
-      if (f->equals((((FuncExp *)e)->fd))) {
+      if (dmd::equals(f, (((FuncExp *)e)->fd))) {
         IF_LOG Logger::println("match");
         return true;
       }
@@ -237,7 +237,7 @@ struct DComputeSemanticAnalyser : public StoppableVisitor {
   }
 
   void visit(FuncDeclaration *fd) override {
-    if (hasKernelAttr(fd) && fd->vthis) {
+    if (getKernelAttr(fd) && fd->vthis) {
       error(fd->loc, "`@kernel` functions must not require `this`");
       stop = true;
       return;

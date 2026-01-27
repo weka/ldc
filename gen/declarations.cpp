@@ -253,9 +253,8 @@ public:
                            decl->toPrettyChars());
     LOG_SCOPE;
 
-    if (decl->ir->isDefined()) {
+    if (decl->ir->isDefined())
       return;
-    }
 
     if (decl->type->ty == TY::Terror) {
       error(decl->loc, "%s `%s` had semantic errors when compiling",
@@ -264,23 +263,31 @@ public:
       return;
     }
 
-    DtoResolveVariable(decl);
-    decl->ir->setDefined();
-
     // just forward aliases
     if (decl->aliasTuple) {
       Logger::println("aliasTuple");
-      decl->toAlias()->accept(this);
+      toAlias(decl)->accept(this);
+      return;
+    }
+
+    if (!decl->canTakeAddressOf()) {
+      Logger::println("manifest constant, skipping");
       return;
     }
 
     // global variable
     if (decl->isDataseg()) {
-      Logger::println("data segment");
+      // skip external declarations (IR-declared lazily)
+      if (decl->storage_class & STCextern) {
+        Logger::println("external global, skipping");
+        return;
+      }
 
-      assert(!(decl->storage_class & STCmanifest) &&
-             "manifest constant being codegen'd!");
+      Logger::println("global variable");
       assert(!irs->dcomputetarget);
+
+      DtoResolveVariable(decl);
+      decl->ir->setDefined();
 
       getIrGlobal(decl)->getValue(/*define=*/true);
     }
@@ -339,9 +346,9 @@ public:
     // is sufficient. Speculative ones are lazily emitted if actually referenced
     // during codegen - per IR module.
     if ((global.params.linkonceTemplates == LinkonceTemplates::aggressive &&
-         decl->isDiscardable()) ||
+         isDiscardable(decl)) ||
         (global.params.linkonceTemplates != LinkonceTemplates::aggressive &&
-         !decl->needsCodegen())) {
+         !needsCodegen(decl))) {
       Logger::println("Does not need codegen, skipping.");
       return;
     }

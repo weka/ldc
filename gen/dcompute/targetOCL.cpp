@@ -73,14 +73,19 @@ public:
     const bool is64 = global.params.targetTriple->isArch64Bit();
 
     _ir = new IRState("dcomputeTargetOCL", ctx);
-    std::string targTriple = is64 ? SPIR_TARGETTRIPLE64
-                                  : SPIR_TARGETTRIPLE32;
+    std::string targTripleStr = is64 ? SPIR_TARGETTRIPLE64
+                                     : SPIR_TARGETTRIPLE32;
+#if LDC_LLVM_VER >= 2100
+    llvm::Triple targTriple = llvm::Triple(targTripleStr);
+#else
+    std::string targTriple = targTripleStr;
+#endif
     _ir->module.setTargetTriple(targTriple);
 
 #if LDC_LLVM_VER >= 1600
     auto floatABI = ::FloatABI::Hard;
     targetMachine = createTargetMachine(
-            targTriple,
+            targTripleStr,
             is64 ? "spirv64" : "spirv32",
             "", {},
             is64 ? ExplicitBitness::M64 : ExplicitBitness::M32, floatABI,
@@ -138,7 +143,7 @@ public:
       KernArgMD_name,
       count_KernArgMD
   };
-  void addKernelMetadata(FuncDeclaration *fd, llvm::Function *llf) override {
+  void addKernelMetadata(FuncDeclaration *fd, llvm::Function *llf, StructLiteralExp *_unused_) override {
     // By the time we get here the ABI should have rewritten the function
     // type so that the magic types in ldc.dcompute are transformed into
     // what the LLVM backend expects.

@@ -594,7 +594,7 @@ void ArgsBuilder::build(llvm::StringRef outputPath,
     args.push_back("-l" + name);
   }
 #ifdef PHOBOS_SYSTEM_ZLIB
-  if (!defaultLibNames.empty() && !linkAgainstSharedDefaultLibs())
+  if (!defaultLibNames.empty())
       args.push_back("-lz");
 #endif
 
@@ -844,7 +844,7 @@ int linkObjToBinaryGcc(llvm::StringRef outputPath,
     tool = getProgram("wasm-ld", &opts::linker);
   } else {
     argsBuilder = std::make_unique<ArgsBuilder>();
-    tool = getGcc(argsBuilder->args);
+    tool = getCC(argsBuilder->args);
   }
 
   // build arguments

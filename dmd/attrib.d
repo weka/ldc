@@ -32,10 +32,8 @@ import dmd.declaration;
 import dmd.dmodule;
 import dmd.dscope;
 import dmd.dsymbol;
-import dmd.dsymbolsem : include;
 import dmd.expression;
 import dmd.func;
-import dmd.globals;
 import dmd.hdrgen : visibilityToBuffer;
 import dmd.id;
 import dmd.identifier;
@@ -80,7 +78,7 @@ extern (C++) abstract class AttribDeclaration : Dsymbol
      * the scope after it used.
      */
     extern (D) static Scope* createNewScope(Scope* sc, STC stc, LINK linkage,
-        CPPMANGLE cppmangle, Visibility visibility, int explicitVisibility,
+        CPPMANGLE cppmangle, Visibility visibility, bool explicitVisibility,
         AlignDeclaration aligndecl, PragmaDeclaration inlining)
     {
         Scope* sc2 = sc;
@@ -108,11 +106,6 @@ extern (C++) abstract class AttribDeclaration : Dsymbol
     override const(char)* kind() const
     {
         return "attribute";
-    }
-
-    override final bool hasPointers()
-    {
-        return this.include(null).foreachDsymbol( (s) { return s.hasPointers(); } ) != 0;
     }
 
     /****************************************
@@ -419,8 +412,7 @@ extern (C++) final class AlignDeclaration : AttribDeclaration
         this.dsym = DSYM.alignDeclaration;
         if (exp)
         {
-            exps = new Expressions();
-            exps.push(exp);
+            exps = new Expressions(exp);
         }
     }
 

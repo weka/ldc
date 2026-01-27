@@ -295,10 +295,15 @@ void ensureToolsExists(const string[string] env, const TestTool[] tools ...)
             if (sourceFile is null)
                 sourceFile = toolsDir.buildPath(tool ~ ".d");
         }
-        if (targetBin.timeLastModified.ifThrown(SysTime.init) >= sourceFile.timeLastModified)
+        auto lastModifiedBin = targetBin.timeLastModified.ifThrown(SysTime.init);
+        if (lastModifiedBin >= sourceFile.timeLastModified)
         {
-            log("%s is already up-to-date", tool);
-            continue;
+            auto lastModifiedDmd = env["DMD"].timeLastModified.ifThrown(SysTime.init);
+            if (!tool.linksWithTests || lastModifiedBin >= lastModifiedDmd)
+            {
+                log("%s is already up-to-date", tool);
+                continue;
+            }
         }
 
         string[] buildCommand;
@@ -619,10 +624,12 @@ string[string] getEnvironment()
       }
 
         version(OSX)
+        {
             version (IN_LLVM)
                 env["D_OBJC"] = "1";
             else version(X86_64)
                 env["D_OBJC"] = "1";
+        }
     }
     return env;
 }

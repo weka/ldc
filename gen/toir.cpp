@@ -22,7 +22,6 @@
 #include "dmd/root/rmem.h"
 #include "dmd/target.h"
 #include "dmd/template.h"
-#include "gen/aa.h"
 #include "gen/abi/abi.h"
 #include "gen/arrays.h"
 #include "gen/binops.h"
@@ -211,15 +210,6 @@ static void write_struct_literal(Loc loc, LLValue *mem, StructDeclaration *sd,
 }
 
 namespace {
-void pushVarDtorCleanup(IRState *p, VarDeclaration *vd) {
-  llvm::BasicBlock *beginBB = p->insertBB(llvm::Twine("dtor.") + vd->toChars());
-
-  const auto savedInsertPoint = p->saveInsertPoint();
-  p->ir->SetInsertPoint(beginBB);
-  toElemDtor(vd->edtor);
-  p->funcGen().scopes.pushCleanup(beginBB, p->scopebb());
-}
-
 // Zero-extends a scalar i1 to an integer type, or creates a vector mask from an
 // i1 vector.
 DImValue *zextBool(LLValue *val, Type *to) {
@@ -318,13 +308,7 @@ public:
     auto &PGO = gIR->funcGen().pgo;
     PGO.setCurrentStmt(e);
 
-    result = DtoDeclarationExp(e->declaration);
-
-    if (auto vd = e->declaration->isVarDeclaration()) {
-      if (!vd->isDataseg() && vd->needsScopeDtor()) {
-        pushVarDtorCleanup(p, vd);
-      }
-    }
+    DtoDeclarationExp(e->declaration);
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -838,7 +822,7 @@ public:
 
     if (delayedDtorVar) {
       delayedDtorVar->edtor = delayedDtorExp;
-      pushVarDtorCleanup(p, delayedDtorVar);
+      p->funcGen().scopes.pushVarDtorCleanup(delayedDtorVar);
     }
 
     return result;
@@ -852,6 +836,14 @@ public:
     IF_LOG Logger::print("CastExp::toElem: %s @ %s\n", e->toChars(),
                          e->type->toChars());
     LOG_SCOPE;
+
+    if (e->lowering) {
+      result = toElem(e->lowering);
+      if (!result->type->equals(e->type)) {
+        result = DtoPaintType(e->loc, result, e->type);
+      }
+      return;
+    }
 
     auto &PGO = gIR->funcGen().pgo;
     PGO.setCurrentStmt(e);
@@ -1197,8 +1189,7 @@ public:
       }
       arrptr = DtoGEP1(DtoMemType(l->type->nextOf()), DtoArrayPtr(l), DtoRVal(r));
     } else if (e1type->ty == TY::Taarray) {
-      result = DtoAAIndex(e->loc, e->type, l, r, e->modifiable);
-      return;
+      llvm_unreachable("IndexExp for associative array should have been lowered");
     } else {
       IF_LOG Logger::println("e1type: %s", e1type->toChars());
       llvm_unreachable("Unknown IndexExp target.");
@@ -1426,6 +1417,11 @@ public:
                          e->type->toChars());
     LOG_SCOPE;
 
+    if (e->lowering) {
+      result = toElem(e->lowering);
+      return;
+    }
+
     auto &PGO = gIR->funcGen().pgo;
     PGO.setCurrentStmt(e);
 
@@ -1468,8 +1464,7 @@ public:
       Logger::println("static or dynamic array");
       eval = DtoArrayEquals(e->loc, e->op, l, r);
     } else if (t->ty == TY::Taarray) {
-      Logger::println("associative array");
-      eval = DtoAAEquals(e->loc, e->op, l, r);
+      llvm_unreachable("associative array equality should have been lowered");
     } else if (t->ty == TY::Tdelegate) {
       Logger::println("delegate");
       eval = DtoDelegateEquals(e->op, DtoRVal(l), DtoRVal(r));
@@ -1634,12 +1629,13 @@ public:
       result = new DImValue(e->type, mem);
     }
     // new AA
-    else if (auto taa = ntype->isTypeAArray()) {
+    else if (ntype->isTypeAArray()) {
       assert(!e->placement);
-      LLFunction *func = getRuntimeFunction(e->loc, gIR->module, "_aaNew");
-      LLValue *aaTypeInfo = DtoTypeInfoOf(e->loc, stripModifiers(taa));
-      LLValue *aa = gIR->CreateCallOrInvoke(func, aaTypeInfo, "aa");
-      result = new DImValue(e->type, aa);
+      assert(!e->argprefix);
+      if (!e->lowering) {
+        llvm_unreachable("_aaNew should have been lowered");
+      }
+      result = toElem(e->lowering);
     }
     // new basic type
     else {
@@ -2455,157 +2451,26 @@ public:
   //////////////////////////////////////////////////////////////////////////////
 
   void visit(InExp *e) override {
-    IF_LOG Logger::print("InExp::toElem: %s @ %s\n", e->toChars(),
-                         e->type->toChars());
-    LOG_SCOPE;
-
-    DValue *key = toElem(e->e1);
-    DValue *aa = toElem(e->e2);
-
-    result = DtoAAIn(e->loc, e->type, aa, key);
+    llvm_unreachable("InExp should have been lowered");
   }
 
   void visit(RemoveExp *e) override {
-    IF_LOG Logger::print("RemoveExp::toElem: %s\n", e->toChars());
-    LOG_SCOPE;
-
-    DValue *aa = toElem(e->e1);
-    DValue *key = toElem(e->e2);
-
-    result = DtoAARemove(e->loc, aa, key);
+    llvm_unreachable("RemoveExp should have been lowered");
   }
 
   //////////////////////////////////////////////////////////////////////////////
-
-  /// Constructs an array initializer constant with the given constants as its
-  /// elements. If the element types differ (unions, …), an anonymous struct
-  /// literal is emitted (as for array constant initializers).
-  llvm::Constant *arrayConst(std::vector<llvm::Constant *> &vals,
-                             Type *nominalElemType) {
-    if (vals.size() == 0) {
-      llvm::ArrayType *type = llvm::ArrayType::get(DtoType(nominalElemType), 0);
-      return llvm::ConstantArray::get(type, vals);
-    }
-
-    llvm::Type *elementType = nullptr;
-    bool differentTypes = false;
-    for (auto v : vals) {
-      if (!elementType) {
-        elementType = v->getType();
-      } else {
-        differentTypes |= (elementType != v->getType());
-      }
-    }
-
-    if (differentTypes) {
-      return llvm::ConstantStruct::getAnon(vals, true);
-    }
-
-    llvm::ArrayType *t = llvm::ArrayType::get(elementType, vals.size());
-    return llvm::ConstantArray::get(t, vals);
-  }
 
   void visit(AssocArrayLiteralExp *e) override {
     IF_LOG Logger::print("AssocArrayLiteralExp::toElem: %s @ %s\n",
                          e->toChars(), e->type->toChars());
     LOG_SCOPE;
 
-    assert(e->keys);
-    assert(e->values);
-    assert(e->keys->length == e->values->length);
-
-    Type *basetype = e->type->toBasetype();
-    Type *aatype = basetype;
-    Type *vtype = aatype->nextOf();
-
-    if (!e->keys->length) {
-      goto LruntimeInit;
-    }
-
-    if (aatype->ty != TY::Taarray) {
-      // It's the AssociativeArray type.
-      // Turn it back into a TypeAArray
-      vtype = e->values->tdata()[0]->type;
-      aatype = TypeAArray::create(vtype, e->keys->tdata()[0]->type);
-      aatype = typeSemantic(aatype, e->loc, nullptr);
-    }
-
-    {
-      std::vector<LLConstant *> keysInits, valuesInits;
-      keysInits.reserve(e->keys->length);
-      valuesInits.reserve(e->keys->length);
-      for (size_t i = 0, n = e->keys->length; i < n; ++i) {
-        Expression *ekey = (*e->keys)[i];
-        Expression *eval = (*e->values)[i];
-        IF_LOG Logger::println("(%llu) aa[%s] = %s",
-                               static_cast<unsigned long long>(i),
-                               ekey->toChars(), eval->toChars());
-        LLConstant *ekeyConst = tryToConstElem(ekey, p);
-        LLConstant *evalConst = tryToConstElem(eval, p);
-        if (!ekeyConst || !evalConst) {
-          goto LruntimeInit;
-        }
-        keysInits.push_back(ekeyConst);
-        valuesInits.push_back(evalConst);
-      }
-
-      assert(aatype->ty == TY::Taarray);
-      Type *indexType = static_cast<TypeAArray *>(aatype)->index;
-      assert(indexType && vtype);
-
-      llvm::Function *func =
-          getRuntimeFunction(e->loc, gIR->module, "_d_assocarrayliteralTX");
-      LLValue *aaTypeInfo = DtoTypeInfoOf(e->loc, stripModifiers(aatype));
-
-      LLConstant *initval = arrayConst(keysInits, indexType);
-      LLConstant *globalstore = new LLGlobalVariable(
-          gIR->module, initval->getType(), false,
-          LLGlobalValue::InternalLinkage, initval, ".aaKeysStorage");
-      LLValue *keysArray = DtoConstSlice(DtoConstSize_t(e->keys->length), globalstore);
-
-      initval = arrayConst(valuesInits, vtype);
-      globalstore = new LLGlobalVariable(gIR->module, initval->getType(), false,
-                                         LLGlobalValue::InternalLinkage,
-                                         initval, ".aaValuesStorage");
-      LLValue *valuesArray = DtoConstSlice(DtoConstSize_t(e->keys->length), globalstore);
-
-      LLValue *aa = gIR->CreateCallOrInvoke(func, aaTypeInfo, keysArray,
-                                            valuesArray, "aa");
-      if (basetype->ty != TY::Taarray) {
-        LLValue *tmp = DtoAlloca(e->type, "aaliteral");
-        DtoStore(aa, DtoGEP(DtoType(e->type), tmp, 0u, 0));
-        result = new DLValue(e->type, tmp);
-      } else {
-        result = new DImValue(e->type, aa);
-      }
-
+    if (e->lowering) {
+      result = toElem(e->lowering);
       return;
     }
 
-  LruntimeInit:
-
-    // it should be possible to avoid the temporary in some cases
-    LLValue *tmp = DtoAllocaDump(LLConstant::getNullValue(DtoType(e->type)),
-                                 e->type, "aaliteral");
-    result = new DLValue(e->type, tmp);
-
-    const size_t n = e->keys->length;
-    for (size_t i = 0; i < n; ++i) {
-      Expression *ekey = (*e->keys)[i];
-      Expression *eval = (*e->values)[i];
-
-      IF_LOG Logger::println("(%llu) aa[%s] = %s",
-                             static_cast<unsigned long long>(i),
-                             ekey->toChars(), eval->toChars());
-
-      // index
-      DValue *key = toElem(ekey);
-      DLValue *mem = DtoAAIndex(e->loc, vtype, result, key, true);
-
-      // try to construct it in-place
-      if (!toInPlaceConstruction(mem, eval))
-        DtoAssign(e->loc, mem, toElem(eval), EXP::blit);
-    }
+    llvm_unreachable("AssocArrayLiteralExp should have been lowered");
   }
 
   //////////////////////////////////////////////////////////////////////////////
@@ -2641,7 +2506,7 @@ public:
                          e->type->toChars());
     LOG_SCOPE;
 
-    assert(e->sym->getType());
+    assert(getType(e->sym));
     result = toElem(e->e1);
   }
 
@@ -2826,7 +2691,7 @@ public:
       LLValue *val = DtoRVal(ex);
 
       // Get and load vtbl pointer.
-      llvm::Value *vtbl = DtoLoad(LLPointerType::getUnqual(vtblType),
+      llvm::Value *vtbl = DtoLoad(LLPointerType::get(getGlobalContext(), 0),
                                   DtoGEP(irtc->getMemoryLLType(), val, 0u, 0));
 
       // TypeInfo ptr is first vtbl entry.
@@ -2987,17 +2852,20 @@ bool toInPlaceConstruction(DLValue *lhs, Expression *rhs) {
     return true;
   }
   // and temporaries
-  else if (isTemporaryVar(rhs)) {
+  else if (auto vd = isTemporaryVar(rhs)) {
     Logger::println("success, in-place-constructing temporary");
-    auto lhsLVal = DtoLVal(lhs);
-    auto rhsLVal = DtoLVal(rhs);
-    if (!llvm::isa<llvm::AllocaInst>(rhsLVal)) {
-      error(rhs->loc, "lvalue of temporary is not an alloca, please "
-                      "file an LDC issue");
-      fatal();
-    }
-    if (lhsLVal != rhsLVal)
-      rhsLVal->replaceAllUsesWith(lhsLVal);
+    assert(!isSpecialRefVar(vd) && "Can this happen?");
+
+    // evaluate lhs to an lvalue, the target address
+    auto lval = DtoLVal(lhs);
+
+    // pre-set the lvalue of the temporary to that address
+    getIrLocal(vd, true)->value = lval;
+    gIR->DBuilder.EmitLocalVariable(lval, vd);
+
+    // evaluate rhs, constructing the pre-allocated temporary
+    toElem(rhs);
+
     return true;
   }
 
