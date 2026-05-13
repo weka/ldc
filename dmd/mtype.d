@@ -2654,6 +2654,21 @@ extern (C++) final class TypeSArray : TypeArray
             elementinit = tuns8.defaultInitLiteral(loc);
         else
             elementinit = next.defaultInitLiteral(loc);
+
+        // For very large arrays whose element-init is a trivial scalar value,
+        // emit a CompactArrayLiteralExp so we don't allocate an N-pointer
+        // sparse `elements` array. The threshold is high enough that small
+        // CTFE-mutated arrays (e.g. druntime's `Bins[2049]`) keep using the
+        // regular ALE path. Larger compact arrays get materialized lazily by
+        // CTFE on first element/slice assignment.
+        enum size_t compactThreshold = 65_536;
+        if (d >= compactThreshold && elementinit &&
+            (elementinit.op == EXP.int64 || elementinit.op == EXP.float64 ||
+             elementinit.op == EXP.null_))
+        {
+            return new CompactArrayLiteralExp(Loc.initial, this, null, elementinit, d);
+        }
+
         auto elements = new Expressions(d);
         foreach (ref e; *elements)
             e = null;

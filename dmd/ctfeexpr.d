@@ -536,7 +536,7 @@ uinteger_t resolveArrayLength(Expression e)
  * Returns:
  *      Constructed ArrayLiteralExp
  */
-ArrayLiteralExp createBlockDuplicatedArrayLiteral(UnionExp* pue, const ref Loc loc, Type type, Expression elem, size_t dim)
+Expression createBlockDuplicatedArrayLiteral(UnionExp* pue, const ref Loc loc, Type type, Expression elem, size_t dim)
 {
     if (type.ty == Tsarray && type.nextOf().ty == Tsarray && elem.type.ty != Tsarray)
     {
@@ -551,6 +551,22 @@ ArrayLiteralExp createBlockDuplicatedArrayLiteral(UnionExp* pue, const ref Loc l
     // Buzilla 15681
     const tb = elem.type.toBasetype();
     const mustCopy = tb.ty == Tstruct || tb.ty == Tsarray;
+
+    // For huge arrays of trivial scalar values (IntegerExp / NullExp /
+    // FloatExp), avoid allocating dim pointers by emitting a
+    // CompactArrayLiteralExp. The compact form represents `[elem, elem, ...,
+    // elem]` (dim copies) as a single AST node. CTFE element-write paths must
+    // materialize the compact node back to a regular ALE on first mutation
+    // (handled in assignToLvalue / SliceExp block-assign).
+    enum size_t compactThreshold = 65_536;
+    if (!mustCopy && dim >= compactThreshold &&
+        (elem.op == EXP.int64 || elem.op == EXP.float64 || elem.op == EXP.null_))
+    {
+        auto cale = new CompactArrayLiteralExp(loc, type, null, elem, dim);
+        cale.ownedByCtfe = OwnedBy.ctfe;
+        emplaceExp!(UnionExp)(pue, cale);
+        return pue.exp();
+    }
 
     auto elements = new Expressions(dim);
     foreach (i, ref el; *elements)

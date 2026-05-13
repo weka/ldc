@@ -2345,6 +2345,35 @@ private void expressionPrettyPrint(Expression e, ref OutBuffer buf, ref HdrGenSt
         buf.writeByte(']');
     }
 
+    void visitCompactArrayLiteral(CompactArrayLiteralExp e)
+    {
+        // Avoid expanding the (possibly very large) tail repetition — print it
+        // as `value x count`. Keeps error messages, --ftime-trace output, and
+        // pretty-printers bounded regardless of the logical array length.
+        buf.put('[');
+        const headLen = e.head ? e.head.length : 0;
+        foreach (i; 0 .. headLen)
+        {
+            if (i)
+                buf.put(", ");
+            expToBuffer((*e.head)[i], PREC.assign, buf, hgs);
+        }
+        if (e.tailCount)
+        {
+            if (headLen)
+                buf.put(", ");
+            if (e.tailValue)
+                expToBuffer(e.tailValue, PREC.assign, buf, hgs);
+            else
+                buf.put("...");
+            import core.stdc.stdio : snprintf;
+            char[32] tmp = void;
+            const n = snprintf(tmp.ptr, tmp.length, " x %llu", cast(ulong)e.tailCount);
+            buf.put(tmp[0 .. n]);
+        }
+        buf.put(']');
+    }
+
     void visitAssocArrayLiteral(AssocArrayLiteralExp e)
     {
         buf.writeByte('[');
@@ -2920,6 +2949,7 @@ private void expressionPrettyPrint(Expression e, ref OutBuffer buf, ref HdrGenSt
         case EXP.string_:       return visitString(e.isStringExp());
         case EXP.interpolated:  return visitInterpolation(e.isInterpExp());
         case EXP.arrayLiteral:  return visitArrayLiteral(e.isArrayLiteralExp());
+        case EXP.compactArrayLiteral:   return visitCompactArrayLiteral(e.isCompactArrayLiteralExp());
         case EXP.assocArrayLiteral:     return visitAssocArrayLiteral(e.isAssocArrayLiteralExp());
         case EXP.structLiteral: return visitStructLiteral(e.isStructLiteralExp());
         case EXP.compoundLiteral:       return visitCompoundLiteral(e.isCompoundLiteralExp());
