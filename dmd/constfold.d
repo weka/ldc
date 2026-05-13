@@ -1127,7 +1127,7 @@ UnionExp Index(Type type, Expression e1, Expression e2, bool indexIsInBounds)
         TypeSArray tsa = cast(TypeSArray)e1.type.toBasetype();
         uinteger_t length = tsa.dim.toInteger();
         uinteger_t i = e2.toInteger();
-        if (i >= length && (e1.op == EXP.arrayLiteral || !indexIsInBounds))
+        if (i >= length && (e1.op == EXP.arrayLiteral || e1.op == EXP.compactArrayLiteral || !indexIsInBounds))
         {
             // C code only checks bounds if an ArrayLiteralExp
             error(e1.loc, "array index %llu is out of bounds `%s[0 .. %llu]`", i, e1.toChars(), length);
@@ -1136,6 +1136,16 @@ UnionExp Index(Type type, Expression e1, Expression e2, bool indexIsInBounds)
         else if (ArrayLiteralExp ale = e1.isArrayLiteralExp())
         {
             auto e = ale[cast(size_t)i];
+            e.type = type;
+            e.loc = loc;
+            if (hasSideEffect(e))
+                cantExp(ue);
+            else
+                emplaceExp!(UnionExp)(&ue, e);
+        }
+        else if (CompactArrayLiteralExp cale = e1.isCompactArrayLiteralExp())
+        {
+            auto e = cale[cast(size_t)i];
             e.type = type;
             e.loc = loc;
             if (hasSideEffect(e))

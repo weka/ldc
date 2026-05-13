@@ -4379,6 +4379,7 @@ string EXPtoString(EXP op)
         EXP.null_ : "null",
         EXP.string_ : "string",
         EXP.arrayLiteral : "arrayliteral",
+        EXP.compactArrayLiteral : "compactarrayliteral",
         EXP.assocArrayLiteral : "assocarrayliteral",
         EXP.classReference : "classreference",
         EXP.file : "__FILE__",

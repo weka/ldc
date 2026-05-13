@@ -164,6 +164,8 @@ bool needToCopyLiteral(const Expression expr) nothrow
         {
         case EXP.arrayLiteral:
             return e.isArrayLiteralExp().ownedByCtfe == OwnedBy.code;
+        case EXP.compactArrayLiteral:
+            return e.isCompactArrayLiteralExp().ownedByCtfe == OwnedBy.code;
         case EXP.assocArrayLiteral:
             return e.isAssocArrayLiteralExp().ownedByCtfe == OwnedBy.code;
         case EXP.structLiteral:
@@ -231,6 +233,15 @@ UnionExp copyLiteral(Expression e)
         emplaceExp!(ArrayLiteralExp)(&ue, e.loc, e.type, elements);
 
         ArrayLiteralExp r = ue.exp().isArrayLiteralExp();
+        r.ownedByCtfe = OwnedBy.ctfe;
+        return ue;
+    }
+    if (auto cale = e.isCompactArrayLiteralExp())
+    {
+        auto newHead = copyLiteralArray(cale.head, null);
+        auto newTail = cale.tailValue ? copyLiteral(cale.tailValue).copy() : null;
+        emplaceExp!(CompactArrayLiteralExp)(&ue, cale.loc, cale.type, newHead, newTail, cale.tailCount);
+        auto r = ue.exp().isCompactArrayLiteralExp();
         r.ownedByCtfe = OwnedBy.ctfe;
         return ue;
     }
@@ -499,6 +510,9 @@ uinteger_t resolveArrayLength(Expression e)
             const ale = e.isArrayLiteralExp();
             return ale.elements ? ale.elements.length : 0;
         }
+
+        case EXP.compactArrayLiteral:
+            return e.isCompactArrayLiteralExp().length;
 
         case EXP.assocArrayLiteral:
         {
@@ -971,7 +985,7 @@ bool isCtfeComparable(Expression e)
         e = e.isSliceExp().e1;
     if (e.isConst() != 1)
     {
-        if (e.op == EXP.null_ || e.op == EXP.string_ || e.op == EXP.function_ || e.op == EXP.delegate_ || e.op == EXP.arrayLiteral || e.op == EXP.structLiteral || e.op == EXP.assocArrayLiteral || e.op == EXP.classReference)
+        if (e.op == EXP.null_ || e.op == EXP.string_ || e.op == EXP.function_ || e.op == EXP.delegate_ || e.op == EXP.arrayLiteral || e.op == EXP.compactArrayLiteral || e.op == EXP.structLiteral || e.op == EXP.assocArrayLiteral || e.op == EXP.classReference)
         {
             return true;
         }
@@ -1052,6 +1066,56 @@ bool realCmp(EXP op, real_t r1, real_t r2) @safe nothrow
  * Returns:
  *      -1,0,1
  */
+// Helper: read element i from any array-like expression (ArrayLiteralExp,
+// CompactArrayLiteralExp, or one of those wrapped behind a basis).
+private Expression arrayElement(Expression x, size_t i)
+{
+    if (auto ae = x.isArrayLiteralExp())
+    {
+        auto el = (*ae.elements)[i];
+        return el ? el : ae.basis;
+    }
+    if (auto ca = x.isCompactArrayLiteralExp())
+        return ca[i];
+    assert(0);
+}
+
+// Helper: if every element of `x` in the range [lo, lo+len) is the same value,
+// return that value (or null if the value is the basis of a fully-sparse ALE
+// whose basis itself is null). Returns null otherwise. O(1) for compact-in-tail
+// and fully-sparse ALE; O(head) for compact with mixed head; O(len) in the
+// fallback ALE case where elements have explicit entries.
+private Expression uniformElementInRange(Expression x, size_t lo, size_t len)
+{
+    if (len == 0)
+        return null;
+    if (auto ca = x.isCompactArrayLiteralExp())
+    {
+        const headLen = ca.head ? ca.head.length : 0;
+        if (lo >= headLen)
+        {
+            // Range entirely in tail.
+            return ca.tailValue;
+        }
+        return null;
+    }
+    if (auto ae = x.isArrayLiteralExp())
+    {
+        if (!ae.basis)
+            return null;
+        if (!ae.elements)
+            return ae.basis;
+        // Every element in the range must be null (i.e. defaulted to basis).
+        foreach (i; lo .. lo + len)
+        {
+            if ((*ae.elements)[i] !is null)
+                return null;
+        }
+        return ae.basis;
+    }
+    return null;
+}
+
 private int ctfeCmpArrays(const ref Loc loc, Expression e1, Expression e2, uinteger_t len)
 {
     // Resolve slices, if necessary
@@ -1066,6 +1130,7 @@ private int ctfeCmpArrays(const ref Loc loc, Expression e1, Expression e2, uinte
     }
     auto se1 = x1.isStringExp();
     auto ae1 = x1.isArrayLiteralExp();
+    auto ca1 = x1.isCompactArrayLiteralExp();
 
     Expression x2 = e2;
     if (auto sle2 = x2.isSliceExp())
@@ -1075,23 +1140,50 @@ private int ctfeCmpArrays(const ref Loc loc, Expression e1, Expression e2, uinte
     }
     auto se2 = x2.isStringExp();
     auto ae2 = x2.isArrayLiteralExp();
+    auto ca2 = x2.isCompactArrayLiteralExp();
 
-    // Now both must be either EXP.arrayLiteral or EXP.string_
+    // String paths only fire when both sides are strings or string/array mix.
     if (se1 && se2)
         return sliceCmpStringWithString(se1, se2, cast(size_t)lo1, cast(size_t)lo2, cast(size_t)len);
     if (se1 && ae2)
         return sliceCmpStringWithArray(se1, ae2, cast(size_t)lo1, cast(size_t)lo2, cast(size_t)len);
     if (se2 && ae1)
         return -sliceCmpStringWithArray(se2, ae1, cast(size_t)lo2, cast(size_t)lo1, cast(size_t)len);
-    assert(ae1 && ae2);
-    // Comparing two array literals. This case is potentially recursive.
-    // If they aren't strings, we just need an equality check rather than
-    // a full cmp.
-    const bool needCmp = ae1.type.nextOf().isintegral();
+    assert((ae1 || ca1) && (ae2 || ca2));
+
+    // Fast path: if both ranges have a single uniform element, compare once.
+    // Triggers for `compactSlice[1..$] == T[N].init` where the sparse ALE on the
+    // RHS has a basis but no overridden elements, and the compact slice falls
+    // entirely within the repeated tail.
+    if (auto u1 = uniformElementInRange(x1, cast(size_t)lo1, cast(size_t)len))
+    {
+        if (auto u2 = uniformElementInRange(x2, cast(size_t)lo2, cast(size_t)len))
+        {
+            Type elemTypeFast = x1.type.nextOf() ? x1.type.nextOf() : x2.type.nextOf();
+            if (elemTypeFast && elemTypeFast.isintegral())
+            {
+                const sinteger_t c = u1.toInteger() - u2.toInteger();
+                if (c > 0) return 1;
+                if (c < 0) return -1;
+                return 0;
+            }
+            return ctfeRawCmp(loc, u1, u2);
+        }
+    }
+
+    // Comparing two array-like literals (ALE or CompactALE). Element-wise.
+    Type elemType = x1.type.nextOf() ? x1.type.nextOf() : x2.type.nextOf();
+    const bool needCmp = elemType && elemType.isintegral();
     foreach (size_t i; 0 .. cast(size_t)len)
     {
-        Expression ee1 = (*ae1.elements)[cast(size_t)(lo1 + i)];
-        Expression ee2 = (*ae2.elements)[cast(size_t)(lo2 + i)];
+        Expression ee1 = arrayElement(x1, cast(size_t)(lo1 + i));
+        Expression ee2 = arrayElement(x2, cast(size_t)(lo2 + i));
+        if (!ee1 || !ee2)
+        {
+            if (ee1 !is ee2)
+                return 1;
+            continue;
+        }
         if (needCmp)
         {
             const sinteger_t c = ee1.toInteger() - ee2.toInteger();
@@ -1125,7 +1217,7 @@ private FuncDeclaration funcptrOf(Expression e) @safe nothrow
 
 private bool isArray(const Expression e) @safe nothrow
 {
-    return e.op == EXP.arrayLiteral || e.op == EXP.string_ || e.op == EXP.slice || e.op == EXP.null_;
+    return e.op == EXP.arrayLiteral || e.op == EXP.compactArrayLiteral || e.op == EXP.string_ || e.op == EXP.slice || e.op == EXP.null_;
 }
 
 /*****
@@ -1512,6 +1604,16 @@ Expression ctfeIndex(UnionExp* pue, const ref Loc loc, Type type, Expression e1,
         return paintTypeOntoLiteral(pue, type, e);
     }
 
+    if (auto cale = e1.isCompactArrayLiteralExp())
+    {
+        if (indx >= cale.length)
+        {
+            error(loc, "array index %llu is out of bounds `%s[0 .. %llu]`", indx, e1.toChars(), cast(ulong)cale.length);
+            return CTFEExp.cantexp;
+        }
+        return paintTypeOntoLiteral(pue, type, cale[cast(size_t)indx]);
+    }
+
     assert(0);
 }
 
@@ -1789,6 +1891,9 @@ bool isCtfeValueValid(Expression newval)
 
         case EXP.arrayLiteral:
             return true; //((ArrayLiteralExp *)newval)->ownedByCtfe;
+
+        case EXP.compactArrayLiteral:
+            return true;
 
         case EXP.assocArrayLiteral:
             return true; //((AssocArrayLiteralExp *)newval)->ownedByCtfe;

@@ -425,6 +425,7 @@ enum EXP : ubyte
     interval,
 
     loweredAssignExp,
+    compactArrayLiteral, // CompactArrayLiteralExp: [head..., tailValue x tailCount]
 }
 
 enum FirstCKeyword = TOK.inline;

@@ -3847,7 +3847,7 @@ private bool isFullyConservativeBitmap(const(size_t)[] bitmap) pure nothrow @nog
 template RTInfo(T)
 {
     enum pointerBitmap = __traits(getPointerBitmap, T);
-    static if (pointerBitmap.length == 1)
+    static if (pointerBitmap[1 .. $] == size_t[pointerBitmap.length - 1].init)
         enum RTInfo = rtinfoNoPointers;
     else static if (isFullyConservativeBitmap(pointerBitmap[]))
         enum RTInfo = rtinfoHasPointers;

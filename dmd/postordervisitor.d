@@ -126,6 +126,11 @@ public:
         doCond(e.basis) || doCond(e.elements.peekSlice()) || applyTo(e);
     }
 
+    override void visit(CompactArrayLiteralExp e)
+    {
+        (e.head && doCond(e.head.peekSlice())) || doCond(e.tailValue) || applyTo(e);
+    }
+
     override void visit(AssocArrayLiteralExp e)
     {
         doCond(e.keys.peekSlice()) || doCond(e.values.peekSlice()) || applyTo(e);
