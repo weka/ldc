@@ -326,21 +326,39 @@ private Expression pointerBitmap(TraitsExp e, ErrorSink eSink)
     if (sz == ulong.max)
         return ErrorExp.get();
 
-    // When the bitmap data is all zeros (no pointers), emit a CompactArrayLiteralExp
-    // so CTFE / mangling don't have to walk N elements. The downstream druntime
-    // template short-circuits via `pointerBitmap[1 .. $] == size_t[N-1].init`, so the
-    // compact value is never seen by paths that need a materialized literal.
+    // Emit a CompactArrayLiteralExp when the bitmap is uniformly all-zero or
+    // all-max (i.e. every word identical to a "safe" sentinel value). Those are
+    // exactly the two cases the druntime `RTInfo` template short-circuits via
+    // `pointerBitmap[1 .. $] == T[N-1].init` (all-zero) or
+    // `isFullyConservativeBitmap(pointerBitmap[])` (all-max). The compact value
+    // never reaches `RTInfoImpl!(pointerBitmap)` instantiation in those paths,
+    // so we don't need a materialized literal.
     //
-    // For mixed (partial-pointer) bitmaps we keep the regular ArrayLiteralExp because
-    // the RTInfoImpl template instantiation needs a real static-array literal.
+    // For mixed (partial-pointer) bitmaps we keep the regular ArrayLiteralExp
+    // because the RTInfoImpl template instantiation needs a real literal it
+    // can convert to a static-array initializer.
     const size_t totalLen = data.length + 1;
-    if (count == 0 && data.length >= 1)
+    if (data.length >= 1)
     {
-        auto headExps = new Expressions(1);
-        (*headExps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
-        auto tailValue = new IntegerExp(e.loc, 0, Type.tsize_t);
-        return new CompactArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(totalLen),
-            headExps, tailValue, data.length);
+        bool uniform = true;
+        const ulong v0 = data[0];
+        foreach (i; 1 .. data.length)
+        {
+            if (data[cast(size_t)i] != v0)
+            {
+                uniform = false;
+                break;
+            }
+        }
+        // Only emit compact for values the druntime fast-paths recognize.
+        if (uniform && (v0 == 0 || v0 == ulong.max))
+        {
+            auto headExps = new Expressions(1);
+            (*headExps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
+            auto tailValue = new IntegerExp(e.loc, v0, Type.tsize_t);
+            return new CompactArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(totalLen),
+                headExps, tailValue, data.length);
+        }
     }
 
     auto exps = new Expressions(totalLen);
