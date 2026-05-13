@@ -2490,6 +2490,16 @@ public:
             result = e;
     }
 
+    override void visit(CompactArrayLiteralExp e)
+    {
+        // A compact array literal carries head + repeated tail; both head
+        // elements and tailValue must already be CTFE values (the trait that
+        // produces them constructs them from IntegerExp etc.). So
+        // interpretation is a pass-through.
+        e.ownedByCtfe = OwnedBy.ctfe;
+        result = e;
+    }
+
     override void visit(ArrayLiteralExp e)
     {
         debug (LOG)
@@ -4974,7 +4984,7 @@ public:
         assert(e1);
         if (exceptionOrCant(e1))
             return;
-        if (e1.op != EXP.string_ && e1.op != EXP.arrayLiteral && e1.op != EXP.slice && e1.op != EXP.null_)
+        if (e1.op != EXP.string_ && e1.op != EXP.arrayLiteral && e1.op != EXP.compactArrayLiteral && e1.op != EXP.slice && e1.op != EXP.null_)
         {
             error(e.loc, "`%s` cannot be evaluated at compile time", e.toChars());
             result = CTFEExp.cantexp;
@@ -5166,7 +5176,7 @@ public:
             len = e1.type.toBasetype().isTypeSArray().dim.toInteger();
         else
         {
-            if (e1.op != EXP.arrayLiteral && e1.op != EXP.string_ && e1.op != EXP.slice && e1.op != EXP.vector)
+            if (e1.op != EXP.arrayLiteral && e1.op != EXP.compactArrayLiteral && e1.op != EXP.string_ && e1.op != EXP.slice && e1.op != EXP.vector)
             {
                 error(e.loc, "cannot determine length of `%s` at compile time", e.e1.toChars());
                 return false;
@@ -5404,7 +5414,7 @@ public:
             dollar = e1.type.toBasetype().isTypeSArray().dim.toInteger();
         else
         {
-            if (e1.op != EXP.arrayLiteral && e1.op != EXP.string_ && e1.op != EXP.null_ && e1.op != EXP.slice && e1.op != EXP.vector)
+            if (e1.op != EXP.arrayLiteral && e1.op != EXP.compactArrayLiteral && e1.op != EXP.string_ && e1.op != EXP.null_ && e1.op != EXP.slice && e1.op != EXP.vector)
             {
                 error(e.loc, "cannot determine length of `%s` at compile time", e1.toChars());
                 result = CTFEExp.cantexp;
@@ -5475,7 +5485,7 @@ public:
             result.type = e.type;
             return;
         }
-        if (e1.op == EXP.arrayLiteral || e1.op == EXP.string_)
+        if (e1.op == EXP.arrayLiteral || e1.op == EXP.compactArrayLiteral || e1.op == EXP.string_)
         {
             if (sliceBoundsCheck(0, dollar, ilwr, iupr))
             {
@@ -6755,6 +6765,15 @@ private Expression copyRegionExp(Expression e)
             auto ale = e.isArrayLiteralExp();
             ale.basis = copyRegionExp(ale.basis);
             copyArray(ale.elements);
+            break;
+        }
+
+        case EXP.compactArrayLiteral:
+        {
+            auto cale = e.isCompactArrayLiteralExp();
+            if (cale.head)
+                copyArray(cale.head);
+            cale.tailValue = copyRegionExp(cale.tailValue);
             break;
         }
 

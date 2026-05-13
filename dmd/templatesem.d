@@ -1217,7 +1217,7 @@ private bool hasNestedArgs(TemplateInstance _this, Objects* args, bool isstatic)
             continue;
         }
         // Emulate Expression.toMangleBuffer call that had exist in TemplateInstance.genIdent.
-        if (ea.op != EXP.int64 && ea.op != EXP.float64 && ea.op != EXP.complex80 && ea.op != EXP.null_ && ea.op != EXP.string_ && ea.op != EXP.arrayLiteral && ea.op != EXP.assocArrayLiteral && ea.op != EXP.structLiteral)
+        if (ea.op != EXP.int64 && ea.op != EXP.float64 && ea.op != EXP.complex80 && ea.op != EXP.null_ && ea.op != EXP.string_ && ea.op != EXP.arrayLiteral && ea.op != EXP.compactArrayLiteral && ea.op != EXP.assocArrayLiteral && ea.op != EXP.structLiteral)
         {
             if (!ea.type.isTypeError())
                 .error(ea.loc, "%s `%s` expression `%s` is not a valid template value argument", _this.kind, _this.toPrettyChars, ea.toChars());

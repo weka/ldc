@@ -607,6 +607,7 @@ version (IN_LLVM)
         inout(InterpExp)    isInterpExp() { return op == EXP.interpolated ? cast(typeof(return))this : null; }
         inout(TupleExp)     isTupleExp() { return op == EXP.tuple ? cast(typeof(return))this : null; }
         inout(ArrayLiteralExp) isArrayLiteralExp() { return op == EXP.arrayLiteral ? cast(typeof(return))this : null; }
+        inout(CompactArrayLiteralExp) isCompactArrayLiteralExp() { return op == EXP.compactArrayLiteral ? cast(typeof(return))this : null; }
         inout(AssocArrayLiteralExp) isAssocArrayLiteralExp() { return op == EXP.assocArrayLiteral ? cast(typeof(return))this : null; }
         inout(StructLiteralExp) isStructLiteralExp() { return op == EXP.structLiteral ? cast(typeof(return))this : null; }
         inout(CompoundLiteralExp) isCompoundLiteralExp() { return op == EXP.compoundLiteral ? cast(typeof(return))this : null; }
@@ -1883,6 +1884,76 @@ extern (C++) final class ArrayLiteralExp : Expression
         se.sz = sz;
         se.type = type;
         return se;
+    }
+
+    override void accept(Visitor v)
+    {
+        v.visit(this);
+    }
+}
+
+/***********************************************************
+ * Compact array literal: [head[0], ..., head[$-1], tailValue, tailValue, ..., tailValue]
+ *
+ * Logical length is `head.length + tailCount`. Used by paths that produce huge
+ * uniform-suffix arrays (e.g. __traits(getPointerBitmap) for pointer-free types,
+ * T[N].init for trivially-zero T) so CTFE / mangling don't have to walk N elements.
+ *
+ * Any visitor that doesn't override visit(CompactArrayLiteralExp) should call
+ * materialize() to fall back to a regular ArrayLiteralExp.
+ */
+extern (C++) final class CompactArrayLiteralExp : Expression
+{
+    OwnedBy ownedByCtfe = OwnedBy.code;
+
+    Expressions* head;       // may be null or empty
+    Expression tailValue;
+    size_t tailCount;
+
+    extern (D) this(Loc loc, Type type, Expressions* head, Expression tailValue, size_t tailCount) @safe
+    {
+        super(loc, EXP.compactArrayLiteral);
+        this.type = type;
+        this.head = head;
+        this.tailValue = tailValue;
+        this.tailCount = tailCount;
+    }
+
+    extern (D) size_t length() const @safe
+    {
+        return (head ? head.length : 0) + tailCount;
+    }
+
+    extern (D) Expression opIndex(size_t i)
+    {
+        const headLen = head ? head.length : 0;
+        if (i < headLen)
+            return (*head)[i];
+        return tailValue;
+    }
+
+    override CompactArrayLiteralExp syntaxCopy()
+    {
+        return new CompactArrayLiteralExp(loc, type,
+            arraySyntaxCopy(head),
+            tailValue ? tailValue.syntaxCopy() : null,
+            tailCount);
+    }
+
+    /// Build the equivalent ArrayLiteralExp with all elements explicitly listed.
+    /// Cost: O(length). Use only when calling code can't handle the compact form.
+    ArrayLiteralExp materialize()
+    {
+        const total = length;
+        auto exps = new Expressions(total);
+        const headLen = head ? head.length : 0;
+        foreach (i; 0 .. headLen)
+            (*exps)[i] = (*head)[i];
+        foreach (i; headLen .. total)
+            (*exps)[i] = tailValue;
+        auto ale = new ArrayLiteralExp(loc, type, exps);
+        ale.ownedByCtfe = ownedByCtfe;
+        return ale;
     }
 
     override void accept(Visitor v)
@@ -5051,4 +5122,5 @@ private immutable ubyte[EXP.max+1] expSize = [
     EXP._Generic: __traits(classInstanceSize, GenericExp),
     EXP.interval: __traits(classInstanceSize, IntervalExp),
     EXP.loweredAssignExp : __traits(classInstanceSize, LoweredAssignExp),
+    EXP.compactArrayLiteral: __traits(classInstanceSize, CompactArrayLiteralExp),
 ];

@@ -172,6 +172,11 @@ ulong getTypePointerBitmap(Loc loc, Type t, ref Array!(ulong) data, ErrorSink eS
             ulong nextsize = t.next.size();
             if (nextsize == SIZE_INVALID)
                 error = true;
+            // If the element type can't contain any pointers, skip the
+            // per-element loop entirely. Saves O(N) work on large arrays of
+            // POD scalars (e.g. `int[1_000_000]`).
+            if (!t.next.hasPointers())
+                return;
             ulong dim = t.dim.toInteger();
             if (t.hasPointers)
             {
@@ -321,19 +326,29 @@ private Expression pointerBitmap(TraitsExp e, ErrorSink eSink)
     if (sz == ulong.max)
         return ErrorExp.get();
 
-    if (count == 0)
+    // When the bitmap data is all zeros (no pointers), emit a CompactArrayLiteralExp
+    // so CTFE / mangling don't have to walk N elements. The downstream druntime
+    // template short-circuits via `pointerBitmap[1 .. $] == size_t[N-1].init`, so the
+    // compact value is never seen by paths that need a materialized literal.
+    //
+    // For mixed (partial-pointer) bitmaps we keep the regular ArrayLiteralExp because
+    // the RTInfoImpl template instantiation needs a real static-array literal.
+    const size_t totalLen = data.length + 1;
+    if (count == 0 && data.length >= 1)
     {
-        auto exps = new Expressions(1);
-        (*exps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
-        return new ArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(1), exps);
+        auto headExps = new Expressions(1);
+        (*headExps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
+        auto tailValue = new IntegerExp(e.loc, 0, Type.tsize_t);
+        return new CompactArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(totalLen),
+            headExps, tailValue, data.length);
     }
 
-    auto exps = new Expressions(data.length + 1);
+    auto exps = new Expressions(totalLen);
     (*exps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);       // [0] is size in bytes of t
     foreach (size_t i; 1 .. exps.length)
         (*exps)[i] = new IntegerExp(e.loc, data[cast(size_t) (i - 1)], Type.tsize_t);
 
-    auto ale = new ArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(data.length + 1), exps);
+    auto ale = new ArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(totalLen), exps);
     return ale;
 }
 

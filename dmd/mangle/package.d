@@ -1021,6 +1021,31 @@ public:
         buf.writeHexString(cast(const(ubyte)[]) q, false);
     }
 
+    override void visit(CompactArrayLiteralExp e)
+    {
+        // Mangle directly from compact form: write head literally, then `R<tailCount><tailValue>`
+        // when the tail is long enough to benefit from RLE.
+        const headLen = e.head ? e.head.length : 0;
+        const dim = headLen + e.tailCount;
+        buf.writeByte('A');
+        buf.print(dim);
+        foreach (i; 0 .. headLen)
+            (*e.head)[i].accept(this);
+        if (e.tailCount >= 3)
+        {
+            buf.writeByte('R');
+            buf.print(e.tailCount);
+            if (e.tailValue)
+                e.tailValue.accept(this);
+        }
+        else
+        {
+            foreach (i; 0 .. e.tailCount)
+                if (e.tailValue)
+                    e.tailValue.accept(this);
+        }
+    }
+
     override void visit(ArrayLiteralExp e)
     {
         const dim = e.elements ? e.elements.length : 0;
