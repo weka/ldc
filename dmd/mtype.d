@@ -2655,12 +2655,16 @@ extern (C++) final class TypeSArray : TypeArray
         else
             elementinit = next.defaultInitLiteral(loc);
 
-        // For very large arrays whose element-init is a trivial scalar value,
-        // emit a CompactArrayLiteralExp so we don't allocate an N-pointer
-        // sparse `elements` array. The threshold is high enough that small
-        // CTFE-mutated arrays (e.g. druntime's `Bins[2049]`) keep using the
-        // regular ALE path. Larger compact arrays get materialized lazily by
-        // CTFE on first element/slice assignment.
+        // For huge arrays whose element-init is a trivial scalar value, emit
+        // a CompactArrayLiteralExp so we don't allocate an N-pointer sparse
+        // `elements` array. CTFE materializes the compact form lazily on first
+        // element write through a `VarExp` LHS (see `assignToLvalue` in
+        // dinterpret.d). Other LHS shapes — slice-assign (`arr[] = v`),
+        // nested-index (`arr[i][j] = v`), and the implicit init-slice-assign
+        // that backs `T[N] x;` declarations — are not yet handled. Keep the
+        // threshold high enough that those paths almost never see a compact
+        // value; lowering further requires the slice / nested IndexExp
+        // materialize-on-write extensions.
         enum size_t compactThreshold = 65_536;
         if (d >= compactThreshold && elementinit &&
             (elementinit.op == EXP.int64 || elementinit.op == EXP.float64 ||
