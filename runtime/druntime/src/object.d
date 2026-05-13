@@ -3821,14 +3821,6 @@ template RTInfoImpl(size_t[] pointerBitmap)
     immutable size_t[pointerBitmap.length] RTInfoImpl = pointerBitmap[];
 }
 
-private bool allEqualTo(const(size_t)[] arr, size_t value) pure nothrow @nogc @safe
-{
-    foreach (v; arr)
-        if (v != value)
-            return false;
-    return true;
-}
-
 // Returns true if every pointer-sized slot within the type extent is marked
 // as a (potential) pointer. Such a bitmap is semantically identical to a
 // conservative scan, so we can short-circuit to `rtinfoHasPointers` and skip
@@ -3855,7 +3847,7 @@ private bool isFullyConservativeBitmap(const(size_t)[] bitmap) pure nothrow @nog
 template RTInfo(T)
 {
     enum pointerBitmap = __traits(getPointerBitmap, T);
-    static if (allEqualTo(pointerBitmap[1 .. $], 0))
+    static if (pointerBitmap.length == 1)
         enum RTInfo = rtinfoNoPointers;
     else static if (isFullyConservativeBitmap(pointerBitmap[]))
         enum RTInfo = rtinfoHasPointers;
