@@ -1026,9 +1026,40 @@ public:
         const dim = e.elements ? e.elements.length : 0;
         buf.writeByte('A');
         buf.print(dim);
-        foreach (i; 0 .. dim)
+        // Run-length encoding: when N consecutive elements compare equal, emit
+        // `R<N>` once followed by a single element mangle, instead of repeating
+        // the element N times. Currently only applied to IntegerExp runs since
+        // their value-equality is trivially decidable and they dominate the
+        // worst case (GC pointer bitmaps for `RTInfoImpl`).
+        enum size_t rleThreshold = 3;
+        size_t i = 0;
+        while (i < dim)
         {
-            e[i].accept(this);
+            size_t runEnd = i + 1;
+            if (auto ie = e[i].isIntegerExp())
+            {
+                const v = ie.toInteger();
+                while (runEnd < dim)
+                {
+                    auto next = e[runEnd].isIntegerExp();
+                    if (!next || next.toInteger() != v)
+                        break;
+                    runEnd++;
+                }
+            }
+            const runLen = runEnd - i;
+            if (runLen >= rleThreshold)
+            {
+                buf.writeByte('R');
+                buf.print(runLen);
+                e[i].accept(this);
+            }
+            else
+            {
+                foreach (j; i .. runEnd)
+                    e[j].accept(this);
+            }
+            i = runEnd;
         }
     }
 

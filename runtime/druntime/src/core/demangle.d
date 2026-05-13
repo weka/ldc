@@ -1517,17 +1517,38 @@ pure @safe:
                 goto LassocArray;
             // A Number Value...
             // An array literal. Value is repeated Number times.
+            // Elements may use run-length encoding: `R<Count>Value` represents
+            // Count copies of Value.
             popFront();
             put( '[' );
             auto n = decodeNumber(errStatus);
             if (errStatus)
                 return;
-            foreach ( i; 0 .. n )
+            size_t emitted = 0;
+            while (emitted < n)
             {
-                putComma(i);
-                parseValue(errStatus);
-                if (errStatus)
-                    return;
+                size_t repeat = 1;
+                if (front == 'R')
+                {
+                    popFront();
+                    repeat = decodeNumber(errStatus);
+                    if (errStatus)
+                        return;
+                    if (repeat == 0 || emitted + repeat > n)
+                    {
+                        errStatus = true;
+                        return;
+                    }
+                }
+                const savePos = pos;
+                foreach (r; 0 .. repeat)
+                {
+                    pos = savePos;
+                    putComma(emitted++);
+                    parseValue(errStatus);
+                    if (errStatus)
+                        return;
+                }
             }
             put( ']' );
             return;
