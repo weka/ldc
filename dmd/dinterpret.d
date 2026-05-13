@@ -3786,6 +3786,28 @@ public:
                 existingSE.setCodeUnit(index, cast(dchar)newval.toInteger());
                 return null;
             }
+            // Materialize-on-write: if the aggregate is a CompactArrayLiteralExp,
+            // expand it into a regular ArrayLiteralExp so we have writable slots,
+            // and write the materialized form back to its source storage.
+            // For now we only handle the VarExp(var) case; other LHS shapes
+            // (DotVarExp, nested IndexExp, slice assign) fall through to the
+            // generic "not yet supported" error below.
+            if (auto existingCA = aggregate.isCompactArrayLiteralExp())
+            {
+                if (existingCA.ownedByCtfe != OwnedBy.ctfe)
+                {
+                    error(e.loc, "cannot modify read-only constant `%s`", existingCA.toChars());
+                    return CTFEExp.cantexp;
+                }
+                if (auto ve = ie.e1.isVarExp())
+                {
+                    auto srcVar = ve.var.isVarDeclaration();
+                    auto materialized = existingCA.materialize();
+                    materialized.ownedByCtfe = OwnedBy.ctfe;
+                    setValue(srcVar, materialized);
+                    aggregate = materialized;
+                }
+            }
             if (aggregate.op != EXP.arrayLiteral)
             {
                 error(e.loc, "index assignment `%s` is not yet supported in CTFE ", e.toChars());
