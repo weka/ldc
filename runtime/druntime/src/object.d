@@ -3803,11 +3803,44 @@ template RTInfoImpl(size_t[] pointerBitmap)
     immutable size_t[pointerBitmap.length] RTInfoImpl = pointerBitmap[];
 }
 
+private bool allEqualTo(const(size_t)[] arr, size_t value) pure nothrow @nogc @safe
+{
+    foreach (v; arr)
+        if (v != value)
+            return false;
+    return true;
+}
+
+// Returns true if every pointer-sized slot within the type extent is marked
+// as a (potential) pointer. Such a bitmap is semantically identical to a
+// conservative scan, so we can short-circuit to `rtinfoHasPointers` and skip
+// instantiating the RTInfoImpl template (which mangles the entire bitmap into
+// the symbol name and is expensive for large types).
+private bool isFullyConservativeBitmap(const(size_t)[] bitmap) pure nothrow @nogc @safe
+{
+    if (bitmap.length < 2)
+        return false;
+    enum size_t bitsPerWord = size_t.sizeof * 8;
+    immutable totalSlots = (bitmap[0] + size_t.sizeof - 1) / size_t.sizeof;
+    immutable fullWords = totalSlots / bitsPerWord;
+    immutable tailBits = totalSlots % bitsPerWord;
+    if (bitmap.length != 1 + fullWords + (tailBits != 0 ? 1 : 0))
+        return false;
+    foreach (i; 1 .. 1 + fullWords)
+        if (bitmap[i] != size_t.max)
+            return false;
+    if (tailBits != 0 && bitmap[$ - 1] != (size_t(1) << tailBits) - 1)
+        return false;
+    return true;
+}
+
 template RTInfo(T)
 {
     enum pointerBitmap = __traits(getPointerBitmap, T);
-    static if (pointerBitmap[1 .. $] == size_t[pointerBitmap.length - 1].init)
+    static if (allEqualTo(pointerBitmap[1 .. $], 0))
         enum RTInfo = rtinfoNoPointers;
+    else static if (isFullyConservativeBitmap(pointerBitmap[]))
+        enum RTInfo = rtinfoHasPointers;
     else
         enum RTInfo = RTInfoImpl!(pointerBitmap).ptr;
 }
