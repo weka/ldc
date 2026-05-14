@@ -2415,7 +2415,9 @@ public:
 
     // For zero-length dynamic arrays, mirror ArrayLiteralExp's null path.
     if (dyn && len == 0) {
-      result = new DSliceValue(e->type, DtoConstSize_t(0), getNullPtr());
+      LLType *llElemType = DtoMemType(elemType);
+      result = new DSliceValue(e->type, DtoConstSize_t(0),
+                               getNullPtr(getPtrToType(llElemType)));
       return;
     }
 

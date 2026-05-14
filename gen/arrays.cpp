@@ -577,7 +577,7 @@ llvm::Constant *compactArrayLiteralToConst(IRState *p, CompactArrayLiteralExp *c
 
   // Fast path: integral element type with a power-of-two width up to 64 bits.
   // Stream the values into a contiguous buffer keyed by element bit width.
-  if (elemTy->isIntegral() && llElemTy->isIntegerTy()) {
+  if (elemTy->isintegral() && llElemTy->isIntegerTy()) {
     const unsigned bits = llElemTy->getIntegerBitWidth();
     auto isIntExp = [](Expression *e) {
       return e && e->op == EXP::int64;
@@ -620,7 +620,7 @@ llvm::Constant *compactArrayLiteralToConst(IRState *p, CompactArrayLiteralExp *c
   }
 
   // Fast path for floating point.
-  if (elemTy->isFloating() && (llElemTy->isFloatTy() || llElemTy->isDoubleTy())) {
+  if (elemTy->isfloating() && (llElemTy->isFloatTy() || llElemTy->isDoubleTy())) {
     auto isFloatExp = [](Expression *e) {
       return e && (e->op == EXP::float64);
     };

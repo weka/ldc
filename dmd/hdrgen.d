@@ -2350,35 +2350,35 @@ private void expressionPrettyPrint(Expression e, ref OutBuffer buf, ref HdrGenSt
         // Avoid expanding the (possibly very large) middle repetition — print it
         // as `value x count`. Keeps error messages, --ftime-trace output, and
         // pretty-printers bounded regardless of the logical array length.
-        buf.put('[');
+        buf.writeByte('[');
         const headLen = e.head ? e.head.length : 0;
         foreach (i; 0 .. headLen)
         {
             if (i)
-                buf.put(", ");
+                buf.writestring(", ");
             expToBuffer((*e.head)[i], PREC.assign, buf, hgs);
         }
         if (e.middleCount)
         {
             if (headLen)
-                buf.put(", ");
+                buf.writestring(", ");
             if (e.middleValue)
                 expToBuffer(e.middleValue, PREC.assign, buf, hgs);
             else
-                buf.put("...");
+                buf.writestring("...");
             import core.stdc.stdio : snprintf;
             char[32] tmp = void;
             const n = snprintf(tmp.ptr, tmp.length, " x %llu", cast(ulong)e.middleCount);
-            buf.put(tmp[0 .. n]);
+            buf.writestring(tmp[0 .. n]);
         }
         const tailLen = e.tail ? e.tail.length : 0;
         foreach (i; 0 .. tailLen)
         {
             if (headLen || e.middleCount || i > 0)
-                buf.put(", ");
+                buf.writestring(", ");
             expToBuffer((*e.tail)[i], PREC.assign, buf, hgs);
         }
-        buf.put(']');
+        buf.writeByte(']');
     }
 
     void visitAssocArrayLiteral(AssocArrayLiteralExp e)

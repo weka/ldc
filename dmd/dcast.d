@@ -868,7 +868,7 @@ MATCH implicitConvTo(Expression e, Type t)
         Type tb = t.toBasetype();
         Type typeb = e.type.toBasetype();
 
-        if (tb.isStaticOrDynamicArray() && typeb.isStaticOrDynamicArray())
+        if ((tb.ty == Tarray || tb.ty == Tsarray) && (typeb.ty == Tarray || typeb.ty == Tsarray))
         {
             auto result = MATCH.exact;
             const size_t headLen = e.head ? e.head.length : 0;
