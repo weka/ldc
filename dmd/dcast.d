@@ -858,6 +858,77 @@ MATCH implicitConvTo(Expression e, Type t)
         return visit(e);
     }
 
+    // Mirror of visitArrayLiteral for the compact representation: walk head +
+    // middleValue (once is enough — all middle copies share it) + tail elements
+    // and return the worst per-element MATCH against the target's element type.
+    // Required so template-arg deduction and other implicit-conversion paths
+    // treat a compact literal the same as the materialized array literal.
+    MATCH visitCompactArrayLiteral(CompactArrayLiteralExp e)
+    {
+        Type tb = t.toBasetype();
+        Type typeb = e.type.toBasetype();
+
+        if (tb.isStaticOrDynamicArray() && typeb.isStaticOrDynamicArray())
+        {
+            auto result = MATCH.exact;
+            const size_t headLen = e.head ? e.head.length : 0;
+            const size_t tailLen = e.tail ? e.tail.length : 0;
+            const size_t total = headLen + e.middleCount + tailLen;
+
+            if (auto tsa = tb.isTypeSArray())
+            {
+                if (total != tsa.dim.toInteger())
+                    result = MATCH.nomatch;
+            }
+
+            Type telement = tb.nextOf();
+            if (total == 0)
+            {
+                Type typen = typeb.nextOf().toBasetype();
+                if (typen.ty != Tvoid)
+                    result = typen.implicitConvTo(telement);
+            }
+            else
+            {
+                foreach (i; 0 .. headLen)
+                {
+                    if (result == MATCH.nomatch)
+                        break;
+                    auto el = (*e.head)[i];
+                    if (!el)
+                        continue;
+                    MATCH m = el.implicitConvTo(telement);
+                    if (m < result)
+                        result = m;
+                }
+                if (result != MATCH.nomatch && e.middleCount > 0 && e.middleValue)
+                {
+                    MATCH m = e.middleValue.implicitConvTo(telement);
+                    if (m < result)
+                        result = m;
+                }
+                foreach (i; 0 .. tailLen)
+                {
+                    if (result == MATCH.nomatch)
+                        break;
+                    auto el = (*e.tail)[i];
+                    if (!el)
+                        continue;
+                    MATCH m = el.implicitConvTo(telement);
+                    if (m < result)
+                        result = m;
+                }
+            }
+
+            if (!result)
+                result = e.type.implicitConvTo(t);
+
+            return result;
+        }
+
+        return visit(e);
+    }
+
     MATCH visitAssocArrayLiteral(AssocArrayLiteralExp e)
     {
         auto taa = t.toBasetype().isTypeAArray();
@@ -1472,6 +1543,7 @@ MATCH implicitConvTo(Expression e, Type t)
         case EXP.structLiteral    : return visitStructLiteral(e.isStructLiteralExp());
         case EXP.string_          : return visitString(e.isStringExp());
         case EXP.arrayLiteral     : return visitArrayLiteral(e.isArrayLiteralExp());
+        case EXP.compactArrayLiteral: return visitCompactArrayLiteral(e.isCompactArrayLiteralExp());
         case EXP.assocArrayLiteral: return visitAssocArrayLiteral(e.isAssocArrayLiteralExp());
         case EXP.call             : return visitCall(e.isCallExp());
         case EXP.address          : return visitAddr(e.isAddrExp());
