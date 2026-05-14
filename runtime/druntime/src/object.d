@@ -3824,7 +3824,7 @@ template RTInfoImpl(size_t[] pointerBitmap)
 template RTInfo(T)
 {
     enum pointerBitmap = __traits(getPointerBitmap, T);
-    static if (pointerBitmap.length == 1)
+    static if (pointerBitmap[1 .. $] == size_t[pointerBitmap.length - 1].init)
         enum RTInfo = rtinfoNoPointers;
     else
         enum RTInfo = RTInfoImpl!(pointerBitmap).ptr;
