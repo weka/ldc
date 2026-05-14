@@ -1907,21 +1907,23 @@ extern (C++) final class CompactArrayLiteralExp : Expression
     OwnedBy ownedByCtfe = OwnedBy.code;
 
     Expressions* head;       // may be null or empty
-    Expression tailValue;
-    size_t tailCount;
+    Expression middleValue;
+    size_t middleCount;
+    Expressions* tail;       // may be null or empty
 
-    extern (D) this(Loc loc, Type type, Expressions* head, Expression tailValue, size_t tailCount) @safe
+    extern (D) this(Loc loc, Type type, Expressions* head, Expression middleValue, size_t middleCount, Expressions* tail) @safe
     {
         super(loc, EXP.compactArrayLiteral);
         this.type = type;
         this.head = head;
-        this.tailValue = tailValue;
-        this.tailCount = tailCount;
+        this.middleValue = middleValue;
+        this.middleCount = middleCount;
+        this.tail = tail;
     }
 
     extern (D) size_t length() const @safe
     {
-        return (head ? head.length : 0) + tailCount;
+        return (head ? head.length : 0) + middleCount + (tail ? tail.length : 0);
     }
 
     extern (D) Expression opIndex(size_t i)
@@ -1929,28 +1931,36 @@ extern (C++) final class CompactArrayLiteralExp : Expression
         const headLen = head ? head.length : 0;
         if (i < headLen)
             return (*head)[i];
-        return tailValue;
+        i -= headLen;
+        if (i < middleCount)
+            return middleValue;
+        i -= middleCount;
+        return (*tail)[i];
     }
 
     override CompactArrayLiteralExp syntaxCopy()
     {
         return new CompactArrayLiteralExp(loc, type,
             arraySyntaxCopy(head),
-            tailValue ? tailValue.syntaxCopy() : null,
-            tailCount);
+            middleValue ? middleValue.syntaxCopy() : null,
+            middleCount,
+            arraySyntaxCopy(tail));
     }
 
     /// Build the equivalent ArrayLiteralExp with all elements explicitly listed.
     /// Cost: O(length). Use only when calling code can't handle the compact form.
     ArrayLiteralExp materialize()
     {
-        const total = length;
+        const total = length();
         auto exps = new Expressions(total);
         const headLen = head ? head.length : 0;
         foreach (i; 0 .. headLen)
             (*exps)[i] = (*head)[i];
-        foreach (i; headLen .. total)
-            (*exps)[i] = tailValue;
+        foreach (i; headLen .. headLen + middleCount)
+            (*exps)[i] = middleValue;
+        const tailLen = tail ? tail.length : 0;
+        foreach (i; 0 .. tailLen)
+            (*exps)[headLen + middleCount + i] = (*tail)[i];
         auto ale = new ArrayLiteralExp(loc, type, exps);
         ale.ownedByCtfe = ownedByCtfe;
         return ale;

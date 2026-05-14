@@ -226,11 +226,23 @@ Expression implicitCastTo(Expression e, Scope* sc, Type t)
         return result;
     }
 
+    Expression visitCompactArrayLiteral(CompactArrayLiteralExp e)
+    {
+        auto result = visit(e);
+
+        Type tb = result.type.toBasetype();
+        if (auto ta = tb.isTypeDArray())
+            if (global.params.useTypeInfo && Type.dtypeinfo)
+                semanticTypeInfo(sc, ta.next);
+        return result;
+    }
+
     Expression visitSlice(SliceExp e)
     {
         auto result = visit(e);
 
         if (auto se = result.isSliceExp())
+        {
             if (auto ale = se.e1.isArrayLiteralExp())
             {
                 Type tb = t.toBasetype();
@@ -239,6 +251,15 @@ Expression implicitCastTo(Expression e, Scope* sc, Type t)
                     : tb.nextOf().arrayOf();
                 se.e1 = ale.implicitCastTo(sc, tx);
             }
+            else if (auto cale = se.e1.isCompactArrayLiteralExp())
+            {
+                Type tb = t.toBasetype();
+                Type tx = (tb.ty == Tsarray)
+                    ? tb.nextOf().sarrayOf(cale.length())
+                    : tb.nextOf().arrayOf();
+                se.e1 = cale.implicitCastTo(sc, tx);
+            }
+        }
 
         return result;
     }
@@ -250,6 +271,7 @@ Expression implicitCastTo(Expression e, Scope* sc, Type t)
         case EXP.error       : return visitError       (e.isErrorExp());
         case EXP.function_   : return visitFunc        (e.isFuncExp());
         case EXP.arrayLiteral: return visitArrayLiteral(e.isArrayLiteralExp());
+        case EXP.compactArrayLiteral: return visitCompactArrayLiteral(e.isCompactArrayLiteralExp());
         case EXP.slice       : return visitSlice       (e.isSliceExp());
     }
 }
@@ -3142,6 +3164,11 @@ Expression castTo(Expression e, Scope* sc, Type t, Type att = null)
         return Expression.combine(e, ini);
     }
 
+    Expression visitCompactArrayLiteral(CompactArrayLiteralExp e)
+    {
+        return e.materialize().castTo(sc, t);
+    }
+
     switch (e.op)
     {
         default                   : return visit(e);
@@ -3153,6 +3180,7 @@ Expression castTo(Expression e, Scope* sc, Type t, Type att = null)
         case EXP.address          : return visitAddr(e.isAddrExp());
         case EXP.tuple            : return visitTuple(e.isTupleExp());
         case EXP.arrayLiteral     : return visitArrayLiteral(e.isArrayLiteralExp());
+        case EXP.compactArrayLiteral: return visitCompactArrayLiteral(e.isCompactArrayLiteralExp());
         case EXP.assocArrayLiteral: return visitAssocArrayLiteral(e.isAssocArrayLiteralExp());
         case EXP.symbolOffset     : return visitSymOff(e.isSymOffExp());
         case EXP.delegate_        : return visitDelegate(e.isDelegateExp());

@@ -498,6 +498,38 @@ public:
     result = DtoConstSlice(DtoConstSize_t(e->elements->length), gvar);
   }
 
+  void visit(CompactArrayLiteralExp *e) override {
+    IF_LOG Logger::print("CompactArrayLiteralExp::toConstElem: %s @ %s\n",
+                         e->toChars(), e->type->toChars());
+    LOG_SCOPE;
+
+    Type *bt = e->type->toBasetype();
+    bool dyn = (bt->ty != TY::Tsarray);
+
+    llvm::Constant *initval = compactArrayLiteralToConst(p, e);
+
+    if (!dyn) {
+      result = initval;
+      return;
+    }
+
+    bool canBeConst = e->type->isConst() || e->type->isImmutable();
+    auto gvar = new llvm::GlobalVariable(
+        gIR->module, initval->getType(), canBeConst,
+        llvm::GlobalValue::InternalLinkage, initval, ".dynarrayStorage");
+    gvar->setUnnamedAddr(canBeConst ? llvm::GlobalValue::UnnamedAddr::Global
+                                    : llvm::GlobalValue::UnnamedAddr::None);
+
+    if (bt->ty == TY::Tpointer) {
+      result = gvar;
+      return;
+    }
+
+    const size_t logicalLen = (e->head ? e->head->length : 0) + e->middleCount
+                              + (e->tail ? e->tail->length : 0);
+    result = DtoConstSlice(DtoConstSize_t(logicalLen), gvar);
+  }
+
   //////////////////////////////////////////////////////////////////////////////
 
   void visit(StructLiteralExp *e) override {

@@ -18,6 +18,7 @@
 
 class ArrayInitializer;
 class ArrayLiteralExp;
+class CompactArrayLiteralExp;
 class DSliceValue;
 class DValue;
 class Expression;
@@ -46,6 +47,7 @@ bool isConstLiteral(Expression *e, bool immutableType = false);
 
 /// Returns the constant for the given array literal expression.
 llvm::Constant *arrayLiteralToConst(IRState *p, ArrayLiteralExp *ale);
+llvm::Constant *compactArrayLiteralToConst(IRState *p, CompactArrayLiteralExp *cale);
 
 /// Initializes a chunk of memory with the contents of an array literal.
 ///

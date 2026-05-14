@@ -1023,27 +1023,28 @@ public:
 
     override void visit(CompactArrayLiteralExp e)
     {
-        // Mangle directly from compact form: write head literally, then `R<tailCount><tailValue>`
-        // when the tail is long enough to benefit from RLE.
         const headLen = e.head ? e.head.length : 0;
-        const dim = headLen + e.tailCount;
+        const tailLen = e.tail ? e.tail.length : 0;
+        const dim = headLen + e.middleCount + tailLen;
         buf.writeByte('A');
         buf.print(dim);
         foreach (i; 0 .. headLen)
             (*e.head)[i].accept(this);
-        if (e.tailCount >= 3)
+        if (e.middleCount >= 3)
         {
             buf.writeByte('R');
-            buf.print(e.tailCount);
-            if (e.tailValue)
-                e.tailValue.accept(this);
+            buf.print(e.middleCount);
+            if (e.middleValue)
+                e.middleValue.accept(this);
         }
         else
         {
-            foreach (i; 0 .. e.tailCount)
-                if (e.tailValue)
-                    e.tailValue.accept(this);
+            foreach (i; 0 .. e.middleCount)
+                if (e.middleValue)
+                    e.middleValue.accept(this);
         }
+        foreach (i; 0 .. tailLen)
+            (*e.tail)[i].accept(this);
     }
 
     override void visit(ArrayLiteralExp e)

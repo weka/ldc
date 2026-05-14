@@ -2456,7 +2456,7 @@ private void expressionPrettyPrint(Expression e, ref OutBuffer buf, ref HdrGenSt
 
     void visitCompactArrayLiteral(CompactArrayLiteralExp e)
     {
-        // Avoid expanding the (possibly very large) tail repetition — print it
+        // Avoid expanding the (possibly very large) middle repetition — print it
         // as `value x count`. Keeps error messages, --ftime-trace output, and
         // pretty-printers bounded regardless of the logical array length.
         buf.put('[');
@@ -2467,18 +2467,25 @@ private void expressionPrettyPrint(Expression e, ref OutBuffer buf, ref HdrGenSt
                 buf.put(", ");
             expToBuffer((*e.head)[i], PREC.assign, buf, hgs);
         }
-        if (e.tailCount)
+        if (e.middleCount)
         {
             if (headLen)
                 buf.put(", ");
-            if (e.tailValue)
-                expToBuffer(e.tailValue, PREC.assign, buf, hgs);
+            if (e.middleValue)
+                expToBuffer(e.middleValue, PREC.assign, buf, hgs);
             else
                 buf.put("...");
             import core.stdc.stdio : snprintf;
             char[32] tmp = void;
-            const n = snprintf(tmp.ptr, tmp.length, " x %llu", cast(ulong)e.tailCount);
+            const n = snprintf(tmp.ptr, tmp.length, " x %llu", cast(ulong)e.middleCount);
             buf.put(tmp[0 .. n]);
+        }
+        const tailLen = e.tail ? e.tail.length : 0;
+        foreach (i; 0 .. tailLen)
+        {
+            if (headLen || e.middleCount || i > 0)
+                buf.put(", ");
+            expToBuffer((*e.tail)[i], PREC.assign, buf, hgs);
         }
         buf.put(']');
     }

@@ -88,7 +88,6 @@ public:
     void visit(ASTCodegen.VoidInitExp e) { visit(cast(ASTCodegen.Expression)e); }
     void visit(ASTCodegen.ThrownExceptionExp e) { visit(cast(ASTCodegen.Expression)e); }
     void visit(ASTCodegen.LoweredAssignExp e) { visit(cast(ASTCodegen.AssignExp)e); }
-    void visit(ASTCodegen.CompactArrayLiteralExp e) { visit(cast(ASTCodegen.Expression)e); }
 }
 
 /**

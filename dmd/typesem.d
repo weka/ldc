@@ -3714,7 +3714,7 @@ Expression defaultInitLiteral(Type t, Loc loc)
             (elementinit.op == EXP.int64 || elementinit.op == EXP.float64 ||
              elementinit.op == EXP.null_))
         {
-            return new CompactArrayLiteralExp(loc, tsa, null, elementinit, d);
+            return new CompactArrayLiteralExp(loc, tsa, null, elementinit, d, null);
         }
 
         auto elements = new Expressions(d);
