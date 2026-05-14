@@ -172,19 +172,36 @@ ulong getTypePointerBitmap(Loc loc, Type t, ref Array!(ulong) data, ErrorSink eS
             ulong nextsize = t.next.size();
             if (nextsize == SIZE_INVALID)
                 error = true;
-            // If the element type can't contain any pointers, skip the
-            // per-element loop entirely. Saves O(N) work on large arrays of
-            // POD scalars (e.g. `int[1_000_000]`).
+            ulong dim = t.dim.toInteger();
+
+            // `void` is conservatively treated as a potential pointer slot
+            // (preserved from upstream D semantics). For `void[N]` we still
+            // want to mark every pointer-sized slot within the array extent,
+            // but we can do it in O(words) by bulk-setting bits in `data[]`
+            // rather than calling setpointer N times.
+            if (t.next.ty == Tvoid)
+            {
+                const ulong totalBytes = arrayoff + dim;
+                const ulong startSlot = arrayoff / sz_size_t;
+                const ulong endSlot = (totalBytes + sz_size_t - 1) / sz_size_t;
+                foreach (slot; startSlot .. endSlot)
+                {
+                    count++;
+                    data[cast(size_t)(slot / bitsPerElement)]
+                        |= 1L << (slot % bitsPerElement);
+                }
+                return;
+            }
+
+            // For element types that can't contain any pointers (e.g.
+            // `int[N]`, `ubyte[N]`), skip the per-element loop entirely.
             if (!t.next.hasPointers())
                 return;
-            ulong dim = t.dim.toInteger();
-            if (t.hasPointers)
+
+            for (ulong i = 0; i < dim; i++)
             {
-                for (ulong i = 0; i < dim; i++)
-                {
-                    offset = arrayoff + i * nextsize;
-                    visit(t.next);
-                }
+                offset = arrayoff + i * nextsize;
+                visit(t.next);
             }
             offset = arrayoff;
         }
@@ -305,6 +322,31 @@ ulong getTypePointerBitmap(Loc loc, Type t, ref Array!(ulong) data, ErrorSink eS
  *  Returns: [T.sizeof, pointerbit0-31/63, pointerbit32/64-63/128, ...]
  *       OR: [T.sizeof] if the type contains no pointers
  */
+// Returns true if every byte of `t` is conservatively treated as a potential
+// pointer slot. True for `void`, `void[N]`, and recursively for structs whose
+// only field covers the entire struct with a conservative type. Used by the
+// `__traits(getPointerBitmap)` fast path to emit a compact all-bits-set bitmap
+// directly, without ever populating an N-word bitmap array.
+private bool isFullyConservativeType(Type t)
+{
+    t = t.toBasetype();
+    if (t.ty == Tvoid)
+        return true;
+    if (auto tsa = t.isTypeSArray())
+        return isFullyConservativeType(tsa.next);
+    if (auto ts = t.isTypeStruct())
+    {
+        auto sd = ts.sym;
+        if (sd && sd.fields.length == 1)
+        {
+            auto f = sd.fields[0];
+            if (f.offset == 0 && f.type.size(Loc.initial) == t.size(Loc.initial))
+                return isFullyConservativeType(f.type);
+        }
+    }
+    return false;
+}
+
 private Expression pointerBitmap(TraitsExp e, ErrorSink eSink)
 {
     if (!e.args || e.args.length != 1)
@@ -318,6 +360,36 @@ private Expression pointerBitmap(TraitsExp e, ErrorSink eSink)
     {
         eSink.error(e.loc, "`%s` is not a type", (*e.args)[0].toChars());
         return ErrorExp.get();
+    }
+
+    // Fast path: type is fully conservative (e.g. `void[N]`, or a struct
+    // wrapping one). Emit the compact bitmap directly without walking the
+    // type or allocating a temporary `Array!(ulong)`. Saves the entire fill
+    // pass — O(1) construction regardless of array size.
+    if (isFullyConservativeType(t))
+    {
+        const ulong szFast = t.size(e.loc);
+        if (szFast == SIZE_INVALID)
+            return ErrorExp.get();
+        const ulong sz_size_t_fast = Type.tsize_t.size(e.loc);
+        enum ulong bitsPerWord = 64;
+        const ulong totalSlots = (szFast + sz_size_t_fast - 1) / sz_size_t_fast;
+        const ulong fullWords = totalSlots / bitsPerWord;
+        const ulong tailBits = totalSlots % bitsPerWord;
+        const size_t dataLen = cast(size_t)(fullWords + (tailBits != 0 ? 1 : 0));
+        const size_t totalLenFast = dataLen + 1;
+
+        auto headExpsFast = new Expressions(1);
+        (*headExpsFast)[0] = new IntegerExp(e.loc, szFast, Type.tsize_t);
+        auto middleValueFast = new IntegerExp(e.loc, ulong.max, Type.tsize_t);
+        Expressions* tailExpsFast = null;
+        if (tailBits != 0)
+        {
+            tailExpsFast = new Expressions(1);
+            (*tailExpsFast)[0] = new IntegerExp(e.loc, (1uL << tailBits) - 1, Type.tsize_t);
+        }
+        return new CompactArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(totalLenFast),
+            headExpsFast, middleValueFast, cast(size_t)fullWords, tailExpsFast);
     }
 
     Array!(ulong) data;

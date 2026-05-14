@@ -7165,6 +7165,62 @@ MATCH deduceType(scope RootObject o, scope Scope* sc, scope Type tparam,
             visit(cast(Expression)e);
         }
 
+        // Mirror of visit(ArrayLiteralExp): walk head + middleValue (once) +
+        // tail elements to deduce T from element types. Without this override
+        // a compact literal would fall through to visit(Expression) and miss
+        // element-level deduction, breaking template arg deduction for cases
+        // like `bar(T)(T[] a)` with a compact-form static array literal.
+        override void visit(CompactArrayLiteralExp e)
+        {
+            const size_t headLen = e.head ? e.head.length : 0;
+            const size_t tailLen = e.tail ? e.tail.length : 0;
+            const size_t total = headLen + e.middleCount + tailLen;
+
+            if (tparam.ty == Tarray && total > 0)
+            {
+                Type tn = (cast(TypeDArray)tparam).next;
+                result = MATCH.exact;
+                foreach (i; 0 .. headLen)
+                {
+                    if (result == MATCH.nomatch)
+                        break;
+                    auto el = (*e.head)[i];
+                    if (!el)
+                        continue;
+                    MATCH m = deduceType(el, sc, tn, parameters, dedtypes, wm);
+                    if (m < result)
+                        result = m;
+                }
+                if (result != MATCH.nomatch && e.middleCount > 0 && e.middleValue)
+                {
+                    MATCH m = deduceType(e.middleValue, sc, tn, parameters, dedtypes, wm);
+                    if (m < result)
+                        result = m;
+                }
+                foreach (i; 0 .. tailLen)
+                {
+                    if (result == MATCH.nomatch)
+                        break;
+                    auto el = (*e.tail)[i];
+                    if (!el)
+                        continue;
+                    MATCH m = deduceType(el, sc, tn, parameters, dedtypes, wm);
+                    if (m < result)
+                        result = m;
+                }
+                return;
+            }
+
+            Type taai;
+            if (e.type.ty == Tarray && (tparam.ty == Tsarray || tparam.ty == Taarray && (taai = (cast(TypeAArray)tparam).index).ty == Tident && (cast(TypeIdentifier)taai).idents.length == 0))
+            {
+                // Consider compile-time known boundaries
+                e.type.nextOf().sarrayOf(total).accept(this);
+                return;
+            }
+            visit(cast(Expression)e);
+        }
+
         override void visit(AssocArrayLiteralExp e)
         {
             if (tparam.ty == Taarray && e.keys && e.keys.length)
