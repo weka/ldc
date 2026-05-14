@@ -629,6 +629,18 @@ if(LDC_WITH_LLD)
             list(APPEND LDC_LINKERFLAG_LIST -lxar)
         endif()
     endif()
+    # LLD's ELF writer uses zstd for SHF_COMPRESSED debug sections from LLVM 16+.
+    # On Linux distros that ship LLVM, the libLLVM .so already pulls zstd in, but
+    # static link variants and Homebrew's llvm@N on macOS leave the lld* archives
+    # with unresolved ZSTD_* symbols. Link zstd explicitly.
+    if(NOT MSVC AND NOT (LDC_LLVM_VER LESS 1600))
+        find_library(ZSTD_LIBRARY NAMES zstd HINTS /opt/homebrew/opt/zstd/lib /usr/local/opt/zstd/lib)
+        if(ZSTD_LIBRARY)
+            list(APPEND LDC_LINKERFLAG_LIST ${ZSTD_LIBRARY})
+        else()
+            list(APPEND LDC_LINKERFLAG_LIST -lzstd)
+        endif()
+    endif()
 endif()
 
 if(NOT DEFINED LDC_LINK_MANUALLY)
