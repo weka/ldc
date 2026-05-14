@@ -545,6 +545,126 @@ bool isConstLiteral(Expression *e, bool immutableType) {
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// Builds an llvm::Constant directly from a CompactArrayLiteralExp. For
+// integral or floating-point element types, this avoids both the head/middle/tail
+// expansion to an ArrayLiteralExp (which would allocate N IntegerExp pointers)
+// AND LLVM's ConstantArray (which would allocate N ConstantInt objects + N Use
+// slots). The fast path streams the raw element values into a contiguous
+// buffer and emits a single llvm::ConstantDataArray.
+//
+// For non-trivial element types (pointers, structs, etc.) we fall back to
+// materializing the compact node into a regular ArrayLiteralExp and using
+// arrayLiteralToConst — correct but loses the memory win.
+llvm::Constant *compactArrayLiteralToConst(IRState *p, CompactArrayLiteralExp *cale) {
+  const size_t headLen = cale->head ? cale->head->length : 0;
+  const size_t tailLen = cale->tail ? cale->tail->length : 0;
+  const size_t total = headLen + cale->middleCount + tailLen;
+
+  Type *elemTy = cale->type->toBasetype()->nextOf();
+  LLType *llElemTy = DtoMemType(elemTy);
+
+  // Lambda: read element i of the compact array as an Expression*, without
+  // ever building a flat ALE. Mirrors the D-side opIndex.
+  auto getElem = [&](size_t i) -> Expression * {
+    if (i < headLen)
+      return (*cale->head)[i];
+    i -= headLen;
+    if (i < cale->middleCount)
+      return cale->middleValue;
+    i -= cale->middleCount;
+    return (*cale->tail)[i];
+  };
+
+  // Fast path: integral element type with a power-of-two width up to 64 bits.
+  // Stream the values into a contiguous buffer keyed by element bit width.
+  if (elemTy->isIntegral() && llElemTy->isIntegerTy()) {
+    const unsigned bits = llElemTy->getIntegerBitWidth();
+    auto isIntExp = [](Expression *e) {
+      return e && e->op == EXP::int64;
+    };
+    bool allInt = true;
+    if (cale->middleCount && !isIntExp(cale->middleValue))
+      allInt = false;
+    if (allInt && cale->head) {
+      for (size_t i = 0; i < headLen && allInt; ++i)
+        allInt = isIntExp((*cale->head)[i]);
+    }
+    if (allInt && cale->tail) {
+      for (size_t i = 0; i < tailLen && allInt; ++i)
+        allInt = isIntExp((*cale->tail)[i]);
+    }
+
+    if (allInt) {
+      auto emit = [&](auto sample) -> llvm::Constant * {
+        using T = decltype(sample);
+        llvm::SmallVector<T, 16> buf;
+        buf.reserve(total);
+        for (size_t i = 0; i < headLen; ++i)
+          buf.push_back(static_cast<T>((*cale->head)[i]->toInteger()));
+        const auto mid = static_cast<T>(cale->middleValue ? cale->middleValue->toInteger() : 0);
+        for (size_t i = 0; i < cale->middleCount; ++i)
+          buf.push_back(mid);
+        for (size_t i = 0; i < tailLen; ++i)
+          buf.push_back(static_cast<T>((*cale->tail)[i]->toInteger()));
+        return llvm::ConstantDataArray::get(p->context(), llvm::ArrayRef<T>(buf));
+      };
+
+      switch (bits) {
+        case 8:  return emit(uint8_t{});
+        case 16: return emit(uint16_t{});
+        case 32: return emit(uint32_t{});
+        case 64: return emit(uint64_t{});
+        default: break;  // odd widths (e.g. i1) fall through to slow path
+      }
+    }
+  }
+
+  // Fast path for floating point.
+  if (elemTy->isFloating() && (llElemTy->isFloatTy() || llElemTy->isDoubleTy())) {
+    auto isFloatExp = [](Expression *e) {
+      return e && (e->op == EXP::float64);
+    };
+    bool allFloat = true;
+    if (cale->middleCount && !isFloatExp(cale->middleValue))
+      allFloat = false;
+    if (allFloat && cale->head) {
+      for (size_t i = 0; i < headLen && allFloat; ++i)
+        allFloat = isFloatExp((*cale->head)[i]);
+    }
+    if (allFloat && cale->tail) {
+      for (size_t i = 0; i < tailLen && allFloat; ++i)
+        allFloat = isFloatExp((*cale->tail)[i]);
+    }
+
+    if (allFloat) {
+      auto emit = [&](auto sample) -> llvm::Constant * {
+        using T = decltype(sample);
+        llvm::SmallVector<T, 16> buf;
+        buf.reserve(total);
+        for (size_t i = 0; i < headLen; ++i)
+          buf.push_back(static_cast<T>((*cale->head)[i]->toReal()));
+        const auto mid = static_cast<T>(cale->middleValue ? cale->middleValue->toReal() : 0);
+        for (size_t i = 0; i < cale->middleCount; ++i)
+          buf.push_back(mid);
+        for (size_t i = 0; i < tailLen; ++i)
+          buf.push_back(static_cast<T>((*cale->tail)[i]->toReal()));
+        return llvm::ConstantDataArray::get(p->context(), llvm::ArrayRef<T>(buf));
+      };
+
+      if (llElemTy->isFloatTy())
+        return emit(float{});
+      return emit(double{});
+    }
+  }
+
+  // Slow path: materialize to a regular ALE and reuse arrayLiteralToConst.
+  // Allocates O(total) elements pointer storage — only fires when the element
+  // type isn't a primitive we can stream into ConstantDataArray.
+  return arrayLiteralToConst(p, cale->materialize());
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 llvm::Constant *arrayLiteralToConst(IRState *p, ArrayLiteralExp *ale) {
   // Build the initializer. We have to take care as due to unions in the
   // element types (with different fields being initialized), we can end up

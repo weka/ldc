@@ -2402,6 +2402,57 @@ public:
 
   //////////////////////////////////////////////////////////////////////////////
 
+  void visit(CompactArrayLiteralExp *e) override {
+    IF_LOG Logger::print("CompactArrayLiteralExp::toElem: %s @ %s\n",
+                         e->toChars(), e->type->toChars());
+    LOG_SCOPE;
+
+    Type *arrayType = e->type->toBasetype();
+    Type *elemType = arrayType->nextOf()->toBasetype();
+    const bool dyn = (arrayType->ty == TY::Tarray);
+    const size_t len = (e->head ? e->head->length : 0) + e->middleCount
+                       + (e->tail ? e->tail->length : 0);
+
+    // For zero-length dynamic arrays, mirror ArrayLiteralExp's null path.
+    if (dyn && len == 0) {
+      result = new DSliceValue(e->type, DtoConstSize_t(0), getNullPtr());
+      return;
+    }
+
+    // Build the constant directly via the ConstantDataArray fast path —
+    // avoids materializing N IntegerExp pointers.
+    llvm::Constant *init = compactArrayLiteralToConst(p, e);
+    LLType *llStoType = init->getType();
+
+    if (arrayType->ty == TY::Tsarray) {
+      // Static array: alloca then store the constant. For larger constants
+      // this would be wasteful if it produced N movs at codegen time, but
+      // LLVM's later optimizer recognizes the const-store pattern and
+      // promotes via memcpy from a global. We mirror the ArrayLiteralExp
+      // path's behavior — alloca + store is the canonical shape.
+      llvm::Value *storage =
+          DtoRawAlloca(llStoType, DtoAlignment(elemType), "compactarrayliteral");
+      DtoStore(init, storage);
+      result = new DLValue(e->type, storage);
+      return;
+    }
+
+    // Dynamic array (Tarray) or pointer: emit as an internal global and
+    // produce a slice / pointer to it.
+    auto global = new llvm::GlobalVariable(
+        gIR->module, llStoType, /*isConstant=*/true,
+        llvm::GlobalValue::InternalLinkage, init, ".compactarrayliteral");
+    global->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+
+    if (arrayType->ty == TY::Tpointer) {
+      result = new DImValue(e->type, global);
+    } else {
+      result = new DSliceValue(arrayType, DtoConstSize_t(len), global);
+    }
+  }
+
+  //////////////////////////////////////////////////////////////////////////////
+
   static DLValue *emitStructLiteral(StructLiteralExp *e,
                                     LLValue *dstMem = nullptr) {
     IF_LOG Logger::print("StructLiteralExp::toElem: %s @ %s\n", e->toChars(),

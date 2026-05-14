@@ -336,27 +336,59 @@ private Expression pointerBitmap(TraitsExp e, ErrorSink eSink)
     // because the RTInfoImpl template instantiation needs a real literal it
     // can convert to a static-array initializer.
     const size_t totalLen = data.length + 1;
-    if (data.length >= 1)
+
+    // Detect the longest middle run of identical bitmap words. When the run
+    // is long enough, emit a CompactArrayLiteralExp so CTFE / mangling don't
+    // have to walk N elements.
+    enum size_t compactThreshold = 3;
+    size_t bestRunLen = 0;
+    size_t bestRunStart = 0;
+    ulong bestRunVal = 0;
+
+    if (data.length >= compactThreshold)
     {
-        bool uniform = true;
-        const ulong v0 = data[0];
-        foreach (i; 1 .. data.length)
+        size_t i = 0;
+        while (i < data.length)
         {
-            if (data[cast(size_t)i] != v0)
+            size_t j = i + 1;
+            while (j < data.length && data[cast(size_t)j] == data[cast(size_t)i])
+                j++;
+            const runLen = j - i;
+            if (runLen > bestRunLen)
             {
-                uniform = false;
-                break;
+                bestRunLen = runLen;
+                bestRunStart = i;
+                bestRunVal = data[cast(size_t)i];
             }
+            i = j;
         }
-        // Only emit compact for values the druntime fast-paths recognize.
-        if (uniform && (v0 == 0 || v0 == ulong.max))
+    }
+
+    // Only emit compact for "safe" values that the druntime fast-paths recognize
+    // (all-zero or all-max). This ensures we don't break druntime templates that
+    // might expect a real literal for mixed bitmaps, while still getting O(1)
+    // for the huge void[N] cases.
+    if (bestRunLen >= compactThreshold && (bestRunVal == 0 || bestRunVal == ulong.max))
+    {
+        auto headExps = new Expressions(1 + bestRunStart);
+        (*headExps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
+        foreach (i; 0 .. bestRunStart)
+            (*headExps)[i + 1] = new IntegerExp(e.loc, data[cast(size_t)i], Type.tsize_t);
+
+        auto middleValue = new IntegerExp(e.loc, bestRunVal, Type.tsize_t);
+
+        const tailStart = bestRunStart + bestRunLen;
+        const tailLen = data.length - tailStart;
+        Expressions* tailExps = null;
+        if (tailLen > 0)
         {
-            auto headExps = new Expressions(1);
-            (*headExps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
-            auto tailValue = new IntegerExp(e.loc, v0, Type.tsize_t);
-            return new CompactArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(totalLen),
-                headExps, tailValue, data.length);
+            tailExps = new Expressions(tailLen);
+            foreach (i; 0 .. tailLen)
+                (*tailExps)[i] = new IntegerExp(e.loc, data[cast(size_t)(tailStart + i)], Type.tsize_t);
         }
+
+        return new CompactArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(totalLen),
+            headExps, middleValue, bestRunLen, tailExps);
     }
 
     auto exps = new Expressions(totalLen);

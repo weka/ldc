@@ -128,7 +128,7 @@ public:
 
     override void visit(CompactArrayLiteralExp e)
     {
-        (e.head && doCond(e.head.peekSlice())) || doCond(e.tailValue) || applyTo(e);
+        (e.head && doCond(e.head.peekSlice())) || doCond(e.middleValue) || (e.tail && doCond(e.tail.peekSlice())) || applyTo(e);
     }
 
     override void visit(AssocArrayLiteralExp e)

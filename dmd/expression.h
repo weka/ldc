@@ -443,6 +443,22 @@ public:
     void accept(Visitor *v) override { v->visit(this); }
 };
 
+class CompactArrayLiteralExp final : public Expression
+{
+public:
+    OwnedBy ownedByCtfe;
+
+    Expressions *head;
+    Expression *middleValue;
+    d_size_t middleCount;
+    Expressions *tail;
+
+    CompactArrayLiteralExp *syntaxCopy() override;
+    ArrayLiteralExp *materialize();
+
+    void accept(Visitor *v) override { v->visit(this); }
+};
+
 class AssocArrayLiteralExp final : public Expression
 {
 public:

@@ -7134,7 +7134,9 @@ private Expression copyRegionExp(Expression e)
             auto cale = e.isCompactArrayLiteralExp();
             if (cale.head)
                 copyArray(cale.head);
-            cale.tailValue = copyRegionExp(cale.tailValue);
+            cale.middleValue = copyRegionExp(cale.middleValue);
+            if (cale.tail)
+                copyArray(cale.tail);
             break;
         }
 

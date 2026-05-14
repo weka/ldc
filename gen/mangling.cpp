@@ -121,12 +121,21 @@ std::string getIRMangledName(FuncDeclaration *fdecl, LINK link) {
 std::string getIRMangledName(VarDeclaration *vd) {
   OutBuffer mangleBuf;
   mangleToBuffer(vd, mangleBuf);
+  std::string mangledName = mangleBuf.peekChars();
 
-  // TODO: is hashing of variable names necessary?
+  // Hash the name if necessary
+  const auto link = vd->resolvedLinkage();
+  if (((link == LINK::d) || (link == LINK::default_)) &&
+      (global.params.hashThreshold != 0) &&
+      (mangledName.length() > global.params.hashThreshold)) {
+
+    auto hashedName = hashSymbolName(mangledName, vd);
+    mangledName = "_D" + hashedName + "Z";
+  }
 
   // TODO: Cache the result?
 
-  return getIRMangledVarName(mangleBuf.peekChars(), vd->resolvedLinkage());
+  return getIRMangledVarName(mangledName, link);
 }
 
 std::string getIRMangledFuncName(std::string baseMangle, LINK link) {

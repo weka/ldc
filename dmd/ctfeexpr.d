@@ -239,8 +239,9 @@ UnionExp copyLiteral(Expression e)
     if (auto cale = e.isCompactArrayLiteralExp())
     {
         auto newHead = copyLiteralArray(cale.head, null);
-        auto newTail = cale.tailValue ? copyLiteral(cale.tailValue).copy() : null;
-        emplaceExp!(CompactArrayLiteralExp)(&ue, cale.loc, cale.type, newHead, newTail, cale.tailCount);
+        auto newMiddle = cale.middleValue ? copyLiteral(cale.middleValue).copy() : null;
+        auto newTail = copyLiteralArray(cale.tail, null);
+        emplaceExp!(CompactArrayLiteralExp)(&ue, cale.loc, cale.type, newHead, newMiddle, cale.middleCount, newTail);
         auto r = ue.exp().isCompactArrayLiteralExp();
         r.ownedByCtfe = OwnedBy.ctfe;
         return ue;
@@ -562,7 +563,7 @@ Expression createBlockDuplicatedArrayLiteral(UnionExp* pue, const ref Loc loc, T
     if (!mustCopy && dim >= compactThreshold &&
         (elem.op == EXP.int64 || elem.op == EXP.float64 || elem.op == EXP.null_))
     {
-        auto cale = new CompactArrayLiteralExp(loc, type, null, elem, dim);
+        auto cale = new CompactArrayLiteralExp(loc, type, null, elem, dim, null);
         cale.ownedByCtfe = OwnedBy.ctfe;
         emplaceExp!(UnionExp)(pue, cale);
         return pue.exp();
@@ -1108,10 +1109,10 @@ private Expression uniformElementInRange(Expression x, size_t lo, size_t len)
     if (auto ca = x.isCompactArrayLiteralExp())
     {
         const headLen = ca.head ? ca.head.length : 0;
-        if (lo >= headLen)
+        if (lo >= headLen && lo + len <= headLen + ca.middleCount)
         {
-            // Range entirely in tail.
-            return ca.tailValue;
+            // Range entirely in the uniform middle.
+            return ca.middleValue;
         }
         return null;
     }
@@ -1168,9 +1169,6 @@ private int ctfeCmpArrays(const ref Loc loc, Expression e1, Expression e2, uinte
     assert((ae1 || ca1) && (ae2 || ca2));
 
     // Fast path: if both ranges have a single uniform element, compare once.
-    // Triggers for `compactSlice[1..$] == T[N].init` where the sparse ALE on the
-    // RHS has a basis but no overridden elements, and the compact slice falls
-    // entirely within the repeated tail.
     if (auto u1 = uniformElementInRange(x1, cast(size_t)lo1, cast(size_t)len))
     {
         if (auto u2 = uniformElementInRange(x2, cast(size_t)lo2, cast(size_t)len))
@@ -1185,6 +1183,36 @@ private int ctfeCmpArrays(const ref Loc loc, Expression e1, Expression e2, uinte
             }
             return ctfeRawCmp(loc, u1, u2);
         }
+    }
+
+    // Optimization: if both are CompactArrayLiteralExp, we can do much better than element-wise.
+    if (ca1 && ca2 && lo1 == 0 && lo2 == 0 && len == ca1.length && len == ca2.length)
+    {
+        const headLen1 = ca1.head ? ca1.head.length : 0;
+        const headLen2 = ca2.head ? ca2.head.length : 0;
+        const tailLen1 = ca1.tail ? ca1.tail.length : 0;
+        const tailLen2 = ca2.tail ? ca2.tail.length : 0;
+
+        if (headLen1 == headLen2 && tailLen1 == tailLen2 && ca1.middleCount == ca2.middleCount)
+        {
+            // Same structure, compare segments.
+            foreach (i; 0 .. headLen1)
+            {
+                const int res = ctfeRawCmp(loc, (*ca1.head)[i], (*ca2.head)[i]);
+                if (res != 0) return res;
+            }
+            int res = ctfeRawCmp(loc, ca1.middleValue, ca2.middleValue);
+            if (res != 0) return res;
+            foreach (i; 0 .. tailLen1)
+            {
+                res = ctfeRawCmp(loc, (*ca1.tail)[i], (*ca2.tail)[i]);
+                if (res != 0) return res;
+            }
+            return 0;
+        }
+        // Different structures but both compact: could still optimize by slicing and comparing,
+        // but element-wise is a safe fallback for now. The uniformElementInRange fast path 
+        // already catches the most important case (comparison with .init).
     }
 
     // Comparing two array-like literals (ALE or CompactALE). Element-wise.
