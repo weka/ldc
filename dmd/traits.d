@@ -104,11 +104,10 @@ private Dsymbol getDsymbolWithoutExpCtx(RootObject oarg)
  *      t = type to generate pointer bitmap from
  *      data = array forming the bitmap
  *      eSink = error message sink
- *      count = returns number of bits set in the bitmap
  * Returns:
  *      size of the type `t` in bytes, ulong.max on error
  */
-ulong getTypePointerBitmap(Loc loc, Type t, ref Array!(ulong) data, ErrorSink eSink, out ulong count)
+ulong getTypePointerBitmap(Loc loc, Type t, ref Array!(ulong) data, ErrorSink eSink)
 {
     auto tc = t.isTypeClass();
     const ulong sz = (tc && !tc.sym.isInterfaceDeclaration())
@@ -139,7 +138,6 @@ ulong getTypePointerBitmap(Loc loc, Type t, ref Array!(ulong) data, ErrorSink eS
     {
         void setpointer(ulong off)
         {
-            count++;
             ulong ptroff = off / sz_size_t;
             data[cast(size_t)(ptroff / bitsPerElement)] |= 1L << (ptroff % bitsPerElement);
         }
@@ -298,7 +296,6 @@ ulong getTypePointerBitmap(Loc loc, Type t, ref Array!(ulong) data, ErrorSink eS
  *  architecture). If set the corresponding memory might contain a pointer/reference.
  *
  *  Returns: [T.sizeof, pointerbit0-31/63, pointerbit32/64-63/128, ...]
- *       OR: [T.sizeof] if no pointers (IN_WEKA)
  */
 private Expression pointerBitmap(TraitsExp e, ErrorSink eSink)
 {
@@ -316,18 +313,9 @@ private Expression pointerBitmap(TraitsExp e, ErrorSink eSink)
     }
 
     Array!(ulong) data;
-    ulong count;
-    const ulong sz = getTypePointerBitmap(e.loc, t, data, eSink, count);
+    const ulong sz = getTypePointerBitmap(e.loc, t, data, eSink);
     if (sz == ulong.max)
         return ErrorExp.get();
-
-version (IN_WEKA) {
-    if (count == 0) {
-        auto exps = new Expressions(1);
-        (*exps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);
-        return new ArrayLiteralExp(e.loc, Type.tsize_t.sarrayOf(1), exps);
-    }
-}
 
     auto exps = new Expressions(data.length + 1);
     (*exps)[0] = new IntegerExp(e.loc, sz, Type.tsize_t);       // [0] is size in bytes of t
