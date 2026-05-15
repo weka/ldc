@@ -87,6 +87,7 @@ private:
         char[__traits(classInstanceSize, SymOffExp)] symoffexp;
         char[__traits(classInstanceSize, StringExp)] stringexp;
         char[__traits(classInstanceSize, ArrayLiteralExp)] arrayliteralexp;
+        char[__traits(classInstanceSize, CompactArrayLiteralExp)] compactarrayliteralexp;
         char[__traits(classInstanceSize, AssocArrayLiteralExp)] assocarrayliteralexp;
         char[__traits(classInstanceSize, StructLiteralExp)] structliteralexp;
         char[__traits(classInstanceSize, CompoundLiteralExp)] compoundliteralexp;
@@ -2164,6 +2165,21 @@ UnionExp voidInitLiteral(Type t, VarDeclaration var)
         // create an a separate copy for each element.
         const mustCopy = (elem.op == EXP.arrayLiteral || elem.op == EXP.structLiteral);
         const d = cast(size_t)tsa.dim.toInteger();
+
+        // Mirror mtype.d::TypeSArray.defaultInitLiteral: for huge static arrays
+        // emit a CompactArrayLiteralExp so we don't allocate an N-pointer
+        // `elements` array. Only safe when the element is trivially shareable
+        // across all slots (mustCopy is false) — for arrays of structs or
+        // nested static arrays we still allocate per-slot copies.
+        enum size_t compactThreshold = 65_536;
+        if (d >= compactThreshold && !mustCopy)
+        {
+            emplaceExp!(CompactArrayLiteralExp)(&ue, var.loc, tsa, null, elem, d, null);
+            CompactArrayLiteralExp cale = ue.exp().isCompactArrayLiteralExp();
+            cale.ownedByCtfe = OwnedBy.ctfe;
+            return ue;
+        }
+
         auto elements = new Expressions(d);
         foreach (i; 0 .. d)
         {

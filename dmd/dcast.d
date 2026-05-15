@@ -2748,6 +2748,22 @@ Expression castTo(Expression e, Scope* sc, Type t, Type att = null)
 
     Expression visitCompactArrayLiteral(CompactArrayLiteralExp e)
     {
+        Type tb = t.toBasetype();
+        Type typeb = e.type.toBasetype();
+
+        // Same-shape (sarray ↔ sarray, sarray ↔ darray of same element)
+        // casts only need type painting — no per-element conversion. The
+        // compact node may be shared (e.g. cached `T.init`), so we always
+        // syntaxCopy before painting to avoid corrupting other users.
+        Type ten = e.type.nextOf();
+        Type tn  = t.nextOf();
+        const sameElement = (ten && tn && ten.equivalent(tn));
+        if (typeb.equals(tb) || (sameElement && tb.ty == Tsarray && typeb.ty == Tsarray))
+        {
+            auto copy = e.syntaxCopy();
+            copy.type = t;
+            return copy;
+        }
         return e.materialize().castTo(sc, t);
     }
 

@@ -1268,6 +1268,34 @@ UnionExp Slice(Type type, Expression e1, Expression lwr, Expression upr)
             emplaceExp!(ArrayLiteralExp)(&ue, e1.loc, type, elements);
         }
     }
+    else if (e1.op == EXP.compactArrayLiteral && lwr.op == EXP.int64 && upr.op == EXP.int64 && !hasSideEffect(e1))
+    {
+        // Slice of a compact literal: if the slice falls entirely inside the
+        // uniform middle (or matches it exactly), produce a smaller compact;
+        // otherwise materialize in place and slice the head.
+        CompactArrayLiteralExp es1 = e1.isCompactArrayLiteralExp();
+        const uinteger_t ilwr = lwr.toInteger();
+        const uinteger_t iupr = upr.toInteger();
+        if (sliceBoundsCheck(0, es1.length, ilwr, iupr))
+            cantExp(ue);
+        else
+        {
+            const size_t headLen = es1.head ? es1.head.length : 0;
+            const size_t sliceLen = cast(size_t)(iupr - ilwr);
+            if (ilwr >= headLen && iupr <= headLen + es1.middleCount && es1.middleValue !is null)
+            {
+                // Whole slice lies in the uniform middle — preserve compactness.
+                emplaceExp!(CompactArrayLiteralExp)(&ue, e1.loc, type, null, es1.middleValue, sliceLen, null);
+            }
+            else
+            {
+                es1.materializeInPlace();
+                auto elements = new Expressions(sliceLen);
+                memcpy(elements.tdata(), es1.head.tdata() + ilwr, sliceLen * ((*es1.head)[0]).sizeof);
+                emplaceExp!(ArrayLiteralExp)(&ue, e1.loc, type, elements);
+            }
+        }
+    }
     else
         cantExp(ue);
     return ue;

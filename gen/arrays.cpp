@@ -563,6 +563,14 @@ llvm::Constant *compactArrayLiteralToConst(IRState *p, CompactArrayLiteralExp *c
   Type *elemTy = cale->type->toBasetype()->nextOf();
   LLType *llElemTy = DtoMemType(elemTy);
 
+  // Pure void-init compact (head/tail empty, middleValue is VoidInitExp):
+  // emit a single LLVM undef of the array type. Avoids running per-element
+  // toConstElem on N VoidInitExp instances, which would error out.
+  if (headLen == 0 && tailLen == 0 && cale->middleValue
+      && cale->middleValue->isVoidInitExp()) {
+    return llvm::UndefValue::get(LLArrayType::get(llElemTy, total));
+  }
+
   // Lambda: read element i of the compact array as an Expression*, without
   // ever building a flat ALE. Mirrors the D-side opIndex.
   auto getElem = [&](size_t i) -> Expression * {

@@ -3917,11 +3917,13 @@ public:
                 return null;
             }
             // Materialize-on-write: if the aggregate is a CompactArrayLiteralExp,
-            // expand it into a regular ArrayLiteralExp so we have writable slots,
-            // and write the materialized form back to its source storage.
-            // For now we only handle the VarExp(var) case; other LHS shapes
-            // (DotVarExp, nested IndexExp, slice assign) fall through to the
-            // generic "not yet supported" error below.
+            // expand head/middleValue/tail into a flat per-element form so the
+            // existing ALE write code applies. Mutation is in place on the same
+            // object — whichever LHS shape (VarExp, DotVarExp, IndexExp) put
+            // the CALE in its storage slot continues to point at the same
+            // object, just with newly flat state. We then alias a stand-in
+            // ArrayLiteralExp over the materialized elements for the rest of
+            // this function.
             if (auto existingCA = aggregate.isCompactArrayLiteralExp())
             {
                 if (existingCA.ownedByCtfe != OwnedBy.ctfe)
@@ -3929,14 +3931,10 @@ public:
                     error(e.loc, "cannot modify read-only constant `%s`", existingCA.toChars());
                     return CTFEExp.cantexp;
                 }
-                if (auto ve = ie.e1.isVarExp())
-                {
-                    auto srcVar = ve.var.isVarDeclaration();
-                    auto materialized = existingCA.materialize();
-                    materialized.ownedByCtfe = OwnedBy.ctfe;
-                    setValue(srcVar, materialized);
-                    aggregate = materialized;
-                }
+                existingCA.materializeInPlace();
+                auto materialized = new ArrayLiteralExp(existingCA.loc, existingCA.type, existingCA.head);
+                materialized.ownedByCtfe = OwnedBy.ctfe;
+                aggregate = materialized;
             }
             if (aggregate.op != EXP.arrayLiteral)
             {
@@ -4096,6 +4094,11 @@ public:
                 lowerbound = 0;
                 upperbound = ale.elements.length;
             }
+            else if (auto cale = e1.isCompactArrayLiteralExp())
+            {
+                lowerbound = 0;
+                upperbound = cale.length;
+            }
             else if (auto se = e1.isStringExp())
             {
                 lowerbound = 0;
@@ -4132,6 +4135,24 @@ public:
                     ulong(srclen), ulong(lowerbound), ulong(upperbound));
                 return CTFEExp.cantexp;
             }
+        }
+
+        // Materialize-on-write for a compact aggregate: expand head/middleValue/tail
+        // into a flat per-element form in place, then alias a stand-in
+        // ArrayLiteralExp over it so the ALE write code below applies uniformly.
+        // The storage slot referencing this CALE keeps its identity — reads
+        // through it now see the flat head via opIndex.
+        if (auto existingCA = aggregate.isCompactArrayLiteralExp())
+        {
+            if (existingCA.ownedByCtfe != OwnedBy.ctfe)
+            {
+                error(e.loc, "cannot modify read-only constant `%s`", existingCA.toChars());
+                return CTFEExp.cantexp;
+            }
+            existingCA.materializeInPlace();
+            auto ale = new ArrayLiteralExp(existingCA.loc, existingCA.type, existingCA.head);
+            ale.ownedByCtfe = OwnedBy.ctfe;
+            aggregate = ale;
         }
 
         if (auto existingSE = aggregate.isStringExp())

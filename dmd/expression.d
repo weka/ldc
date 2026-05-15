@@ -2246,6 +2246,32 @@ extern (C++) final class CompactArrayLiteralExp : Expression
         return ale;
     }
 
+    /// Expand head/middleValue/tail into a flat per-element form stored back
+    /// into `head`, leaving middleCount=0 and tail=null. The object's identity
+    /// is preserved, so storage slots referencing it remain valid — callers
+    /// that already hold a reference to this CALE keep seeing it through
+    /// opIndex/length but those are now backed by the flat head.
+    /// Cost: O(length). No-op if already in flat form.
+    extern (D) void materializeInPlace()
+    {
+        if (middleCount == 0 && (tail is null || tail.length == 0))
+            return;
+        const total = length();
+        auto exps = new Expressions(total);
+        const headLen = head ? head.length : 0;
+        foreach (i; 0 .. headLen)
+            (*exps)[i] = (*head)[i];
+        foreach (i; headLen .. headLen + middleCount)
+            (*exps)[i] = middleValue;
+        const tailLen = tail ? tail.length : 0;
+        foreach (i; 0 .. tailLen)
+            (*exps)[headLen + middleCount + i] = (*tail)[i];
+        head = exps;
+        middleValue = null;
+        middleCount = 0;
+        tail = null;
+    }
+
     override void accept(Visitor v)
     {
         v.visit(this);
