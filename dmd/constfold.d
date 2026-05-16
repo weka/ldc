@@ -1298,7 +1298,7 @@ UnionExp Slice(Type type, Expression e1, Expression lwr, Expression upr)
             }
             else
             {
-                es1.materializeInPlace();
+                es1.materializeInPlace(e1.loc);
                 if (es1.isScalar())
                 {
                     auto elements = new Expressions(sliceLen);

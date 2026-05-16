@@ -2764,7 +2764,7 @@ Expression castTo(Expression e, Scope* sc, Type t, Type att = null)
             copy.type = t;
             return copy;
         }
-        return e.materialize().castTo(sc, t);
+        return e.materialize(e.loc).castTo(sc, t);
     }
 
     switch (e.op)

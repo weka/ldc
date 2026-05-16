@@ -2670,13 +2670,13 @@ extern (C++) final class TypeSArray : TypeArray
             (elementinit.op == EXP.int64 || elementinit.op == EXP.float64 ||
              elementinit.op == EXP.null_))
         {
-            return new CompactArrayLiteralExp(Loc.initial, this, null, elementinit, d, null);
+            return new CompactArrayLiteralExp(loc, this, null, elementinit, d, null);
         }
 
         auto elements = new Expressions(d);
         foreach (ref e; *elements)
             e = null;
-        auto ae = new ArrayLiteralExp(Loc.initial, this, elementinit, elements);
+        auto ae = new ArrayLiteralExp(loc, this, elementinit, elements);
         return ae;
     }
 

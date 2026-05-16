@@ -4008,7 +4008,7 @@ public:
                 }
 
                 // Both extensions exceed threshold — full materialize.
-                existingCA.materializeInPlace();
+                existingCA.materializeInPlace(e.loc);
                 if (existingCA.isScalar())
                 {
                     // Scalar buffer was allocated; perform the write directly
@@ -4392,7 +4392,7 @@ public:
             }
 
             // Fallback: materialize.
-            existingCA.materializeInPlace();
+            existingCA.materializeInPlace(e.loc);
             if (existingCA.isScalar())
             {
                 const sliceLenS = cast(size_t)(upperbound - lowerbound);

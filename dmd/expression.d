@@ -2348,16 +2348,25 @@ extern (C++) final class CompactArrayLiteralExp : Expression
 
     /// Build the equivalent ArrayLiteralExp with all elements explicitly listed.
     /// Cost: O(length). Use only when calling code can't handle the compact form.
+    /// C++ entry point — calls through to the D overload with no trigger loc.
     ArrayLiteralExp materialize()
     {
+        return materializeImpl(Loc.initial);
+    }
+
+    /// D overload that accepts the source location of the operation that
+    /// forced materialization (e.g. a cast or write). Preferred over the
+    /// CALE's own `loc` for diagnostics: the CALE was usually born inside
+    /// `TypeSArray.defaultInitLiteral` with `Loc.initial`.
+    extern (D) ArrayLiteralExp materialize(Loc trigger)
+    {
+        return materializeImpl(trigger);
+    }
+
+    extern (D) private ArrayLiteralExp materializeImpl(Loc trigger)
+    {
         const total = length();
-        if (global.params.v.ctfe)
-        {
-            import core.stdc.stdio : fprintf, stderr;
-            const lc = loc.toChars();
-            fprintf(stderr, "%s: materialize() CompactArrayLiteralExp %s (n=%llu, fresh ArrayLiteralExp)\n",
-                (lc && *lc) ? lc : "<no loc>", type ? type.toChars() : "<no type>", cast(ulong)total);
-        }
+        logMaterialize(trigger, total, "materialize()", "fresh ArrayLiteralExp", 0, 0);
         auto exps = new Expressions(total);
         if (scalarStride != 0)
         {
@@ -2380,25 +2389,41 @@ extern (C++) final class CompactArrayLiteralExp : Expression
         return ale;
     }
 
+    /// Pick the most informative location for diagnostics: trigger if it has
+    /// a filename (set by the caller's expression loc), else the CALE's birth
+    /// loc, else "<no loc>". Logs go to stderr; only fires under `--vctfe`.
+    extern (D) private void logMaterialize(Loc trigger, size_t total, string fn,
+        string mode, uint stride, ulong bytes)
+    {
+        if (!global.params.v.ctfe)
+            return;
+        import core.stdc.stdio : fprintf, stderr;
+        Loc useLoc = (trigger.filename !is null) ? trigger
+                   : (loc.filename !is null)     ? loc
+                                                 : Loc.initial;
+        const lc = useLoc.toChars();
+        const locStr = (lc && *lc) ? lc : "<no loc>";
+        const typeStr = type ? type.toChars() : "<no type>";
+        if (stride == 0)
+            fprintf(stderr, "%s: %s CompactArrayLiteralExp %s (n=%llu, %s)\n",
+                locStr, fn.ptr, typeStr, cast(ulong)total, mode.ptr);
+        else
+            fprintf(stderr, "%s: %s CompactArrayLiteralExp %s (n=%llu, %s[stride=%u, %llu bytes])\n",
+                locStr, fn.ptr, typeStr, cast(ulong)total, mode.ptr, stride, bytes);
+    }
+
     /// Allocate a native scalar buffer (stride bytes per element) and fill it
     /// from head/middleValue/tail. Drops the compact structure. Caller must
     /// have already verified `scalarElemBytes() != 0` and all per-element
     /// values are IntegerExps.
-    extern (D) void scalarMaterializeInPlace()
+    extern (D) void scalarMaterializeInPlace(Loc trigger = Loc.initial)
     {
         import dmd.root.rmem : mem;
         const stride = scalarElemBytes();
         assert(stride != 0);
         const total = length();
         const bytes = total * stride;
-        if (global.params.v.ctfe)
-        {
-            import core.stdc.stdio : fprintf, stderr;
-            const lc = loc.toChars();
-            fprintf(stderr, "%s: materialize CompactArrayLiteralExp %s (n=%llu, mode=scalar[stride=%u, %llu bytes])\n",
-                (lc && *lc) ? lc : "<no loc>", type ? type.toChars() : "<no type>",
-                cast(ulong)total, cast(uint)stride, cast(ulong)bytes);
-        }
+        logMaterialize(trigger, total, "materialize", "mode=scalar", stride, bytes);
         // Scalar buffer holds raw integer bytes with no Expression* pointers,
         // so use the noscan variant: under `-lowmem` the GC collector skips
         // scanning it for roots (avoids false positives and saves GC work).
@@ -2448,7 +2473,7 @@ extern (C++) final class CompactArrayLiteralExp : Expression
     /// IntegerExps.
     /// Cost: O(length). No-op if already flat (Expressions* head only) or
     /// already in scalar mode.
-    extern (D) void materializeInPlace()
+    extern (D) void materializeInPlace(Loc trigger = Loc.initial)
     {
         if (scalarStride != 0)
             return;
@@ -2456,17 +2481,11 @@ extern (C++) final class CompactArrayLiteralExp : Expression
             return;
         if (canScalarMaterialize())
         {
-            scalarMaterializeInPlace();
+            scalarMaterializeInPlace(trigger);
             return;
         }
         const total = length();
-        if (global.params.v.ctfe)
-        {
-            import core.stdc.stdio : fprintf, stderr;
-            const lc = loc.toChars();
-            fprintf(stderr, "%s: materialize CompactArrayLiteralExp %s (n=%llu, mode=Expression*[n])\n",
-                (lc && *lc) ? lc : "<no loc>", type ? type.toChars() : "<no type>", cast(ulong)total);
-        }
+        logMaterialize(trigger, total, "materialize", "mode=Expression*[n]", 0, 0);
         auto exps = new Expressions(total);
         const headLen = head ? head.length : 0;
         foreach (i; 0 .. headLen)

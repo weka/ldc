@@ -699,7 +699,9 @@ llvm::Constant *compactArrayLiteralToConst(IRState *p, CompactArrayLiteralExp *c
 
   // Slow path: materialize to a regular ALE and reuse arrayLiteralToConst.
   // Allocates O(total) elements pointer storage — only fires when the element
-  // type isn't a primitive we can stream into ConstantDataArray.
+  // type isn't a primitive we can stream into ConstantDataArray. The CALE's
+  // own loc is the most informative location at this point (codegen has no
+  // separate "trigger" expression).
   return arrayLiteralToConst(p, cale->materialize());
 }
 
