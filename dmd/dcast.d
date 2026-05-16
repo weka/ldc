@@ -2751,14 +2751,37 @@ Expression castTo(Expression e, Scope* sc, Type t, Type att = null)
         Type tb = t.toBasetype();
         Type typeb = e.type.toBasetype();
 
-        // Same-shape (sarray ↔ sarray, sarray ↔ darray of same element)
-        // casts only need type painting — no per-element conversion. The
-        // compact node may be shared (e.g. cached `T.init`), so we always
-        // syntaxCopy before painting to avoid corrupting other users.
+        // Type-painting paths: handle every cast where no per-element value
+        // conversion is needed. Materializing a huge compact (e.g. a
+        // `ubyte[600 MB].init` from a default field initializer) would
+        // allocate an Expression*[N] array hundreds of times the size of the
+        // actual data, so we work hard to keep the CALE intact here.
         Type ten = e.type.nextOf();
         Type tn  = t.nextOf();
         const sameElement = (ten && tn && ten.equivalent(tn));
-        if (typeb.equals(tb) || (sameElement && tb.ty == Tsarray && typeb.ty == Tsarray))
+        const tbArrayLike = (tb.ty == Tsarray || tb.ty == Tarray);
+        const tybArrayLike = (typeb.ty == Tsarray || typeb.ty == Tarray);
+
+        // (a) identical types (qualifier-only changes paint-cleanly here)
+        // (b) array-shape ↔ array-shape with the same element type, where
+        //     "array-shape" means either sarray or darray. Covers
+        //     sarray↔sarray, sarray↔darray, darray↔sarray.
+        // (c) array-shape ↔ array-shape with element types of the same
+        //     storage width and differing only in qualifiers, sign, or
+        //     void-painting — e.g. `ubyte[N] → void[N]`,
+        //     `const(ubyte)[N] → ubyte[N]`. No value conversion needed.
+        bool sameWidthIgnoringMod()
+        {
+            if (!ten || !tn) return false;
+            auto enb = ten.toBasetype();
+            auto tnb = tn.toBasetype();
+            if (enb.size() != tnb.size()) return false;
+            if (enb.ty == Tvoid || tnb.ty == Tvoid) return true;
+            return enb.unSharedOf().mutableOf().equivalent(tnb.unSharedOf().mutableOf());
+        }
+        if (typeb.equals(tb)
+            || (sameElement && tbArrayLike && tybArrayLike)
+            || (tbArrayLike && tybArrayLike && sameWidthIgnoringMod()))
         {
             auto copy = e.syntaxCopy();
             copy.type = t;
