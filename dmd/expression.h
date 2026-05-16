@@ -453,6 +453,10 @@ public:
     d_size_t middleCount;
     Expressions *tail;
 
+    void *scalarBuffer;
+    d_size_t scalarLen;
+    uint8_t scalarStride;
+
     CompactArrayLiteralExp *syntaxCopy() override;
     ArrayLiteralExp *materialize();
 

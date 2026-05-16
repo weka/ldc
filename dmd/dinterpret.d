@@ -3943,6 +3943,12 @@ public:
                     error(e.loc, "cannot modify read-only constant `%s`", existingCA.toChars());
                     return CTFEExp.cantexp;
                 }
+                // Scalar buffer mode: write to native storage directly.
+                if (existingCA.isScalar())
+                {
+                    existingCA.writeScalar(cast(size_t)index, newval.toInteger());
+                    return e.op == EXP.blit ? newval : null;
+                }
                 const headLen = existingCA.head ? existingCA.head.length : 0;
                 const tailLen = existingCA.tail ? existingCA.tail.length : 0;
                 const tailStart = headLen + existingCA.middleCount;
@@ -4003,6 +4009,13 @@ public:
 
                 // Both extensions exceed threshold — full materialize.
                 existingCA.materializeInPlace();
+                if (existingCA.isScalar())
+                {
+                    // Scalar buffer was allocated; perform the write directly
+                    // and stay in compact form for subsequent reads/writes.
+                    existingCA.writeScalar(cast(size_t)index, newval.toInteger());
+                    return e.op == EXP.blit ? newval : null;
+                }
                 auto materialized = new ArrayLiteralExp(existingCA.loc, existingCA.type, existingCA.head);
                 materialized.ownedByCtfe = OwnedBy.ctfe;
                 aggregate = materialized;
@@ -4220,6 +4233,49 @@ public:
                 error(e.loc, "cannot modify read-only constant `%s`", existingCA.toChars());
                 return CTFEExp.cantexp;
             }
+            // Scalar-buffer mode: slice writes go directly to the native buffer.
+            if (existingCA.isScalar())
+            {
+                const sliceLenS = cast(size_t)(upperbound - lowerbound);
+                if (isBlockAssignment)
+                {
+                    const v = newval.toInteger();
+                    foreach (k; 0 .. sliceLenS)
+                        existingCA.writeScalar(cast(size_t)(firstIndex + k), v);
+                    return newval;
+                }
+                // Slice-to-slice: resolve source, write per element.
+                Expression scSrc = newval;
+                if (scSrc.isSliceExp())
+                {
+                    scSrc = resolveSlice(scSrc);
+                    if (CTFEExp.isCantExp(scSrc))
+                    {
+                        error(e.loc, "CTFE internal error: slice `%s`", newval.toChars());
+                        return CTFEExp.cantexp;
+                    }
+                }
+                if (auto sale = scSrc.isArrayLiteralExp())
+                {
+                    foreach (k; 0 .. sliceLenS)
+                        existingCA.writeScalar(cast(size_t)(firstIndex + k), (*sale.elements)[k].toInteger());
+                    return newval;
+                }
+                if (auto scale = scSrc.isCompactArrayLiteralExp())
+                {
+                    foreach (k; 0 .. sliceLenS)
+                        existingCA.writeScalar(cast(size_t)(firstIndex + k), scale[k].toInteger());
+                    return newval;
+                }
+                if (auto sse = scSrc.isStringExp())
+                {
+                    foreach (k; 0 .. sliceLenS)
+                        existingCA.writeScalar(cast(size_t)(firstIndex + k), sse.getIndex(k));
+                    return newval;
+                }
+                error(e.loc, "CTFE internal error: unsupported slice source `%s`", newval.toChars());
+                return CTFEExp.cantexp;
+            }
             const headLen = existingCA.head ? existingCA.head.length : 0;
             const tailLen = existingCA.tail ? existingCA.tail.length : 0;
             const tailStart = headLen + existingCA.middleCount;
@@ -4337,6 +4393,47 @@ public:
 
             // Fallback: materialize.
             existingCA.materializeInPlace();
+            if (existingCA.isScalar())
+            {
+                const sliceLenS = cast(size_t)(upperbound - lowerbound);
+                if (isBlockAssignment)
+                {
+                    const v = newval.toInteger();
+                    foreach (k; 0 .. sliceLenS)
+                        existingCA.writeScalar(cast(size_t)(firstIndex + k), v);
+                    return newval;
+                }
+                Expression scSrc = newval;
+                if (scSrc.isSliceExp())
+                {
+                    scSrc = resolveSlice(scSrc);
+                    if (CTFEExp.isCantExp(scSrc))
+                    {
+                        error(e.loc, "CTFE internal error: slice `%s`", newval.toChars());
+                        return CTFEExp.cantexp;
+                    }
+                }
+                if (auto sale = scSrc.isArrayLiteralExp())
+                {
+                    foreach (k; 0 .. sliceLenS)
+                        existingCA.writeScalar(cast(size_t)(firstIndex + k), (*sale.elements)[k].toInteger());
+                    return newval;
+                }
+                if (auto scale = scSrc.isCompactArrayLiteralExp())
+                {
+                    foreach (k; 0 .. sliceLenS)
+                        existingCA.writeScalar(cast(size_t)(firstIndex + k), scale[k].toInteger());
+                    return newval;
+                }
+                if (auto sse = scSrc.isStringExp())
+                {
+                    foreach (k; 0 .. sliceLenS)
+                        existingCA.writeScalar(cast(size_t)(firstIndex + k), sse.getIndex(k));
+                    return newval;
+                }
+                error(e.loc, "CTFE internal error: unsupported slice source `%s`", newval.toChars());
+                return CTFEExp.cantexp;
+            }
             auto ale = new ArrayLiteralExp(existingCA.loc, existingCA.type, existingCA.head);
             ale.ownedByCtfe = OwnedBy.ctfe;
             aggregate = ale;
@@ -7340,6 +7437,10 @@ private Expression copyRegionExp(Expression e)
         case EXP.compactArrayLiteral:
         {
             auto cale = e.isCompactArrayLiteralExp();
+            // Scalar buffer is allocated via mem.xmalloc (off the region
+            // allocator) and holds no Expression pointers; nothing to copy.
+            if (cale.isScalar())
+                break;
             if (cale.head)
                 copyArray(cale.head);
             cale.middleValue = copyRegionExp(cale.middleValue);

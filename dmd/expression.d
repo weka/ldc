@@ -2191,6 +2191,17 @@ extern (C++) final class CompactArrayLiteralExp : Expression
     size_t middleCount;
     Expressions* tail;       // may be null or empty
 
+    // Scalar-buffer mode: when `scalarStride != 0`, the array's data is stored
+    // as a native contiguous typed buffer instead of an Expressions* of length()
+    // pointers. Used by materializeInPlace for huge arrays with integral element
+    // types, saving up to 8× memory (1 GB → 128 MB for ubyte[128M]). In scalar
+    // mode, head/middleValue/middleCount/tail are all cleared; reads go through
+    // opIndex (which fabricates an IntegerExp on demand) and writes go through
+    // setElement / writeScalar.
+    void* scalarBuffer;
+    size_t scalarLen;
+    ubyte scalarStride;      // 0 = not scalar mode; else element width in bytes
+
     extern (D) this(Loc loc, Type type, Expressions* head, Expression middleValue, size_t middleCount, Expressions* tail) @safe
     {
         super(loc, EXP.compactArrayLiteral);
@@ -2201,13 +2212,83 @@ extern (C++) final class CompactArrayLiteralExp : Expression
         this.tail = tail;
     }
 
+    extern (D) bool isScalar() const @safe
+    {
+        return scalarStride != 0;
+    }
+
     extern (D) size_t length() const @safe
     {
+        if (scalarStride != 0)
+            return scalarLen;
         return (head ? head.length : 0) + middleCount + (tail ? tail.length : 0);
+    }
+
+    /// Returns the element's storage width in bytes if the element type is an
+    /// integral type of width 1/2/4/8, else 0 (meaning scalar mode unsupported).
+    extern (D) ubyte scalarElemBytes()
+    {
+        if (!type)
+            return 0;
+        auto tn = type.toBasetype().nextOf();
+        if (!tn)
+            return 0;
+        auto tb = tn.toBasetype();
+        if (!tb.isintegral())
+            return 0;
+        const sz = tb.size();
+        if (sz == 1 || sz == 2 || sz == 4 || sz == 8)
+            return cast(ubyte)sz;
+        return 0;
+    }
+
+    /// True if scalar elements are interpreted as unsigned (used for sign
+    /// extension on reads).
+    extern (D) bool scalarElemUnsigned()
+    {
+        if (!type)
+            return false;
+        auto tn = type.toBasetype().nextOf();
+        if (!tn)
+            return false;
+        return tn.toBasetype().isunsigned() != 0;
+    }
+
+    extern (D) dinteger_t readScalar(size_t i)
+    {
+        assert(scalarStride != 0);
+        const unsig = scalarElemUnsigned();
+        final switch (scalarStride)
+        {
+            case 1: return unsig ? cast(dinteger_t)(cast(ubyte*)scalarBuffer)[i]
+                                 : cast(dinteger_t)(cast(byte*)scalarBuffer)[i];
+            case 2: return unsig ? cast(dinteger_t)(cast(ushort*)scalarBuffer)[i]
+                                 : cast(dinteger_t)(cast(short*)scalarBuffer)[i];
+            case 4: return unsig ? cast(dinteger_t)(cast(uint*)scalarBuffer)[i]
+                                 : cast(dinteger_t)(cast(int*)scalarBuffer)[i];
+            case 8: return cast(dinteger_t)(cast(long*)scalarBuffer)[i];
+        }
+    }
+
+    extern (D) void writeScalar(size_t i, dinteger_t v)
+    {
+        assert(scalarStride != 0);
+        final switch (scalarStride)
+        {
+            case 1: (cast(ubyte*)scalarBuffer)[i] = cast(ubyte)v; break;
+            case 2: (cast(ushort*)scalarBuffer)[i] = cast(ushort)v; break;
+            case 4: (cast(uint*)scalarBuffer)[i] = cast(uint)v; break;
+            case 8: (cast(ulong*)scalarBuffer)[i] = cast(ulong)v; break;
+        }
     }
 
     extern (D) Expression opIndex(size_t i)
     {
+        if (scalarStride != 0)
+        {
+            auto elemType = type.toBasetype().nextOf();
+            return new IntegerExp(loc, readScalar(i), elemType);
+        }
         const headLen = head ? head.length : 0;
         if (i < headLen)
             return (*head)[i];
@@ -2218,13 +2299,51 @@ extern (C++) final class CompactArrayLiteralExp : Expression
         return (*tail)[i];
     }
 
+    /// Write `v` to logical index `i`. In scalar mode the buffer is updated
+    /// in place; otherwise the head/tail slot is overwritten or the value is
+    /// confirmed to match middleValue (caller must already have ensured the
+    /// index doesn't land in middle for non-scalar mode).
+    extern (D) void setElement(size_t i, Expression v)
+    {
+        if (scalarStride != 0)
+        {
+            writeScalar(i, v.toInteger());
+            return;
+        }
+        const headLen = head ? head.length : 0;
+        if (i < headLen)
+        {
+            (*head)[i] = v;
+            return;
+        }
+        i -= headLen;
+        if (i < middleCount)
+        {
+            assert(middleValue && v.equals(middleValue));
+            return;
+        }
+        i -= middleCount;
+        (*tail)[i] = v;
+    }
+
     override CompactArrayLiteralExp syntaxCopy()
     {
-        return new CompactArrayLiteralExp(loc, type,
+        auto c = new CompactArrayLiteralExp(loc, type,
             arraySyntaxCopy(head),
             middleValue ? middleValue.syntaxCopy() : null,
             middleCount,
             arraySyntaxCopy(tail));
+        if (scalarStride != 0)
+        {
+            import core.stdc.string : memcpy;
+            import dmd.root.rmem : mem;
+            c.scalarStride = scalarStride;
+            c.scalarLen = scalarLen;
+            const bytes = scalarLen * scalarStride;
+            c.scalarBuffer = mem.xmalloc_noscan(bytes);
+            memcpy(c.scalarBuffer, scalarBuffer, bytes);
+        }
+        return c;
     }
 
     /// Build the equivalent ArrayLiteralExp with all elements explicitly listed.
@@ -2233,29 +2352,98 @@ extern (C++) final class CompactArrayLiteralExp : Expression
     {
         const total = length();
         auto exps = new Expressions(total);
-        const headLen = head ? head.length : 0;
-        foreach (i; 0 .. headLen)
-            (*exps)[i] = (*head)[i];
-        foreach (i; headLen .. headLen + middleCount)
-            (*exps)[i] = middleValue;
-        const tailLen = tail ? tail.length : 0;
-        foreach (i; 0 .. tailLen)
-            (*exps)[headLen + middleCount + i] = (*tail)[i];
+        if (scalarStride != 0)
+        {
+            foreach (i; 0 .. total)
+                (*exps)[i] = opIndex(i);
+        }
+        else
+        {
+            const headLen = head ? head.length : 0;
+            foreach (i; 0 .. headLen)
+                (*exps)[i] = (*head)[i];
+            foreach (i; headLen .. headLen + middleCount)
+                (*exps)[i] = middleValue;
+            const tailLen = tail ? tail.length : 0;
+            foreach (i; 0 .. tailLen)
+                (*exps)[headLen + middleCount + i] = (*tail)[i];
+        }
         auto ale = new ArrayLiteralExp(loc, type, exps);
         ale.ownedByCtfe = ownedByCtfe;
         return ale;
     }
 
-    /// Expand head/middleValue/tail into a flat per-element form stored back
-    /// into `head`, leaving middleCount=0 and tail=null. The object's identity
-    /// is preserved, so storage slots referencing it remain valid — callers
-    /// that already hold a reference to this CALE keep seeing it through
-    /// opIndex/length but those are now backed by the flat head.
-    /// Cost: O(length). No-op if already in flat form.
+    /// Allocate a native scalar buffer (stride bytes per element) and fill it
+    /// from head/middleValue/tail. Drops the compact structure. Caller must
+    /// have already verified `scalarElemBytes() != 0` and all per-element
+    /// values are IntegerExps.
+    extern (D) void scalarMaterializeInPlace()
+    {
+        import dmd.root.rmem : mem;
+        const stride = scalarElemBytes();
+        assert(stride != 0);
+        const total = length();
+        const bytes = total * stride;
+        // Scalar buffer holds raw integer bytes with no Expression* pointers,
+        // so use the noscan variant: under `-lowmem` the GC collector skips
+        // scanning it for roots (avoids false positives and saves GC work).
+        void* buf = mem.xmalloc_noscan(bytes);
+        import core.stdc.string : memset;
+        memset(buf, 0, bytes);
+        // Bind helper closures to the new buffer for the fill phase. We can't
+        // use the class methods yet because scalarStride is still 0.
+        void writeAt(size_t i, dinteger_t v)
+        {
+            final switch (stride)
+            {
+                case 1: (cast(ubyte*)buf)[i]  = cast(ubyte)v;  break;
+                case 2: (cast(ushort*)buf)[i] = cast(ushort)v; break;
+                case 4: (cast(uint*)buf)[i]   = cast(uint)v;   break;
+                case 8: (cast(ulong*)buf)[i]  = cast(ulong)v;  break;
+            }
+        }
+        const headLen = head ? head.length : 0;
+        foreach (i; 0 .. headLen)
+        {
+            auto el = (*head)[i];
+            writeAt(i, el ? el.toInteger() : 0);
+        }
+        const mv = middleValue ? middleValue.toInteger() : 0;
+        foreach (i; headLen .. headLen + middleCount)
+            writeAt(i, mv);
+        const tailLen = tail ? tail.length : 0;
+        foreach (i; 0 .. tailLen)
+        {
+            auto el = (*tail)[i];
+            writeAt(headLen + middleCount + i, el ? el.toInteger() : 0);
+        }
+        scalarBuffer = buf;
+        scalarLen = total;
+        scalarStride = stride;
+        head = null;
+        middleValue = null;
+        middleCount = 0;
+        tail = null;
+    }
+
+    /// Expand head/middleValue/tail into a flat per-element form. Tries scalar
+    /// buffer first (8×/4×/2× smaller for ubyte/ushort/uint elements). Falls
+    /// back to an Expressions* of length() pointers when the element type
+    /// isn't a fixed-width integral or the per-element values aren't simple
+    /// IntegerExps.
+    /// Cost: O(length). No-op if already flat (Expressions* head only) or
+    /// already in scalar mode.
     extern (D) void materializeInPlace()
     {
+        if (scalarStride != 0)
+            return;
         if (middleCount == 0 && (tail is null || tail.length == 0))
             return;
+        if (canScalarMaterialize())
+        {
+            scalarMaterializeInPlace();
+            return;
+        }
         const total = length();
         auto exps = new Expressions(total);
         const headLen = head ? head.length : 0;
@@ -2270,6 +2458,25 @@ extern (C++) final class CompactArrayLiteralExp : Expression
         middleValue = null;
         middleCount = 0;
         tail = null;
+    }
+
+    /// True when scalarMaterializeInPlace can run: element type fits 1/2/4/8
+    /// bytes integral, and every per-element value is an int64 expression.
+    extern (D) bool canScalarMaterialize()
+    {
+        if (scalarElemBytes() == 0)
+            return false;
+        if (middleValue && middleValue.op != EXP.int64)
+            return false;
+        if (head)
+            foreach (e; *head)
+                if (e && e.op != EXP.int64)
+                    return false;
+        if (tail)
+            foreach (e; *tail)
+                if (e && e.op != EXP.int64)
+                    return false;
+        return true;
     }
 
     override void accept(Visitor v)

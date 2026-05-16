@@ -1011,6 +1011,40 @@ public:
 
     override void visit(CompactArrayLiteralExp e)
     {
+        // Scalar-buffer mode: walk indices through opIndex (constructs fresh
+        // IntegerExp per slot) and apply the same Integer-RLE we use for
+        // ArrayLiteralExp so all-zero / all-same-value bitmaps still mangle
+        // compactly.
+        if (e.isScalar())
+        {
+            const dim = e.scalarLen;
+            buf.writeByte('A');
+            buf.print(dim);
+            enum size_t rleThreshold = 3;
+            size_t i = 0;
+            while (i < dim)
+            {
+                const v = e.readScalar(i);
+                size_t runEnd = i + 1;
+                while (runEnd < dim && e.readScalar(runEnd) == v)
+                    runEnd++;
+                const runLen = runEnd - i;
+                if (runLen >= rleThreshold)
+                {
+                    buf.writeByte('R');
+                    buf.print(runLen);
+                    e[i].accept(this);
+                }
+                else
+                {
+                    foreach (j; i .. runEnd)
+                        e[j].accept(this);
+                }
+                i = runEnd;
+            }
+            return;
+        }
+
         const headLen = e.head ? e.head.length : 0;
         const tailLen = e.tail ? e.tail.length : 0;
         const dim = headLen + e.middleCount + tailLen;

@@ -556,12 +556,44 @@ bool isConstLiteral(Expression *e, bool immutableType) {
 // materializing the compact node into a regular ArrayLiteralExp and using
 // arrayLiteralToConst — correct but loses the memory win.
 llvm::Constant *compactArrayLiteralToConst(IRState *p, CompactArrayLiteralExp *cale) {
+  Type *elemTy = cale->type->toBasetype()->nextOf();
+  LLType *llElemTy = DtoMemType(elemTy);
+
+  // Scalar-buffer mode: the values already live in a contiguous native buffer
+  // matching the destination LLVM element type. Stream them straight into
+  // ConstantDataArray without ever building Expression objects.
+  if (cale->scalarStride != 0 && elemTy->isintegral() && llElemTy->isIntegerTy()) {
+    const unsigned bits = llElemTy->getIntegerBitWidth();
+    if (bits == cale->scalarStride * 8u) {
+      switch (bits) {
+        case 8:
+          return llvm::ConstantDataArray::get(
+              p->context(),
+              llvm::ArrayRef<uint8_t>(static_cast<uint8_t *>(cale->scalarBuffer),
+                                      cale->scalarLen));
+        case 16:
+          return llvm::ConstantDataArray::get(
+              p->context(),
+              llvm::ArrayRef<uint16_t>(static_cast<uint16_t *>(cale->scalarBuffer),
+                                       cale->scalarLen));
+        case 32:
+          return llvm::ConstantDataArray::get(
+              p->context(),
+              llvm::ArrayRef<uint32_t>(static_cast<uint32_t *>(cale->scalarBuffer),
+                                       cale->scalarLen));
+        case 64:
+          return llvm::ConstantDataArray::get(
+              p->context(),
+              llvm::ArrayRef<uint64_t>(static_cast<uint64_t *>(cale->scalarBuffer),
+                                       cale->scalarLen));
+        default: break;
+      }
+    }
+  }
+
   const size_t headLen = cale->head ? cale->head->length : 0;
   const size_t tailLen = cale->tail ? cale->tail->length : 0;
   const size_t total = headLen + cale->middleCount + tailLen;
-
-  Type *elemTy = cale->type->toBasetype()->nextOf();
-  LLType *llElemTy = DtoMemType(elemTy);
 
   // Pure void-init compact (head/tail empty, middleValue is VoidInitExp):
   // emit a single LLVM undef of the array type. Avoids running per-element

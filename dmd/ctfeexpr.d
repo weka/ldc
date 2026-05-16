@@ -244,6 +244,16 @@ UnionExp copyLiteral(Expression e)
         auto newTail = copyLiteralArray(cale.tail, null);
         emplaceExp!(CompactArrayLiteralExp)(&ue, cale.loc, cale.type, newHead, newMiddle, cale.middleCount, newTail);
         auto r = ue.exp().isCompactArrayLiteralExp();
+        if (cale.isScalar())
+        {
+            import core.stdc.string : memcpy;
+            import dmd.root.rmem : mem;
+            r.scalarStride = cale.scalarStride;
+            r.scalarLen = cale.scalarLen;
+            const bytes = cale.scalarLen * cale.scalarStride;
+            r.scalarBuffer = mem.xmalloc_noscan(bytes);
+            memcpy(r.scalarBuffer, cale.scalarBuffer, bytes);
+        }
         r.ownedByCtfe = OwnedBy.ctfe;
         return ue;
     }
@@ -1109,6 +1119,15 @@ private Expression uniformElementInRange(Expression x, size_t lo, size_t len)
         return null;
     if (auto ca = x.isCompactArrayLiteralExp())
     {
+        if (ca.isScalar())
+        {
+            // Walk the buffer: if all values match, return one IntegerExp.
+            const v = ca.readScalar(lo);
+            foreach (i; lo + 1 .. lo + len)
+                if (ca.readScalar(i) != v)
+                    return null;
+            return ca[lo];
+        }
         const headLen = ca.head ? ca.head.length : 0;
         if (lo >= headLen && lo + len <= headLen + ca.middleCount)
         {
@@ -1187,7 +1206,10 @@ private int ctfeCmpArrays(const ref Loc loc, Expression e1, Expression e2, uinte
     }
 
     // Optimization: if both are CompactArrayLiteralExp, we can do much better than element-wise.
-    if (ca1 && ca2 && lo1 == 0 && lo2 == 0 && len == ca1.length && len == ca2.length)
+    // Skip the structural fast path when either side is in scalar-buffer mode;
+    // those go through the element-wise loop via opIndex.
+    if (ca1 && ca2 && lo1 == 0 && lo2 == 0 && len == ca1.length && len == ca2.length
+        && !ca1.isScalar() && !ca2.isScalar())
     {
         const headLen1 = ca1.head ? ca1.head.length : 0;
         const headLen2 = ca2.head ? ca2.head.length : 0;

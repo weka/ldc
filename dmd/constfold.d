@@ -1272,12 +1272,21 @@ UnionExp Slice(Type type, Expression e1, Expression lwr, Expression upr)
     {
         // Slice of a compact literal: if the slice falls entirely inside the
         // uniform middle (or matches it exactly), produce a smaller compact;
-        // otherwise materialize in place and slice the head.
+        // otherwise materialize in place and slice the head. Scalar-buffer
+        // mode walks the buffer per-element since head/middle/tail are dropped.
         CompactArrayLiteralExp es1 = e1.isCompactArrayLiteralExp();
         const uinteger_t ilwr = lwr.toInteger();
         const uinteger_t iupr = upr.toInteger();
         if (sliceBoundsCheck(0, es1.length, ilwr, iupr))
             cantExp(ue);
+        else if (es1.isScalar())
+        {
+            const size_t sliceLen = cast(size_t)(iupr - ilwr);
+            auto elements = new Expressions(sliceLen);
+            foreach (k; 0 .. sliceLen)
+                (*elements)[k] = es1[cast(size_t)(ilwr) + k];
+            emplaceExp!(ArrayLiteralExp)(&ue, e1.loc, type, elements);
+        }
         else
         {
             const size_t headLen = es1.head ? es1.head.length : 0;
@@ -1290,9 +1299,19 @@ UnionExp Slice(Type type, Expression e1, Expression lwr, Expression upr)
             else
             {
                 es1.materializeInPlace();
-                auto elements = new Expressions(sliceLen);
-                memcpy(elements.tdata(), es1.head.tdata() + ilwr, sliceLen * ((*es1.head)[0]).sizeof);
-                emplaceExp!(ArrayLiteralExp)(&ue, e1.loc, type, elements);
+                if (es1.isScalar())
+                {
+                    auto elements = new Expressions(sliceLen);
+                    foreach (k; 0 .. sliceLen)
+                        (*elements)[k] = es1[cast(size_t)(ilwr) + k];
+                    emplaceExp!(ArrayLiteralExp)(&ue, e1.loc, type, elements);
+                }
+                else
+                {
+                    auto elements = new Expressions(sliceLen);
+                    memcpy(elements.tdata(), es1.head.tdata() + ilwr, sliceLen * ((*es1.head)[0]).sizeof);
+                    emplaceExp!(ArrayLiteralExp)(&ue, e1.loc, type, elements);
+                }
             }
         }
     }
