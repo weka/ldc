@@ -1344,9 +1344,13 @@ version (IN_LLVM)
         const tsz = type.size();
         assert(vsz != SIZE_INVALID && tsz != SIZE_INVALID);
 
-        // Overlap is checked by comparing bit offsets
-        auto bitoffset  =   offset * 8;
-        auto vbitoffset = v.offset * 8;
+        // Overlap is checked by comparing bit offsets.
+        // Multiply in 64-bit: `uint(offset) * 8` wraps when offset >= 2^29
+        // (struct fields placed past the 512 MB mark) — that wrap makes
+        // a field appear to overlap with byte 0, so AggregateDeclaration.fill
+        // wrongly skips its default-init, leaving its element slot null.
+        ulong bitoffset  = cast(ulong)offset   * 8;
+        ulong vbitoffset = cast(ulong)v.offset * 8;
 
         // Bitsize of types are overridden by any bit-field widths.
         ulong tbitsize = void;

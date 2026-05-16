@@ -2491,12 +2491,24 @@ public:
 
     override void visit(CompactArrayLiteralExp e)
     {
-        // A compact array literal carries head + repeated tail; both head
-        // elements and tailValue must already be CTFE values (the trait that
-        // produces them constructs them from IntegerExp etc.). So
-        // interpretation is a pass-through.
-        e.ownedByCtfe = OwnedBy.ctfe;
-        result = e;
+        // Head/middle/tail values are already CTFE-ready (the producers
+        // construct them from IntegerExp etc.), so interpretation is just
+        // ownership marking — except we must hand back a *fresh* CALE when
+        // the type is mutable, so subsequent CTFE writes to one instance
+        // don't bleed into shared `T.init` / cached default-init literals.
+        if (e.ownedByCtfe >= OwnedBy.ctfe)
+        {
+            result = e;
+            return;
+        }
+        if (e.type.toBasetype().nextOf().mod & (MODFlags.const_ | MODFlags.immutable_))
+        {
+            e.ownedByCtfe = OwnedBy.ctfe;
+            result = e;
+            return;
+        }
+        *pue = copyLiteral(e);
+        result = pue.exp();
     }
 
     override void visit(ArrayLiteralExp e)
@@ -3931,6 +3943,65 @@ public:
                     error(e.loc, "cannot modify read-only constant `%s`", existingCA.toChars());
                     return CTFEExp.cantexp;
                 }
+                const headLen = existingCA.head ? existingCA.head.length : 0;
+                const tailLen = existingCA.tail ? existingCA.tail.length : 0;
+                const tailStart = headLen + existingCA.middleCount;
+
+                // Phase 1: no-op if write lands in uniform middle and equals middleValue.
+                if (index >= headLen && index < tailStart
+                    && existingCA.middleValue !is null
+                    && newval.equals(existingCA.middleValue))
+                    return e.op == EXP.blit ? newval : null;
+
+                // Phase 2: keep compact when possible by writing into existing
+                // head/tail directly, or by extending head/tail with middleValue
+                // padding if the resulting size stays under threshold. Falls
+                // back to full materialize only when both extensions overflow.
+                enum size_t phase2Threshold = 65_536;
+                if (index < headLen)
+                {
+                    (*existingCA.head)[cast(size_t)index] = newval;
+                    return e.op == EXP.blit ? newval : null;
+                }
+                if (index >= tailStart)
+                {
+                    (*existingCA.tail)[cast(size_t)(index - tailStart)] = newval;
+                    return e.op == EXP.blit ? newval : null;
+                }
+                const newHeadLen = cast(size_t)(index + 1);
+                const newTailLen = tailLen + cast(size_t)(tailStart - index);
+                const canHead = (newHeadLen <= phase2Threshold);
+                const canTail = (newTailLen <= phase2Threshold);
+                if (canHead && (!canTail || newHeadLen <= newTailLen))
+                {
+                    if (existingCA.head is null)
+                        existingCA.head = new Expressions();
+                    const oldLen = existingCA.head.length;
+                    const padCount = cast(size_t)(index - headLen);
+                    existingCA.head.setDim(newHeadLen);
+                    foreach (j; 0 .. padCount)
+                        (*existingCA.head)[oldLen + j] = existingCA.middleValue;
+                    (*existingCA.head)[cast(size_t)index] = newval;
+                    existingCA.middleCount -= (padCount + 1);
+                    return e.op == EXP.blit ? newval : null;
+                }
+                if (canTail)
+                {
+                    if (existingCA.tail is null)
+                        existingCA.tail = new Expressions();
+                    const padCount = cast(size_t)(tailStart - 1 - index);
+                    const prevTailLen = existingCA.tail.length;
+                    existingCA.tail.setDim(newTailLen);
+                    for (size_t k = prevTailLen; k > 0; --k)
+                        (*existingCA.tail)[k - 1 + padCount + 1] = (*existingCA.tail)[k - 1];
+                    (*existingCA.tail)[0] = newval;
+                    foreach (j; 0 .. padCount)
+                        (*existingCA.tail)[1 + j] = existingCA.middleValue;
+                    existingCA.middleCount -= (padCount + 1);
+                    return e.op == EXP.blit ? newval : null;
+                }
+
+                // Both extensions exceed threshold — full materialize.
                 existingCA.materializeInPlace();
                 auto materialized = new ArrayLiteralExp(existingCA.loc, existingCA.type, existingCA.head);
                 materialized.ownedByCtfe = OwnedBy.ctfe;
@@ -4149,6 +4220,122 @@ public:
                 error(e.loc, "cannot modify read-only constant `%s`", existingCA.toChars());
                 return CTFEExp.cantexp;
             }
+            const headLen = existingCA.head ? existingCA.head.length : 0;
+            const tailLen = existingCA.tail ? existingCA.tail.length : 0;
+            const tailStart = headLen + existingCA.middleCount;
+            const sliceLen = upperbound - lowerbound;
+            const sliceEnd = firstIndex + sliceLen;
+
+            // Phase 1: block-assign covering uniform middle range with matching
+            // newval is a no-op.
+            if (isBlockAssignment
+                && existingCA.middleValue !is null
+                && firstIndex >= headLen
+                && sliceEnd <= tailStart
+                && newval.equals(existingCA.middleValue))
+                return newval;
+
+            // Phase 2: block-assign that fits entirely in head/tail — or that
+            // can be absorbed by extending head/tail within threshold — stays
+            // compact. Slice-to-slice (non-block) of bounded length is handled
+            // the same way: per-element source values write into head/tail
+            // without materializing the aggregate.
+            enum size_t phase2Threshold = 65_536;
+
+            // Resolve the per-element source for slice-to-slice copies. For
+            // block assignment the "source" is the same `newval` for every
+            // slot, so we route through a closure that ignores the index.
+            Expression src;
+            if (!isBlockAssignment)
+            {
+                src = newval;
+                if (src.isSliceExp())
+                {
+                    src = resolveSlice(src);
+                    if (CTFEExp.isCantExp(src))
+                    {
+                        error(e.loc, "CTFE internal error: slice `%s`", newval.toChars());
+                        return CTFEExp.cantexp;
+                    }
+                }
+            }
+            Expression srcAt(size_t k)
+            {
+                if (isBlockAssignment)
+                    return newval;
+                if (auto sale = src.isArrayLiteralExp())
+                    return (*sale.elements)[k];
+                if (auto scale = src.isCompactArrayLiteralExp())
+                    return scale[k];
+                if (auto sse = src.isStringExp())
+                    return ctfeEmplaceExp!IntegerExp(sse.loc, sse.getIndex(k), src.type.nextOf());
+                return null;
+            }
+
+            // Slice-to-slice with a source shape we can't index per-element
+            // (e.g. NullExp) — fall through to the materialize path below.
+            const indexableSrc = isBlockAssignment || srcAt(0) !is null;
+            if (sliceLen <= phase2Threshold && indexableSrc)
+            {
+                // Entirely within head
+                if (sliceEnd <= headLen)
+                {
+                    foreach (k; 0 .. cast(size_t)sliceLen)
+                        (*existingCA.head)[cast(size_t)(firstIndex + k)] = srcAt(k);
+                    return newval;
+                }
+                // Entirely within tail
+                if (firstIndex >= tailStart)
+                {
+                    foreach (k; 0 .. cast(size_t)sliceLen)
+                        (*existingCA.tail)[cast(size_t)(firstIndex - tailStart + k)] = srcAt(k);
+                    return newval;
+                }
+                // Touches middle — try head/tail extension if within threshold.
+                const newHeadLen = (sliceEnd > headLen && sliceEnd <= tailStart)
+                                   ? cast(size_t)sliceEnd
+                                   : size_t.max;
+                const newTailLen = (firstIndex >= headLen && firstIndex < tailStart)
+                                   ? tailLen + cast(size_t)(tailStart - firstIndex)
+                                   : size_t.max;
+                const canHead = (newHeadLen <= phase2Threshold);
+                const canTail = (newTailLen <= phase2Threshold);
+                if (canHead && (!canTail || newHeadLen <= newTailLen))
+                {
+                    if (existingCA.head is null)
+                        existingCA.head = new Expressions();
+                    const oldLen = existingCA.head.length;
+                    existingCA.head.setDim(newHeadLen);
+                    // pad middleValue from oldLen up to firstIndex
+                    foreach (j; oldLen .. cast(size_t)firstIndex)
+                        (*existingCA.head)[j] = existingCA.middleValue;
+                    // write source over the slice region
+                    foreach (k; 0 .. cast(size_t)sliceLen)
+                        (*existingCA.head)[cast(size_t)(firstIndex + k)] = srcAt(k);
+                    existingCA.middleCount -= (newHeadLen - oldLen);
+                    return newval;
+                }
+                if (canTail)
+                {
+                    if (existingCA.tail is null)
+                        existingCA.tail = new Expressions();
+                    const prevTailLen = existingCA.tail.length;
+                    const growth = newTailLen - prevTailLen;
+                    existingCA.tail.setDim(newTailLen);
+                    for (size_t k = prevTailLen; k > 0; --k)
+                        (*existingCA.tail)[k - 1 + growth] = (*existingCA.tail)[k - 1];
+                    // tail[0 .. growth] covers indices [firstIndex .. tailStart);
+                    // write source over [firstIndex .. sliceEnd), middleValue for [sliceEnd .. tailStart)
+                    foreach (k; 0 .. cast(size_t)sliceLen)
+                        (*existingCA.tail)[k] = srcAt(k);
+                    foreach (j; cast(size_t)sliceLen .. growth)
+                        (*existingCA.tail)[j] = existingCA.middleValue;
+                    existingCA.middleCount -= growth;
+                    return newval;
+                }
+            }
+
+            // Fallback: materialize.
             existingCA.materializeInPlace();
             auto ale = new ArrayLiteralExp(existingCA.loc, existingCA.type, existingCA.head);
             ale.ownedByCtfe = OwnedBy.ctfe;
