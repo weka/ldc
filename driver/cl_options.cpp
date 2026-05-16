@@ -96,6 +96,11 @@ static cl::opt<bool, true>
     vgc("vgc", cl::desc("List all gc allocations including hidden ones"),
         cl::ZeroOrMore, cl::location(global.params.v.gc));
 
+static cl::opt<bool, true>
+    vctfe("vctfe",
+          cl::desc("Log CompactArrayLiteralExp materialization sites during CTFE"),
+          cl::ZeroOrMore, cl::location(global.params.v.ctfe));
+
 // Dummy data type for custom parsers where the help output shouldn't display
 // any value.
 using DummyDataType = bool;

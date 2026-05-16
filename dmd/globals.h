@@ -153,6 +153,7 @@ struct Verbose
     // TODO: make this an enum when we want to list other kinds of instances
     d_bool templatesListInstances;
     d_bool gc;                 // identify gc usage
+    d_bool ctfe;               // log CompactArrayLiteralExp materialization sites
     d_bool field;              // identify non-mutable field variables
     d_bool complex = true;     // identify complex/imaginary type usage
     d_bool vin;                // identify 'in' parameters

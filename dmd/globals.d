@@ -173,6 +173,7 @@ extern(C++) struct Verbose
     // TODO: make this an enum when we want to list other kinds of instances
     bool templatesListInstances;
     bool gc;                // identify gc usage
+    bool ctfe;              // log CompactArrayLiteralExp materialization sites
     bool field;             // identify non-mutable field variables
     bool complex = true;    // identify complex/imaginary type usage
     bool vin;               // identify 'in' parameters

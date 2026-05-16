@@ -2351,6 +2351,13 @@ extern (C++) final class CompactArrayLiteralExp : Expression
     ArrayLiteralExp materialize()
     {
         const total = length();
+        if (global.params.v.ctfe)
+        {
+            import core.stdc.stdio : fprintf, stderr;
+            const lc = loc.toChars();
+            fprintf(stderr, "%s: materialize() CompactArrayLiteralExp %s (n=%llu, fresh ArrayLiteralExp)\n",
+                (lc && *lc) ? lc : "<no loc>", type ? type.toChars() : "<no type>", cast(ulong)total);
+        }
         auto exps = new Expressions(total);
         if (scalarStride != 0)
         {
@@ -2384,6 +2391,14 @@ extern (C++) final class CompactArrayLiteralExp : Expression
         assert(stride != 0);
         const total = length();
         const bytes = total * stride;
+        if (global.params.v.ctfe)
+        {
+            import core.stdc.stdio : fprintf, stderr;
+            const lc = loc.toChars();
+            fprintf(stderr, "%s: materialize CompactArrayLiteralExp %s (n=%llu, mode=scalar[stride=%u, %llu bytes])\n",
+                (lc && *lc) ? lc : "<no loc>", type ? type.toChars() : "<no type>",
+                cast(ulong)total, cast(uint)stride, cast(ulong)bytes);
+        }
         // Scalar buffer holds raw integer bytes with no Expression* pointers,
         // so use the noscan variant: under `-lowmem` the GC collector skips
         // scanning it for roots (avoids false positives and saves GC work).
@@ -2445,6 +2460,13 @@ extern (C++) final class CompactArrayLiteralExp : Expression
             return;
         }
         const total = length();
+        if (global.params.v.ctfe)
+        {
+            import core.stdc.stdio : fprintf, stderr;
+            const lc = loc.toChars();
+            fprintf(stderr, "%s: materialize CompactArrayLiteralExp %s (n=%llu, mode=Expression*[n])\n",
+                (lc && *lc) ? lc : "<no loc>", type ? type.toChars() : "<no type>", cast(ulong)total);
+        }
         auto exps = new Expressions(total);
         const headLen = head ? head.length : 0;
         foreach (i; 0 .. headLen)
