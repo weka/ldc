@@ -1603,8 +1603,12 @@ else
         sc2.pop();
 
         // Instantiate RTInfo!S to provide a pointer bitmap for the GC
-        // Don't do it in -betterC or on unused deprecated / error types
+        // Don't do it in -betterC, with -conservative-rtinfo, or on unused
+        // deprecated / error types. Under -conservative-rtinfo, codegen leaves
+        // m_RTInfo as null and the irstruct / irclass paths fall back to
+        // rtinfoHasPointers (1) / rtinfoNoPointers (0) based on hasPointers().
         if (!ad.getRTInfo && global.params.useTypeInfo && Type.rtinfo &&
+            !global.params.conservativeRTInfo &&
             (!ad.isDeprecated() || global.params.useDeprecated != DiagnosticReporting.error) &&
             (ad.type && ad.type.ty != Terror))
         {
