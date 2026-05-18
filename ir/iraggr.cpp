@@ -11,11 +11,13 @@
 
 #include "dmd/aggregate.h"
 #include "dmd/declaration.h"
+#include "dmd/errors.h"
 #include "dmd/expression.h"
 #include "dmd/identifier.h"
 #include "dmd/init.h"
 #include "dmd/mtype.h"
 #include "dmd/target.h"
+#include "driver/cl_options.h"
 #include "gen/irstate.h"
 #include "gen/llvm.h"
 #include "gen/llvmhelpers.h"
@@ -107,6 +109,25 @@ LLConstant *IrAggr::getInitSymbol(bool define) {
     if (initGlobal // NOT a bitcast pointer to helper global
         && !initGlobal->hasInitializer()) {
       init = gIR->setGlobalVarInitializer(initGlobal, initConstant, aggrdecl);
+
+      const uint64_t symSize = getTypeAllocSize(initConstant->getType());
+      if (opts::maxInitSymbolSize.getNumOccurrences() > 0 &&
+          symSize > opts::maxInitSymbolSize) {
+        error(aggrdecl->loc,
+              "init symbol `%s` is %llu bytes, exceeding "
+              "`--max-init-symbol-size=%llu`",
+              aggrdecl->toPrettyChars(),
+              (unsigned long long)symSize,
+              (unsigned long long)(uint64_t)opts::maxInitSymbolSize);
+      } else if (opts::maxInitSymbolSizeWarning.getNumOccurrences() > 0 &&
+                 symSize > opts::maxInitSymbolSizeWarning) {
+        warning(aggrdecl->loc,
+                "init symbol `%s` is %llu bytes, exceeding "
+                "`--max-init-symbol-size-warning=%llu`",
+                aggrdecl->toPrettyChars(),
+                (unsigned long long)symSize,
+                (unsigned long long)(uint64_t)opts::maxInitSymbolSizeWarning);
+      }
     }
   }
 

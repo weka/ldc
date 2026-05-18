@@ -145,6 +145,9 @@ extern cl::opt<std::string> saveOptimizationRecord;
 extern cl::opt<unsigned> fWarnStackSize;
 #endif
 
+extern cl::opt<uint64_t> maxInitSymbolSize;
+extern cl::opt<uint64_t> maxInitSymbolSizeWarning;
+
 #if LDC_LLVM_SUPPORTED_TARGET_SPIRV || LDC_LLVM_SUPPORTED_TARGET_NVPTX
 extern cl::list<std::string> dcomputeTargets;
 extern cl::opt<std::string> dcomputeFilePrefix;
