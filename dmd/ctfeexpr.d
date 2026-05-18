@@ -201,6 +201,7 @@ private Expressions* copyLiteralArray(Expressions* oldelems, Expression basis = 
     if (!oldelems)
         return oldelems;
     incArrayAllocs();
+    logCtfeAlloc("copyLiteralArray Expression*[]", oldelems.length, (void*).sizeof, Loc.initial);
     auto newelems = new Expressions(oldelems.length);
     foreach (i, el; *oldelems)
     {
@@ -580,6 +581,7 @@ Expression createBlockDuplicatedArrayLiteral(UnionExp* pue, const ref Loc loc, T
         return pue.exp();
     }
 
+    logCtfeAlloc("createBlockDuplicatedArrayLiteral", dim, (void*).sizeof, loc);
     auto elements = new Expressions(dim);
     foreach (i, ref el; *elements)
     {
@@ -2202,6 +2204,7 @@ UnionExp voidInitLiteral(Type t, VarDeclaration var)
             return ue;
         }
 
+        logCtfeAlloc("voidInitLiteral non-compact fallback", d, (void*).sizeof, var.loc);
         auto elements = new Expressions(d);
         foreach (i; 0 .. d)
         {

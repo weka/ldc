@@ -215,6 +215,29 @@ void incArrayAllocs()
     ++ctfeGlobals.numArrayAllocs;
 }
 
+/// Diagnostic helper for `--vctfe`. Logs CTFE allocations whose byte size
+/// crosses a coarse threshold so the user can see where memory goes during
+/// compile-time evaluation without being drowned in noise from tiny literals.
+/// `kind` is a short label (e.g. "Expressions copy", "void-init fallback",
+/// "NewExp T[N]") that names the call site. `bytesPerElem` is the per-slot
+/// size — for Expression*[] arrays that's `(void*).sizeof`; for raw byte
+/// buffers it's 1.
+public void logCtfeAlloc(string kind, size_t count, size_t bytesPerElem, Loc loc)
+{
+    if (!global.params.v.ctfe)
+        return;
+    enum size_t threshold = 64 * 1024;  // 64 KB
+    const bytes = count * bytesPerElem;
+    if (bytes < threshold)
+        return;
+    import core.stdc.stdio : fprintf, stderr;
+    const lc = loc.toChars();
+    const locStr = (lc && *lc) ? lc : "<no loc>";
+    fprintf(stderr, "%s: ctfe alloc %.*s (n=%llu, %llu bytes)\n",
+        locStr, cast(int)kind.length, kind.ptr,
+        cast(ulong)count, cast(ulong)bytes);
+}
+
 /* ================================================ Implementation ======================================= */
 
 private:
@@ -2791,6 +2814,7 @@ public:
             if (exceptionOrCantInterpret(elem))
                 return elem;
 
+            logCtfeAlloc("NewExp T[N]", len, (void*).sizeof, loc);
             auto elements = new Expressions(len);
             foreach (ref element; *elements)
                 element = copyLiteral(elem).copy();
@@ -3144,6 +3168,7 @@ public:
                     return ue;
                 }
                 const length = aex.elements.length;
+                logCtfeAlloc("array op element-wise", length, (void*).sizeof, loc);
                 Expressions* elements = new Expressions(length);
 
                 emplaceExp!ArrayLiteralExp(&ue, loc, type, elements);
