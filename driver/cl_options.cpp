@@ -740,19 +740,19 @@ cl::opt<bool> ltoFatObjects(
     cl::desc("Include both IR and object code in object file output; only "
              "effective when compiling with -flto."));
 
-cl::opt<uint64_t>
+cl::opt<uint64_t, true>
     maxInitSymbolSize("max-init-symbol-size", cl::ZeroOrMore,
-                      cl::init(UINT64_MAX),
                       cl::desc("Error if a `<type>__initZ` symbol exceeds this "
                                "size in bytes"),
-                      cl::value_desc("bytes"));
+                      cl::value_desc("bytes"),
+                      cl::location(global.params.maxInitSymbolSize));
 
-cl::opt<uint64_t>
+cl::opt<uint64_t, true>
     maxInitSymbolSizeWarning("max-init-symbol-size-warning", cl::ZeroOrMore,
-                             cl::init(UINT64_MAX),
                              cl::desc("Warn if a `<type>__initZ` symbol exceeds "
                                       "this size in bytes"),
-                             cl::value_desc("bytes"));
+                             cl::value_desc("bytes"),
+                             cl::location(global.params.maxInitSymbolSizeWarning));
 
 cl::opt<std::string>
     saveOptimizationRecord("fsave-optimization-record",

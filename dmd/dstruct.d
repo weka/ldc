@@ -394,6 +394,16 @@ version (IN_LLVM) {} else
 
 
         argTypes = target.toArgTypes(type);
+
+        version (IN_LLVM)
+        {
+            if (!zeroInit && structsize > global.params.maxInitSymbolSize)
+            {
+                error(loc, "init symbol `%s` is %llu bytes, exceeding `--max-init-symbol-size=%llu`",
+                    toPrettyChars(), cast(ulong)structsize, cast(ulong)global.params.maxInitSymbolSize);
+                errors = true;
+            }
+        }
     }
 
     /// Compute cached type properties for `TypeStruct`

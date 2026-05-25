@@ -337,6 +337,9 @@ version (IN_LLVM)
 
     LinkonceTemplates linkonceTemplates; // -linkonce-templates
 
+    ulong maxInitSymbolSize        = ulong.max; // error if __initZ symbol exceeds this
+    ulong maxInitSymbolSizeWarning = ulong.max; // warn if __initZ symbol exceeds this
+
     // Windows-specific:
     bool dllexport;      // dllexport ~all defined symbols?
     DLLImport dllimport; // dllimport data symbols not defined in any root module?

@@ -26,6 +26,7 @@ import dmd.dsymbol;
 import dmd.dsymbolsem;
 import dmd.errors;
 import dmd.func;
+import dmd.globals;
 import dmd.id;
 import dmd.identifier;
 import dmd.location;
@@ -604,6 +605,16 @@ version (IN_LLVM) {} else
         }
 
         sizeok = Sizeok.done;
+
+        version (IN_LLVM)
+        {
+            if (structsize > global.params.maxInitSymbolSize)
+            {
+                error(loc, "init symbol `%s` is %llu bytes, exceeding `--max-init-symbol-size=%llu`",
+                    toPrettyChars(), cast(ulong)structsize, cast(ulong)global.params.maxInitSymbolSize);
+                errors = true;
+            }
+        }
 
         // Calculate fields[i].overlapped
         checkOverlappedFields();
