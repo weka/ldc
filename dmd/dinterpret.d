@@ -215,6 +215,21 @@ void incArrayAllocs()
     ++ctfeGlobals.numArrayAllocs;
 }
 
+/* Check whether a CTFE allocation of `allocBytes` bytes exceeds the
+ * --ctfe-max-alloc limit.  Returns true and reports an error if so.
+ */
+bool ctfeAllocExceedsLimit(const ref Loc loc, uinteger_t allocBytes)
+{
+    const limit = global.params.ctfeMaxAllocSize;
+    if (limit == 0 || allocBytes == SIZE_INVALID || allocBytes <= limit)
+        return false;
+    import core.stdc.stdio : snprintf;
+    char[64] buf = void;
+    snprintf(buf.ptr, buf.length, "%llu", cast(ulong)allocBytes);
+    error(loc, "CTFE allocation of %s bytes exceeds `--ctfe-max-alloc=%llu`", buf.ptr, cast(ulong)limit);
+    return true;
+}
+
 /* ================================================ Implementation ======================================= */
 
 private:
@@ -2671,6 +2686,12 @@ public:
             return;
         }
 
+        if (ctfeAllocExceedsLimit(e.loc, e.sd.structsize))
+        {
+            result = CTFEExp.cantexp;
+            return;
+        }
+
         size_t dim = e.elements ? e.elements.length : 0;
         auto expsx = e.elements;
 
@@ -2763,6 +2784,8 @@ public:
             return lenExpr;
         size_t len = cast(size_t)lenExpr.toInteger();
         Type elemType = (cast(TypeArray)newtype).next;
+        if (ctfeAllocExceedsLimit(loc, cast(uinteger_t)len * elemType.size()))
+            return CTFEExp.cantexp;
         if (elemType.ty == Tarray && argnum < arguments.length - 1)
         {
             Expression elem = recursivelyCreateArrayLiteral(pue, loc, elemType, istate, arguments, argnum + 1);
@@ -2809,6 +2832,11 @@ public:
         }
         if (auto ts = e.newtype.toBasetype().isTypeStruct())
         {
+            if (ctfeAllocExceedsLimit(e.loc, ts.size(e.loc)))
+            {
+                result = CTFEExp.cantexp;
+                return;
+            }
             if (e.member)
             {
                 Expression se = e.newtype.defaultInitLiteral(e.loc);
@@ -2853,6 +2881,11 @@ public:
         }
         if (auto tc = e.newtype.toBasetype().isTypeClass())
         {
+            if (ctfeAllocExceedsLimit(e.loc, tc.size(e.loc)))
+            {
+                result = CTFEExp.cantexp;
+                return;
+            }
             ClassDeclaration cd = tc.sym;
             size_t totalFieldCount = 0;
             for (ClassDeclaration c = cd; c; c = c.baseClass)
