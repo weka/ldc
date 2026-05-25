@@ -117,6 +117,14 @@ static cl::opt<uint64_t, true> ctfeMaxAllocSize(
              "compile-time evaluated code."),
     cl::ZeroOrMore, cl::location(global.params.ctfeMaxAllocSize));
 
+static cl::opt<uint64_t, true> maxVariableSize(
+    "max-variable-size",
+    cl::desc("Error if a `__gshared`, TLS, or stack variable exceeds this "
+             "size in bytes. Does not apply to struct/class fields. "
+             "Catches accidentally large globals and stack allocations."),
+    cl::value_desc("bytes"),
+    cl::ZeroOrMore, cl::location(global.params.maxVariableSize));
+
 // Dummy data type for custom parsers where the help output shouldn't display
 // any value.
 using DummyDataType = bool;
