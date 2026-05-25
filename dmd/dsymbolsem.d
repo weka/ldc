@@ -1451,6 +1451,31 @@ version (IN_LLVM)
         if (dsym.type.toBasetype().ty == Terror)
             dsym.errors = true;
 
+        version (IN_LLVM)
+        {
+            const varSizeLimit = global.params.maxVariableSize;
+            if (varSizeLimit < ulong.max
+                && !dsym.isField()
+                && !dsym.isParameter()
+                && !(dsym.storage_class & (STC.manifest | STC.extern_ | STC.ctfe))
+                && !dsym.errors)
+            {
+                const bool isGsharedOrTLS = (dsym.storage_class & STC.gshared) != 0 || dsym.isThreadlocal();
+                const bool isStackLocal   = !dsym.isDataseg() && !dsym.isField();
+                if (isGsharedOrTLS || isStackLocal)
+                {
+                    const varSz = dsym.type.size(dsym.loc);
+                    if (varSz != SIZE_INVALID && varSz > varSizeLimit)
+                    {
+                        const(char)* kind = isGsharedOrTLS ? (dsym.isThreadlocal() ? "TLS" : "__gshared") : "stack";
+                        error(dsym.loc, "%s variable `%s` is %llu bytes, exceeding `--max-variable-size=%llu`",
+                            kind, dsym.toPrettyChars(), cast(ulong)varSz, cast(ulong)varSizeLimit);
+                        dsym.errors = true;
+                    }
+                }
+            }
+        }
+
         if(sc.scopesym && !sc.scopesym.isAggregateDeclaration())
         {
             for (ScopeDsymbol sym = sc.scopesym; sym && dsym.endlinnum == 0;
