@@ -340,6 +340,7 @@ version (IN_LLVM)
 
     ulong maxInitSymbolSize        = ulong.max; // error if __initZ symbol exceeds this
     ulong maxInitSymbolSizeWarning = ulong.max; // warn if __initZ symbol exceeds this
+    ulong maxVariableSize          = ulong.max; // error if __gshared/TLS/stack variable exceeds this
 
     // Windows-specific:
     bool dllexport;      // dllexport ~all defined symbols?
