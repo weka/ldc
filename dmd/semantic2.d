@@ -356,6 +356,7 @@ private extern(C++) final class Semantic2Visitor : Visitor
         {
             const varSizeLimit = global.params.maxVariableSize;
             if (varSizeLimit < ulong.max
+                && !sc.intypeof
                 && !vd.isField()
                 && !vd.isParameter()
                 && !(vd.storage_class & (STC.manifest | STC.extern_ | STC.ctfe | STC.ref_))
