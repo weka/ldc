@@ -55,6 +55,7 @@ import dmd.hdrgen;
 import dmd.location;
 import dmd.mtype;
 import dmd.mustuse;
+import dmd.nocapture;
 import dmd.nogc;
 import dmd.nspace;
 import dmd.objc;
@@ -121,6 +122,7 @@ void enumSemantic(Scope* sc, EnumDeclaration ed)
     ed.semanticRun = PASS.semantic;
     UserAttributeDeclaration.checkGNUABITag(ed, sc.linkage);
     checkMustUseReserved(ed);
+    checkNoCaptureReserved(ed);
 
     if (!ed.members && !ed.memtype) // enum ident;
     {

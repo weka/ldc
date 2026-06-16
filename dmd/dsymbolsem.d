@@ -53,6 +53,7 @@ import dmd.hdrgen;
 import dmd.location;
 import dmd.mtype;
 import dmd.mustuse;
+import dmd.nocapture;
 import dmd.nspace;
 import dmd.objc;
 import dmd.opover;
@@ -1450,6 +1451,8 @@ version (IN_LLVM)
 
         if (dsym.type.toBasetype().ty == Terror)
             dsym.errors = true;
+
+        checkNoCaptureReserved(dsym);
 
         if(sc.scopesym && !sc.scopesym.isAggregateDeclaration())
         {

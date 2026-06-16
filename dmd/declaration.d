@@ -1599,6 +1599,17 @@ version (IN_LLVM)
         if (!fdv || fdv == fdthis)
             return false;
 
+        // A @nocapture variable (or one of a @nocapture type) cannot be
+        // captured across a function frame; it must be passed explicitly.
+        import dmd.nocapture : isNoCapture;
+        if (isNoCapture(this, sc))
+        {
+            const eloc = loc.isValid() ? loc : this.loc;
+            error(eloc, "variable `%s` is `@nocapture` and cannot be captured by a nested function; pass it as an explicit parameter (or make the nested function `static`)",
+                toChars());
+            return true;
+        }
+
         // Add fdthis to nestedrefs[] if not already there
         if (!nestedrefs.contains(fdthis))
             nestedrefs.push(fdthis);

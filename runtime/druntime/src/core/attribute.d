@@ -292,6 +292,43 @@ version (UdaGNUAbiTag) struct gnuAbiTag
 enum mustuse;
 
 /**
+ * Use this attribute to forbid a variable, or all variables of a type, from
+ * being captured by a nested function or lambda. Capturing such a variable
+ * from an enclosing function scope is a compile-time error; the value must
+ * instead be passed explicitly (e.g. as a function parameter, or by making
+ * the nested function `static`).
+ *
+ * Applied to a `struct`, `union`, or `class` declaration, every stack-local
+ * variable of that type becomes non-capturable. Applied directly to a local
+ * variable declaration, only that variable is affected.
+ *
+ * The attribute concerns the captured variable's own storage only: it does
+ * not propagate through `struct`/`union`/`class` fields, nor through
+ * indirection (a `T*`, `ref T`, or `T[]` of a `@nocapture` type `T` is still
+ * capturable). It is meaningless on globals, `__gshared`/TLS/`static`
+ * variables and function parameters (which are never captured), and attaching
+ * it there, or to a function or `enum` declaration, is an error.
+ *
+ * Examples:
+ * ---
+ * @nocapture struct LockGuard { ... }
+ *
+ * void f()
+ * {
+ *     @nocapture int counter;
+ *     LockGuard g;
+ *
+ *     // error: captures `@nocapture` variable `counter`
+ *     //auto bad = () => counter + 1;
+ *
+ *     // error: captures variable `g` of `@nocapture` type `LockGuard`
+ *     //auto bad2 = () { g.touch(); };
+ * }
+ * ---
+ */
+enum nocapture;
+
+/**
  * Use this attribute to indicate that a shared module constructor does not depend on any
  * other module constructor being run first. This avoids errors on cyclic module constructors.
  *

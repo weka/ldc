@@ -45,6 +45,7 @@ import dmd.init;
 import dmd.location;
 import dmd.mtype;
 import dmd.mustuse;
+import dmd.nocapture;
 import dmd.objc;
 import dmd.opover;
 import dmd.pragmasem;
@@ -241,6 +242,7 @@ void funcDeclarationSemantic(Scope* sc, FuncDeclaration funcdecl)
     funcdecl.userAttribDecl = sc.userAttribDecl;
     UserAttributeDeclaration.checkGNUABITag(funcdecl, funcdecl._linkage);
     checkMustUseReserved(funcdecl);
+    checkNoCaptureReserved(funcdecl);
 
 version (IN_LLVM)
 {
