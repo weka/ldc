@@ -31,8 +31,10 @@ import dmd.cond;
 import dmd.declaration;
 import dmd.dmodule;
 import dmd.dscope;
+import dmd.dstruct;
 import dmd.dsymbol;
 import dmd.dsymbolsem;
+import dmd.dtemplate;
 import dmd.errors;
 import dmd.expression;
 import dmd.expressionsem;
@@ -1340,4 +1342,48 @@ bool isEnumAttribute(Expression e, Identifier id)
         return true;
 
     return false;
+}
+
+/**
+ * Option A — caller-required attributes.
+ *
+ * Detects a `callerAttr!("NAME", fake)` instantiation, i.e. an instance of the
+ * `callerAttr` struct template from `core.attribute`. On success fills `name`
+ * (the attribute's string name) and `fake` (true for the `callerAttrFake`
+ * migration variant).
+ *
+ * Returns: true if `sd` is such an instantiation.
+ */
+bool isCallerAttrStruct(StructDeclaration sd, out const(char)[] name, out bool fake)
+{
+    if (!sd || !sd.parent)
+        return false;
+    auto ti = sd.parent.isTemplateInstance();
+    if (!ti || !ti.tempdecl)
+        return false;
+    if (!isCoreUda(ti.tempdecl, Id.udaCallerAttr))
+        return false;
+
+    // Read the resolved template value arguments: (string name, bool fake = false).
+    if (ti.tdtypes.length >= 1)
+        if (auto e = ti.tdtypes[0].isExpression())
+            if (auto se = e.isStringExp())
+                name = se.peekString();
+    fake = false;
+    if (ti.tdtypes.length >= 2)
+        if (auto e = ti.tdtypes[1].isExpression())
+            fake = e.toInteger() != 0;
+    return name !is null;
+}
+
+/// As `isCallerAttrStruct`, but starting from a UDA expression (a `TypeExp` of the struct).
+bool isCallerAttrExp(Expression e, out const(char)[] name, out bool fake)
+{
+    auto te = e.isTypeExp();
+    if (!te)
+        return false;
+    auto ts = te.type.isTypeStruct();
+    if (!ts)
+        return false;
+    return isCallerAttrStruct(ts.sym, name, fake);
 }

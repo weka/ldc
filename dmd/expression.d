@@ -3553,6 +3553,7 @@ extern (C++) final class CallExp : UnaExp
     bool ignoreAttributes;  /// don't enforce attributes (e.g. call @gc function in @nogc code)
     bool isUfcsRewrite;     /// the first argument was pushed in here by a UFCS rewrite
     VarDeclaration vthis2;  // container for multi-context
+    Identifier markedCallerAttr; /// Option A: alias name of the `.ATTR` caller-attr marker written at this call site (null if none)
 
     /// Puts the `arguments` and `names` into an `ArgumentList` for easily passing them around.
     /// The fields are still separate for backwards compatibility
