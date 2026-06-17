@@ -8966,6 +8966,26 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
                 error("identifier or `new` expected following `.`, not `%s`", token.toChars());
                 break;
 
+            case TOK.at:
+                // Caller-required attribute call-site marker: `callee(args) @CTX_SWITCH`.
+                // Attaches the marker identifier to the (call) expression it follows.
+                if (peekNext() == TOK.identifier)
+                {
+                    nextToken();            // skip `@`
+                    Identifier id = token.ident;
+                    nextToken();            // skip the marker identifier
+                    auto ce = e.isCallExp();
+                    if (!ce)
+                    {
+                        // no-parens form: `callee @CTX_SWITCH` is a marked zero-arg call
+                        ce = new AST.CallExp(loc, e);
+                        e = ce;
+                    }
+                    ce.markedCallerAttr = id;
+                    continue;
+                }
+                return e;
+
             case TOK.plusPlus:
                 e = new AST.PostExp(EXP.plusPlus, loc, e);
                 break;

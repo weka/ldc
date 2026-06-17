@@ -1,4 +1,4 @@
-// Option A: caller-required attributes with the `.ATTR` member-access marker.
+// Option A: caller-required attributes with the postfix `() @ATTR` call-site marker.
 // These all compile cleanly.
 import core.attribute : callerAttr, callerAttrFake;
 alias CTX_SWITCH      = callerAttr!"CTX_SWITCH";
@@ -10,47 +10,40 @@ void plain() {}
 // Propagation: a @CTX_SWITCH function may call @CTX_SWITCH functions when marked.
 @CTX_SWITCH void worker()
 {
-    yieldNow.CTX_SWITCH();   // marker matches; worker is @CTX_SWITCH
-    plain();                 // not CS, no marker needed
+    yieldNow() @CTX_SWITCH;   // marker matches; worker is @CTX_SWITCH
+    plain();                  // not CS, no marker needed
 }
 
 // The single root (e.g. the fiber main) starts the tree.
 @CTX_SWITCH void fiberMain()
 {
-    worker.CTX_SWITCH();
+    worker() @CTX_SWITCH;
 }
 
 // Forwarder via the FAKE migration shim: not forced onto its callers.
 @CTX_SWITCH_FAKE void withLock(void delegate() dg)
 {
-    yieldNow.CTX_SWITCH();   // strict-fake: internal CS call still marked
+    yieldNow() @CTX_SWITCH;   // strict-fake: internal CS call still marked
     dg();
 }
 
 void notYetMigrated()
 {
-    withLock(() {});         // calling a FAKE function needs no marker and no propagation
-}
-
-// No-parens property form is a marked zero-arg call.
-@CTX_SWITCH void tick() {}
-@CTX_SWITCH void run()
-{
-    tick.CTX_SWITCH;
+    withLock(() {});          // calling a FAKE function needs no marker and no propagation
 }
 
 // Works on aggregate methods too.
 struct Fiber
 {
     @CTX_SWITCH void yield() {}
-    @CTX_SWITCH void step() { this.yield.CTX_SWITCH(); }
+    @CTX_SWITCH void step() { this.yield() @CTX_SWITCH; }
 }
 
 // ----------------------------------------------------------------------------
 // Delegates / function pointers (indirect calls).
 //
 // A delegate parameter marked `@CTX_SWITCH` is itself a context-switching callee:
-// calling it requires the `.CTX_SWITCH` marker and propagates upward exactly like
+// calling it requires the `() @CTX_SWITCH` marker and propagates upward exactly like
 // a named function. This holds whether or not the parameter is `scope`.
 // A delegate parameter *without* `@CTX_SWITCH` is an ordinary callee: no marker,
 // no propagation.
@@ -60,26 +53,26 @@ struct Fiber
 // Non-scope @CTX_SWITCH delegate, forwarded by a FAKE shim (no propagation to callers).
 @CTX_SWITCH_FAKE void withDg(@CTX_SWITCH void delegate() dg)
 {
-    yieldNow.CTX_SWITCH();
-    dg.CTX_SWITCH();             // marked indirect call
+    yieldNow() @CTX_SWITCH;
+    dg() @CTX_SWITCH;             // marked indirect call
 }
 
 // `scope` @CTX_SWITCH delegate — same rules; `scope` does not change enforcement.
 @CTX_SWITCH_FAKE void withScopeDg(@CTX_SWITCH scope void delegate() dg)
 {
-    dg.CTX_SWITCH();
+    dg() @CTX_SWITCH;
 }
 
 // A real @CTX_SWITCH function calling a @CTX_SWITCH (scope) delegate: propagation holds.
 @CTX_SWITCH void runScoped(@CTX_SWITCH scope void delegate() dg)
 {
-    dg.CTX_SWITCH();
+    dg() @CTX_SWITCH;
 }
 
 // @CTX_SWITCH function-pointer parameter, called with the marker.
 @CTX_SWITCH void runFp(@CTX_SWITCH void function() fp)
 {
-    fp.CTX_SWITCH();
+    fp() @CTX_SWITCH;
 }
 
 // (A context-switching lambda passed to a *plain* delegate parameter is rejected —
@@ -88,17 +81,17 @@ struct Fiber
 // Both kinds side by side: `dg` requires the marker, `dg_no_ctx` does not.
 @CTX_SWITCH void runMixed(@CTX_SWITCH void delegate() dg, void delegate() dg_no_ctx)
 {
-    withDg.CTX_SWITCH(dg);
+    withDg(dg) @CTX_SWITCH;
 
     // An in-place lambda that itself performs a context switch. The lambda infers
     // `@CTX_SWITCH` from its body (like @nogc/@safe inference), so no annotation
     // and no FAKE shim are needed.
-    withDg.CTX_SWITCH(() {
-        yieldNow.CTX_SWITCH();
-    });
+    withDg(() {
+        yieldNow() @CTX_SWITCH;
+    }) @CTX_SWITCH;
 
-    dg.CTX_SWITCH();   // CS delegate: marker required
-    dg_no_ctx();       // plain delegate: no marker
+    dg() @CTX_SWITCH;   // CS delegate: marker required
+    dg_no_ctx();        // plain delegate: no marker
 }
 
 // --- delegates that DO NOT require CTX_SWITCH ---
@@ -125,9 +118,7 @@ void withDgPlain(void delegate() dg)
 
 void usesWithDgPlain()
 {
-    withDgPlain(() {
-        // yieldNow.CTX_SWITCH(); // build error here [cannot pass `@CTX_SWITCH` lambda to non-`@CTX_SWITCH` parameter `dg`]
-    }); 
+    withDgPlain(() {});   // plain lambda: no context switch, no marker
 }
 
 // IMPORTANT (the core safety rule): a function NOT marked @CTX_SWITCH may NOT call a
@@ -135,12 +126,12 @@ void usesWithDgPlain()
 // covered by fail_compilation/callerattr_propagation.d and callerattr_delegate.d:
 //
 //   void illegalNamed() {
-//       yieldNow.CTX_SWITCH();   // Error: non-`@CTX_SWITCH` function `illegalNamed`
-//                                //        cannot call `@CTX_SWITCH` function `yieldNow`
+//       yieldNow() @CTX_SWITCH;   // Error: non-`@CTX_SWITCH` function `illegalNamed`
+//                                 //        cannot call `@CTX_SWITCH` function `yieldNow`
 //   }
 //   void illegalDg(@CTX_SWITCH void delegate() dg) {
-//       dg.CTX_SWITCH();         // Error: non-`@CTX_SWITCH` function `illegalDg`
-//                                //        cannot call `@CTX_SWITCH` function `illegalDg.dg`
+//       dg() @CTX_SWITCH;         // Error: non-`@CTX_SWITCH` function `illegalDg`
+//                                 //        cannot call `@CTX_SWITCH` function `illegalDg.dg`
 //   }
 
 // Driving both kinds from non-CS code: calling a FAKE forwarder needs no marker
@@ -152,4 +143,3 @@ void usesDelegates()
     each(() {});               // plain delegate: no marker
     eachScoped(() {});
 }
-

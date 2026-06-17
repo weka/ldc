@@ -5,7 +5,7 @@ alias CTX_SWITCH = callerAttr!"CTX_SWITCH";
 
 void oops()
 {
-    yieldNow.CTX_SWITCH();   // error: oops is not @CTX_SWITCH
+    yieldNow() @CTX_SWITCH;   // error: oops is not @CTX_SWITCH
 }
 
 /*

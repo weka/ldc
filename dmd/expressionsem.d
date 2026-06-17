@@ -1094,20 +1094,6 @@ private Expression resolveUFCS(Scope* sc, CallExp ce)
     {
         Identifier ident = die.ident;
 
-        // Option A: caller-required attribute call-site marker `callee.ATTR(args)`.
-        // If `ident` names a `callerAttr` alias visible in this scope, the member
-        // access is a marker: record it and rewrite to a plain call `callee(args)`.
-        {
-            const(char)[] caName;
-            bool caFake;
-            if (callerAttrMarkerName(sc, die.loc, ident, caName, caFake))
-            {
-                ce.markedCallerAttr = Identifier.idPool(caName);
-                ce.e1 = die.e1;
-                return null;
-            }
-        }
-
         Expression ex = die.dotIdSemanticPropX(sc);
         if (ex != die)
         {
@@ -8138,20 +8124,6 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
         {
             printf("DotIdExp::semantic(this = %p, '%s')\n", exp, exp.toChars());
             //printf("e1.op = %d, '%s'\n", e1.op, Token.toChars(e1.op));
-        }
-
-        // Option A: no-parens caller-attr marker `callee.ATTR;` is a marked zero-arg call.
-        if (!(sc.flags & SCOPE.Cfile))
-        {
-            const(char)[] caName;
-            bool caFake;
-            if (callerAttrMarkerName(sc, exp.loc, exp.ident, caName, caFake))
-            {
-                auto ce = new CallExp(exp.loc, exp.e1);
-                ce.markedCallerAttr = Identifier.idPool(caName);
-                result = ce.expressionSemantic(sc);
-                return;
-            }
         }
 
         if (sc.flags & SCOPE.Cfile)
@@ -16383,7 +16355,19 @@ private void checkCallerAttr(CallExp ce, Scope* sc, Dsymbol callee)
     if (ce.ignoreAttributes)
         return;
 
-    const(char)[] markName = ce.markedCallerAttr ? ce.markedCallerAttr.toString() : null;
+    // The parser records the raw marker identifier (`@CTX_SWITCH`); resolve it through
+    // its `callerAttr` alias to the actual attribute name.
+    const(char)[] markName = null;
+    if (ce.markedCallerAttr)
+    {
+        bool mfake;
+        if (!callerAttrMarkerName(sc, ce.loc, ce.markedCallerAttr, markName, mfake))
+        {
+            error(ce.loc, "`@%s` is not a caller-required attribute (declare it with `callerAttr`)",
+                ce.markedCallerAttr.toChars());
+            return;
+        }
+    }
     bool markerMatched = false;
 
     if (callee)
@@ -16399,10 +16383,10 @@ private void checkCallerAttr(CallExp ce, Scope* sc, Dsymbol callee)
         if (fake)
             return 0; // fake shim: no marker requirement, no propagation
 
-        // E2: a `@name` call must carry the `.name` marker.
+        // E2: a `@name` call must carry the `() @name` marker.
         if (markName is null || markName != name)
         {
-            error(ce.loc, "call to `@%.*s` function `%s` must be marked `%s.%.*s(...)`",
+            error(ce.loc, "call to `@%.*s` function `%s` must be marked `%s() @%.*s`",
                 cast(int) name.length, name.ptr, callee.toPrettyChars(),
                 ce.e1.toChars(), cast(int) name.length, name.ptr);
             return 0;
@@ -16430,7 +16414,7 @@ private void checkCallerAttr(CallExp ce, Scope* sc, Dsymbol callee)
     if (markName !is null && !markerMatched)
     {
         const(char)* who = callee ? callee.toPrettyChars() : ce.e1.toChars();
-        error(ce.loc, "`%s` is not a `@%.*s` function; remove the `.%.*s` marker",
+        error(ce.loc, "`%s` is not a `@%.*s` function; remove the `@%.*s` marker",
             who, cast(int) markName.length, markName.ptr,
             cast(int) markName.length, markName.ptr);
     }

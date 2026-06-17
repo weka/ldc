@@ -1,9 +1,10 @@
-# Implementation Spec: Option A — Caller-Required Attributes with `.ATTR` Call-Site Marker
+# Implementation Spec: Caller-Required Attributes with the `() @ATTR` Call-Site Marker
 
 **Status:** ✅ Implemented & verified in this tree (Weka-local fork). See [Implementation status](#implementation-status).
-**Implements:** Option A from [`ctx-switch-marking-spec.md`](./ctx-switch-marking-spec.md) — the generalized `callerAttr` facility with the member-access call-site marker (`callee.CTX_SWITCH(args)`).
+**Implements:** the generalized `callerAttr` facility from [`ctx-switch-marking-spec.md`](./ctx-switch-marking-spec.md).
 **Target:** Weka-local fork of the LDC/DMD frontend (`dmd/`). No upstreaming constraint.
-**Non-goal:** the `@ATTR` spelling (Option B) — explicitly out of scope here.
+
+> **Call-site syntax (updated):** the marker is now a **postfix attribute on the call**, `callee(args) @CTX_SWITCH`, rather than the earlier member-access form `callee.CTX_SWITCH(args)`. This required a parser change (new expression grammar: `PostfixExpression '@' Identifier`). **Tooling tradeoff:** unlike the member-access form (which parsed with existing grammars), this `@`-postfix syntax is *intrusive* to third-party D parsers (libdparse/DCD/serve-d/dfmt/etc.) until they are taught the grammar — i.e. it has the same ecosystem cost as design-spec Option B/D2. Everything below that refers to "the `.ATTR` marker" now means the `() @ATTR` postfix marker.
 
 All file:line references below were verified against the current tree.
 
