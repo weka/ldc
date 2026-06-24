@@ -5505,7 +5505,14 @@ version (IN_LLVM)
             Module.runDeferredSemantic();
         }
 
-        members.foreachDsymbol(&symbolDg);
+        if (global.params.depsOnly)
+        {
+            import dmd.deps : DepsCollectVisitor;
+            scope dcv = new DepsCollectVisitor(sc2);
+            members.foreachDsymbol((s) { s.accept(dcv); });
+        }
+        else
+            members.foreachDsymbol(&symbolDg);
     }
 
     extern (D) final void tryExpandMembers(Scope* sc2)
