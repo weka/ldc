@@ -565,6 +565,29 @@ version (IN_WEKA)
     if (global.errors)
         removeHdrFilesAndFail(params, modules);
 
+    if (params.depsOnly)
+    {
+        import dmd.deps : DepsCollectVisitor;
+        if (!params.moduleDeps.buffer)
+            params.moduleDeps.buffer = new OutBuffer();
+        foreach (m; modules)
+        {
+            if (params.v.verbose)
+                message("deps-only %s", m.toChars());
+            scope dcv = new DepsCollectVisitor(m._scope);
+            m.accept(dcv);
+        }
+        const data = (*params.moduleDeps.buffer)[];
+        if (params.moduleDeps.name)
+        {
+            if (!writeFile(Loc.initial, params.moduleDeps.name, data))
+                fatal();
+        }
+        else
+            printf("%.*s", cast(int)data.length, data.ptr);
+        return EXIT_SUCCESS;
+    }
+
 version (IN_LLVM) {} else
 {
     backend_init();
