@@ -658,7 +658,7 @@ version (IN_LLVM)
     final Ungag ungagSpeculative() const
     {
         uint oldgag = global.gag;
-        if (global.gag && !isSpeculative() && !toParent2().isFuncDeclaration())
+        if (global.gag && !global.params.inDepsOnlyScan && !isSpeculative() && !toParent2().isFuncDeclaration())
             global.gag = 0;
         return Ungag(oldgag);
     }

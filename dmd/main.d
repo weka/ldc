@@ -570,8 +570,20 @@ version (IN_WEKA)
         import dmd.deps : DepsCollectVisitor;
         if (!params.moduleDeps.buffer)
             params.moduleDeps.buffer = new OutBuffer();
-        foreach (m; modules)
+        // inDepsOnlyScan stays true for the entire scan, even when
+        // disableDepsOnly() is called inside DepsCollectVisitor for condition
+        // evaluation. All Ungag-like patterns in the frontend check this flag
+        // so that errors remain suppressed throughout the scan.
+        params.inDepsOnlyScan = true;
+        scope(exit) params.inDepsOnlyScan = false;
+        // Iterate Module.amodules (not just command-line `modules`) so that
+        // every transitively imported module has its imports recorded - matching
+        // what -deps produces via full semantic analysis.  Use an index loop so
+        // that modules loaded lazily during traversal are also picked up.
+        for (size_t i = 0; i < Module.amodules.length; i++)
         {
+            auto m = Module.amodules[i];
+            if (!m._scope) continue;
             if (params.v.verbose)
                 message("deps-only %s", m.toChars());
             scope dcv = new DepsCollectVisitor(m._scope);

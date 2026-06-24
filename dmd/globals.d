@@ -277,6 +277,7 @@ extern (C++) struct Param
     Output mixinOut;                    // write expanded mixins for debugging
     Output moduleDeps;                  // Generate `.deps` module dependencies
     bool depsOnly;                      // -deps-only: skip unnecessary phases
+    bool inDepsOnlyScan;                // true for the entire DepsCollectVisitor scan, NOT cleared by disableDepsOnly()
 
     uint debuglevel;                    // debug level
     uint versionlevel;                  // version level

@@ -1514,9 +1514,10 @@ version (IN_LLVM)
     {
         assert(type && _init);
 
-        // Ungag errors when not speculative
+        // Ungag errors when not speculative.
+        // Keep errors gagged in depsOnly mode to avoid spurious CTFE failures.
         uint oldgag = global.gag;
-        if (global.gag)
+        if (global.gag && !global.params.inDepsOnlyScan)
         {
             Dsymbol sym = isMember();
             if (sym && !sym.isSpeculative())

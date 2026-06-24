@@ -1147,7 +1147,7 @@ bool functionSemantic(FuncDeclaration fd)
         TemplateInstance spec = fd.isSpeculative();
         uint olderrs = global.errors;
         uint oldgag = global.gag;
-        if (global.gag && !spec)
+        if (global.gag && !spec && !global.params.inDepsOnlyScan)
             global.gag = 0;
         dsymbolSemantic(fd, fd._scope);
         global.gag = oldgag;
@@ -1203,7 +1203,7 @@ bool functionSemantic3(FuncDeclaration fd)
         TemplateInstance spec = fd.isSpeculative();
         uint olderrs = global.errors;
         uint oldgag = global.gag;
-        if (global.gag && !spec && (!IN_LLVM || !global.gaggedForInlining))
+        if (global.gag && !spec && !global.params.inDepsOnlyScan && (!IN_LLVM || !global.gaggedForInlining))
             global.gag = 0;
         semantic3(fd, fd._scope);
         global.gag = oldgag;

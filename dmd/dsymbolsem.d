@@ -5287,10 +5287,16 @@ void aliasSemantic(AliasDeclaration ds, Scope* sc)
     const errors = global.errors;
     Type oldtype = ds.type;
 
-    // Ungag errors when not instantiated DeclDefs scope alias
+    // Ungag errors when not instantiated DeclDefs scope alias.
+    // In depsOnly mode we're scanning for dependencies, not performing real
+    // semantic analysis. The Ungag trick exists to surface real template errors
+    // to users; in our gagged condition-evaluation chains it would print spurious
+    // errors about unresolved template parameters. Keep errors gagged when
+    // depsOnly is active.
     auto ungag = Ungag(global.gag);
     //printf("%s parent = %s, gag = %d, instantiated = %d\n", ds.toChars(), ds.parent.toChars(), global.gag, ds.isInstantiated() !is null);
-    if (ds.parent && global.gag && !ds.isInstantiated() && !ds.toParent2().isFuncDeclaration() && (sc.minst || sc.tinst))
+    if (!global.params.inDepsOnlyScan &&
+        ds.parent && global.gag && !ds.isInstantiated() && !ds.toParent2().isFuncDeclaration() && (sc.minst || sc.tinst))
     {
         //printf("%s type = %s\n", ds.toPrettyChars(), ds.type.toChars());
         global.gag = 0;
