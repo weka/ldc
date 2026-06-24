@@ -143,3 +143,75 @@ void usesDelegates()
     each(() {});               // plain delegate: no marker
     eachScoped(() {});
 }
+
+// ----------------------------------------------------------------------------
+// Regression: the call-site marker must survive template instantiation.
+// CallExp.markedCallerAttr is set at parse time, so CallExp.syntaxCopy() must
+// copy it — otherwise each template instantiation loses the marker and wrongly
+// reports "call must be marked". A FAKE template instantiated with >1 arg keeps
+// its internal marker across all instantiations.
+@CTX_SWITCH_FAKE void suspendThisFiberT(bool withDelayFault = true)()
+{
+    yieldNow() @CTX_SWITCH;     // marker inside a templated body
+}
+void drivesTemplate()
+{
+    suspendThisFiberT!(true)();
+    suspendThisFiberT!(false)();
+}
+
+// ----------------------------------------------------------------------------
+// foreach over an aggregate's opApply: the loop body is lowered to a delegate passed to opApply.
+// A container can offer both a plain and a @CTX_SWITCH opApply; the caller-attr overload tie-break
+// picks per body, and a context-switching body propagates @CTX_SWITCH to the enclosing function
+// (the compiler-generated foreach->opApply call is implicitly marked — no user marker possible).
+struct CtxContainer
+{
+    int[2] data;
+    // plain iteration
+    int opApply(scope int delegate(int) dg)
+    {
+        foreach (x; data) { if (auto r = dg(x)) return r; }
+        return 0;
+    }
+    // context-switching iteration (chosen when the loop body calls a @CTX_SWITCH function)
+    @CTX_SWITCH int opApply(scope @CTX_SWITCH int delegate(int) dg)
+    {
+        foreach (x; data) { if (auto r = dg(x) @CTX_SWITCH) return r; }
+        return 0;
+    }
+}
+
+// plain body -> selects the plain opApply; no propagation, callable from non-@CTX_SWITCH code.
+void foreachPlain()
+{
+    CtxContainer c;
+    foreach (x; c) { int y = x; }
+}
+
+// context-switching body -> selects the @CTX_SWITCH opApply; the marker stays natural and the
+// enclosing function must itself be @CTX_SWITCH (propagation through foreach).
+@CTX_SWITCH void foreachCtxSwitch()
+{
+    CtxContainer c;
+    foreach (x; c) { yieldNow() @CTX_SWITCH; }
+}
+
+// a FAKE function may host a context-switching foreach without forcing the requirement on its callers.
+@CTX_SWITCH_FAKE void foreachCtxSwitchFake()
+{
+    CtxContainer c;
+    foreach (x; c) { yieldNow() @CTX_SWITCH; }
+}
+void drivesForeachFake() { foreachCtxSwitchFake(); }   // calling a FAKE: no marker, no propagation
+
+// A @CTX_SWITCH function may freely run ordinary (non-context-switching) foreach loops: a plain body
+// selects the plain opApply, so the loop needs no marker and does not itself re-propagate. (This
+// function is @CTX_SWITCH for its own reasons — the direct marked call below.)
+@CTX_SWITCH void ctxFnWithPlainForeach()
+{
+    CtxContainer c;
+    int sum;
+    foreach (x; c) { sum += x; }    // plain body -> plain opApply, no @CTX_SWITCH involved
+    yieldNow() @CTX_SWITCH;          // the genuine context switch
+}

@@ -137,6 +137,7 @@ import core.stdc.string;
 import dmd.aggregate;
 import dmd.arraytypes;
 import dmd.astenums;
+import dmd.attrib : isCallerAttrExp;
 import dmd.basicmangle;
 import dmd.dclass;
 import dmd.declaration;
@@ -406,6 +407,109 @@ void mangleFuncType(TypeFunction t, TypeFunction ta, ubyte modMask, Type tret, r
 
 /*************************************************************
  */
+/****************************************************************
+ * Option A — caller-required attributes participate in name mangling, but ONLY
+ * where they must to break an otherwise-identical symbol collision.
+ *
+ * A `@(callerAttr!"NAME")` (or its `callerAttrFake` variant) is an ordinary UDA,
+ * invisible to the mangler. When two overloads differ ONLY by the attribute —
+ * e.g. `RobinHashTable`'s plain vs `@CTX_SWITCH` `opApply` — they mangle to the
+ * same symbol and codegen silently drops one ("skipping definition ... same
+ * mangled name"). To fix that we append a discriminator to the attribute-bearing
+ * overload's symbol.
+ *
+ * Critically, the discriminator is emitted ONLY when `fd` has a same-name,
+ * same-type overload sibling (the real collision). A standalone caller-attr
+ * function (`yield`, `submitTask`, a socket `send`/`recv`, ...) keeps its
+ * baseline mangle, so its definition and every cross-module call site agree —
+ * otherwise the discriminator would be applied inconsistently across separately
+ * compiled modules (it depends on whether the UDA happens to be semantically
+ * resolved when the symbol is first mangled and cached), producing `undefined
+ * symbol` link errors. Gating on collision also makes the result independent of
+ * that resolution timing for non-overloaded functions: with no sibling we emit
+ * nothing regardless. The colliding `opApply` overloads are co-resolved members
+ * of the same struct template, so their treatment is consistent everywhere.
+ */
+void mangleCallerAttrDisc(Dsymbol sym, ref OutBuffer buf)
+{
+    auto fd = sym ? sym.isFuncDeclaration() : null;
+    if (!fd || !fd.userAttribDecl || !fd.type)
+        return;
+    auto udas = fd.userAttribDecl.getAttributes();
+    if (!udas)
+        return;
+
+    // Does `fd` carry any caller-attr UDA at all?
+    bool hasAttr;
+    foreach (uda; (*udas)[])
+    {
+        const(char)[] n;
+        bool f;
+        if (auto tup = uda.isTupleExp())
+        {
+            foreach (e; (*tup.exps)[])
+                if (e && isCallerAttrExp(e, n, f)) { hasAttr = true; break; }
+        }
+        else if (uda && isCallerAttrExp(uda, n, f))
+            hasAttr = true;
+        if (hasAttr)
+            break;
+    }
+    if (!hasAttr)
+        return;
+
+    // Gate: only disambiguate when a same-name/same-type overload sibling exists.
+    // Enumerate the WHOLE overload set from its head — `overnext` is singly
+    // linked, so starting from `fd` alone could miss earlier-declared siblings
+    // (the `@CTX_SWITCH` overload is typically declared after the plain one).
+    Dsymbol head = fd;
+    if (auto p = fd.parent)
+        if (auto sds = p.isScopeDsymbol())
+            if (sds.symtab)
+                if (auto s = sds.symtab.lookup(fd.ident))
+                    head = s;
+
+    bool collides;
+    overloadApply(head, (Dsymbol s) {
+        auto f = s.isFuncDeclaration();
+        if (f && f !is fd && f.type && f.type.equals(fd.type))
+        {
+            collides = true;
+            return 1;
+        }
+        return 0;
+    });
+    if (!collides)
+        return;
+
+    // Emit: 'Y' <'F' fake | 'R' real> <len> <name> per caller-attr.
+    void emit(Expression e)
+    {
+        if (!e)
+            return;
+        const(char)[] name;
+        bool fake;
+        if (isCallerAttrExp(e, name, fake))
+        {
+            buf.writeByte('Y');
+            buf.writeByte(fake ? 'F' : 'R');
+            buf.print(cast(int) name.length);
+            buf.writestring(name);
+        }
+    }
+
+    foreach (uda; (*udas)[])
+    {
+        if (auto tup = uda.isTupleExp())
+        {
+            foreach (e; (*tup.exps)[])
+                emit(e);
+        }
+        else
+            emit(uda);
+    }
+}
+
 void mangleParameter(Parameter p, ref OutBuffer buf, ref Backref backref)
 {
     // https://dlang.org/spec/abi.html#Parameter
@@ -572,6 +676,8 @@ public:
         //printf("fd.type = %s\n", fd.type.toChars());
         if (fd.needThis() || fd.isNested())
             buf.writeByte('M');
+
+        mangleCallerAttrDisc(fd, *buf);
 
         if (!fd.type || fd.type.ty == Terror)
         {

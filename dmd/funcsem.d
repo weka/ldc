@@ -1517,6 +1517,21 @@ FuncDeclaration resolveFuncCall(const ref Loc loc, Scope* sc, Dsymbol s,
     functionResolve(m, s, loc, sc, tiargs, tthis, argumentList);
     auto orig_s = s;
 
+    // Option A (caller-required attributes): two overloads can match identically by type yet differ
+    // only by a parameter's caller-attr (a UDA, not part of the type), making the call ambiguous.
+    // Break the tie by argument caller-attr fit (e.g. a context-switching `foreach` body selects the
+    // `@CTX_SWITCH` opApply; a plain body the plain one). Only runs when resolution is already
+    // ambiguous, so non-ambiguous calls are unaffected.
+    if (m.last > MATCH.nomatch && m.count > 1 && m.lastf && m.nextf)
+    {
+        import dmd.expressionsem : disambiguateCallerAttrOverload;
+        if (auto winner = disambiguateCallerAttrOverload(m.lastf, m.nextf, fargs, sc))
+        {
+            m.lastf = winner;
+            m.count = 1;
+        }
+    }
+
     if (m.last > MATCH.nomatch && m.lastf)
     {
         if (m.count == 1) // exactly one match
