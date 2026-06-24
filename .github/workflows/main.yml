@@ -36,11 +36,15 @@ jobs:
               -DEXTRA_CXXFLAGS=-flto=full
             with_pgo: true
 
-# macOS x86_64 disabled: bootstrap LDC 1.42.0 segfaults on macos-15-intel runner
-#          - job_name: macOS x86_64
-#            os: macos-15-intel
-#            arch: x86_64
-#            with_pgo: true
+          # PGO disabled on macOS x86_64: bootstrap LDC 1.42.0 (LLVM 18.1) segfaults in the
+          # PGOInstrumentationUse pass on -fprofile-use when the profile hash-mismatches the
+          # (weka-patched) source. Building without PGO sidesteps the crash; the produced
+          # x86_64 ldc2 is fully correct, just marginally slower to run. Needed so the
+          # osx-universal artifact (lipo of x86_64 + arm64) can be produced again.
+          - job_name: macOS x86_64
+            os: macos-15-intel
+            arch: x86_64
+            with_pgo: false
 
           - job_name: macOS arm64
             os: macos-14
@@ -134,16 +138,15 @@ jobs:
           arch: ${{ matrix.arch }}
 
 
-  # merge-macos disabled alongside macOS x86_64
-  # merge-macos:
-  #   name: macOS universal
-  #   runs-on: macos-latest
-  #   timeout-minutes: 30
-  #   needs: build-native
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Merge x86_64 & arm64 packages to universal one
-  #       uses: ./.github/actions/merge-macos
+  merge-macos:
+    name: macOS universal
+    runs-on: macos-latest
+    timeout-minutes: 30
+    needs: build-native
+    steps:
+      - uses: actions/checkout@v4
+      - name: Merge x86_64 & arm64 packages to universal one
+        uses: ./.github/actions/merge-macos
 
 
   upload-to-github:
@@ -153,6 +156,7 @@ jobs:
     timeout-minutes: 30
     needs:
       - build-native
+      - merge-macos
     permissions:
       contents: write
     steps:
