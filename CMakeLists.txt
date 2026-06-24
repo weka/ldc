@@ -629,6 +629,28 @@ if(LDC_WITH_LLD)
             list(APPEND LDC_LINKERFLAG_LIST -lxar)
         endif()
     endif()
+    # lldELF may depend on ZSTD for debug section compression (LLVM >= 16).
+    # Distributions like homebrew llvm@16 enable this but the dependency is
+    # not automatically propagated when linking via raw -l flags. Check for it
+    # via the LLD cmake exports and add -lzstd when present.
+    if(NOT MSVC AND NOT (LDC_LLVM_VER LESS 1600))
+        set(_ldc_lld_cmake "${LLVM_LIBRARY_DIRS}/cmake/lld/LLDTargets.cmake")
+        if(EXISTS "${_ldc_lld_cmake}")
+            file(READ "${_ldc_lld_cmake}" _lld_cmake_content)
+            if(_lld_cmake_content MATCHES "zstd")
+                find_library(ZSTD_LIBRARY NAMES zstd
+                    HINTS "${LLVM_LIBRARY_DIRS}" /opt/homebrew/lib)
+                if(ZSTD_LIBRARY)
+                    message(STATUS "LLD requires zstd - adding ${ZSTD_LIBRARY}")
+                    get_filename_component(_zstd_dir "${ZSTD_LIBRARY}" DIRECTORY)
+                    list(APPEND LDC_LINKERFLAG_LIST -L${_zstd_dir} -lzstd)
+                    unset(_zstd_dir)
+                endif()
+            endif()
+        endif()
+        unset(_ldc_lld_cmake)
+        unset(_lld_cmake_content)
+    endif()
 endif()
 
 if(NOT DEFINED LDC_LINK_MANUALLY)
