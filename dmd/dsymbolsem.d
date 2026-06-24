@@ -1661,74 +1661,8 @@ else
 
         imp.semanticRun = PASS.semanticdone;
 
-        // object self-imports itself, so skip that
-        // https://issues.dlang.org/show_bug.cgi?id=7547
-        // don't list pseudo modules __entrypoint.d, __main.d
-        // https://issues.dlang.org/show_bug.cgi?id=11117
-        // https://issues.dlang.org/show_bug.cgi?id=11164
-        if (global.params.moduleDeps.buffer is null || (imp.id == Id.object && sc._module.ident == Id.object) ||
-            strcmp(sc._module.ident.toChars(), "__main") == 0)
-            return;
-
-        /* The grammar of the file is:
-         *      ImportDeclaration
-         *          ::= BasicImportDeclaration [ " : " ImportBindList ] [ " -> "
-         *      ModuleAliasIdentifier ] "\n"
-         *
-         *      BasicImportDeclaration
-         *          ::= ModuleFullyQualifiedName " (" FilePath ") : " Protection|"string"
-         *              " [ " static" ] : " ModuleFullyQualifiedName " (" FilePath ")"
-         *
-         *      FilePath
-         *          - any string with '(', ')' and '\' escaped with the '\' character
-         */
-        OutBuffer* ob = global.params.moduleDeps.buffer;
-        Module imod = sc._module;
-        if (!global.params.moduleDeps.name)
-            ob.writestring("depsImport ");
-        ob.writestring(imod.toPrettyChars());
-        ob.writestring(" (");
-        escapePath(ob, imod.srcfile.toChars());
-        ob.writestring(") : ");
-        // use visibility instead of sc.visibility because it couldn't be
-        // resolved yet, see the comment above
-        visibilityToBuffer(*ob, imp.visibility);
-        ob.writeByte(' ');
-        if (imp.isstatic)
-        {
-            stcToBuffer(*ob, STC.static_);
-            ob.writeByte(' ');
-        }
-        ob.writestring(": ");
-        foreach (pid; imp.packages)
-        {
-            ob.printf("%s.", pid.toChars());
-        }
-        ob.writestring(imp.id.toString());
-        ob.writestring(" (");
-        if (imp.mod)
-            escapePath(ob, imp.mod.srcfile.toChars());
-        else
-            ob.writestring("???");
-        ob.writeByte(')');
-        foreach (i, name; imp.names)
-        {
-            if (i == 0)
-                ob.writeByte(':');
-            else
-                ob.writeByte(',');
-            Identifier _alias = imp.aliases[i];
-            if (!_alias)
-            {
-                ob.printf("%s", name.toChars());
-                _alias = name;
-            }
-            else
-                ob.printf("%s=%s", _alias.toChars(), name.toChars());
-        }
-        if (imp.aliasId)
-            ob.printf(" -> %s", imp.aliasId.toChars());
-        ob.writenl();
+        import dmd.deps : addImportDep;
+        addImportDep(global.params.moduleDeps, imp, sc._module);
     }
 
     void attribSemantic(AttribDeclaration ad)
@@ -4964,6 +4898,14 @@ version (IN_LLVM)
     tempinst.tryExpandMembers(sc2);
 
     tempinst.semanticRun = PASS.semanticdone;
+
+    if (global.params.depsOnly)
+    {
+        // Pop scopes pushed above before returning early
+        sc2.pop();
+        _scope.pop();
+        return;
+    }
 
     /* ConditionalDeclaration may introduce eponymous declaration,
      * so we should find it once again after semantic.
