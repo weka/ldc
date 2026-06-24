@@ -445,6 +445,12 @@ cl::opt<std::string>
              cl::desc("Write module dependencies in Makefile compatible format "
                       "to <filename>/stdout (only imports)"));
 
+cl::opt<bool> depsOnly(
+    "deps-only", cl::ZeroOrMore,
+    cl::desc("Print module dependencies (imports only) and exit before semantic "
+             "analysis. Like -deps but skips all phases except parsing and "
+             "import resolution"));
+
 cl::opt<bool> m32bits("m32", cl::desc("32 bit target"), cl::ZeroOrMore);
 
 cl::opt<bool> m64bits("m64", cl::desc("64 bit target"), cl::ZeroOrMore);
