@@ -247,6 +247,7 @@ struct Param
     Output makeDeps;          // Generate make file dependencies
     Output mixinOut;          // write expanded mixins for debugging
     Output moduleDeps;        // Generate `.deps` module dependencies
+    d_bool depsOnly;          // -deps-only: skip unnecessary phases
 
     unsigned debuglevel;   // debug level
     unsigned versionlevel; // version level
