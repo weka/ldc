@@ -655,8 +655,19 @@ else
     // So deps file generation should be moved after the inlining stage.
     if (OutBuffer* ob = params.moduleDeps.buffer)
     {
-        foreach (i; 1 .. modules[0].aimports.length)
-            semantic3OnDependencies(modules[0].aimports[i]);
+        // Note: DO NOT USE foreach here because Module.amodules.length can
+        //       change on each iteration of the loop
+        for (size_t i = 0; i < Module.amodules.length; i++)
+        {
+            auto m = Module.amodules[i];
+            if (!m || m.isRoot() || m.semanticRun > PASS.semantic3)
+                continue;
+
+            if (params.v.verbose)
+                message("semantic3 %s", m.toChars());
+            m.semantic3(null);
+            assert(m.semanticRun >= PASS.semantic3done);
+        }
         Module.runDeferredSemantic3();
 
         const data = (*ob)[];
