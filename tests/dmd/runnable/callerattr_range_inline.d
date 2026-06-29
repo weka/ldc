@@ -18,9 +18,9 @@ pragma(inline, true) @CTX_SWITCH void yieldNow() { ++switches; }
 //     by the compiler (the user cannot annotate a compiler-generated call).
 struct SwitchingRange {
     int i, n;
-    pragma(inline, true) @CTX_SWITCH bool empty()    { yieldNow() @CTX_SWITCH; return i >= n; }
+    pragma(inline, true) @CTX_SWITCH bool empty()    { @CTX_SWITCH yieldNow(); return i >= n; }
     pragma(inline, true) @CTX_SWITCH int  front()    { return i; }
-    pragma(inline, true) @CTX_SWITCH void popFront() { yieldNow() @CTX_SWITCH; ++i; }
+    pragma(inline, true) @CTX_SWITCH void popFront() { @CTX_SWITCH yieldNow(); ++i; }
 }
 
 @CTX_SWITCH_FAKE int sumSwitchingRange() {
@@ -40,7 +40,7 @@ struct PlainRange {
 
 @CTX_SWITCH_FAKE int sumPlainRangeSwitchingBody() {
     int s;
-    foreach (v; PlainRange(0, 4)) { yieldNow() @CTX_SWITCH; s += v; }
+    foreach (v; PlainRange(0, 4)) { @CTX_SWITCH yieldNow(); s += v; }
     return s;
 }
 

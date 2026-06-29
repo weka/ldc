@@ -3770,7 +3770,7 @@ private extern(D) Expression applyOpApply(ForeachStatement fs, Expression flde,
     ec = new DotIdExp(fs.loc, fs.aggr, sapply.ident);
     auto applyCall = new CallExp(fs.loc, ec, flde);
     // Option A (caller-required attributes): this `aggr.opApply(body)` is compiler-generated, with no
-    // place for a user `() @ATTR` marker. Flag it as implicitly marked so that when the loop body is
+    // place for a user `@ATTR callee()` marker. Flag it as implicitly marked so that when the loop body is
     // context-switching (and overload resolution selects a `@CTX_SWITCH` opApply), the call is allowed
     // without a written marker while still propagating the attribute to the enclosing function.
     applyCall.callerAttrAutoMarked = true;

@@ -17,7 +17,7 @@ struct CtxContainer
     
     @CTX_SWITCH int opApply(scope @CTX_SWITCH int delegate(int) dg) { 
         foreach (x; data) 
-            if (auto r = dg(x) @CTX_SWITCH) return r; 
+            if (auto r = @CTX_SWITCH dg(x)) return r; 
         return 0; 
     }
 }
@@ -26,7 +26,7 @@ struct CtxContainer
 {
     CtxContainer c;
     foreach (x; c) { 
-        yieldNow() @CTX_SWITCH; 
+        @CTX_SWITCH yieldNow(); 
     }
 }
 
@@ -34,7 +34,7 @@ void bad()
 {
     CtxContainer c;
     foreach (x; c) { 
-        yieldNow() @CTX_SWITCH; // build should fail here
+        @CTX_SWITCH yieldNow(); // build should fail here
     } 
 }
 

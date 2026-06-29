@@ -18,8 +18,8 @@ pragma(inline, true) @CTX_SWITCH void yieldNow() { ++switches; }
 
 // (1) A pragma(inline,true) @CTX_SWITCH function: the marker is still required at the call site,
 //     and the inlined call must produce the right result.
-pragma(inline, true) @CTX_SWITCH int doubled(int x) { yieldNow() @CTX_SWITCH; return x * 2; }
-@CTX_SWITCH_FAKE int useDoubled(int x) { return doubled(x) @CTX_SWITCH; }
+pragma(inline, true) @CTX_SWITCH int doubled(int x) { @CTX_SWITCH yieldNow(); return x * 2; }
+@CTX_SWITCH_FAKE int useDoubled(int x) { return @CTX_SWITCH doubled(x); }
 
 // (2) Dual opApply: plain vs @CTX_SWITCH. The two overloads differ only by the caller-attr, so
 //     the fork must keep them as distinct symbols (mangling discriminator). Both are force-inlined.
@@ -35,7 +35,7 @@ struct Container {
 
     pragma(inline, true) @CTX_SWITCH int opApply(scope @CTX_SWITCH int delegate(int) dg) {
         int r;
-        foreach (v; data) { ++switches; r = dg(v) @CTX_SWITCH; if (r) return r; }
+        foreach (v; data) { ++switches; r = @CTX_SWITCH dg(v); if (r) return r; }
         return 0;
     }
 }
@@ -50,7 +50,7 @@ int sumPlain(ref Container c) {
 // Switching body -> binds the @CTX_SWITCH opApply.
 @CTX_SWITCH_FAKE int sumViaOpApply(ref Container c) {
     int s;
-    foreach (v; c) { yieldNow() @CTX_SWITCH; s += v; }
+    foreach (v; c) { @CTX_SWITCH yieldNow(); s += v; }
     return s;
 }
 
@@ -58,7 +58,7 @@ int sumPlain(ref Container c) {
 //     function (no opApply delegate), so the switch is just an ordinary marked call.
 @CTX_SWITCH_FAKE int sumArray(const(int)[] xs) {
     int s;
-    foreach (v; xs) { yieldNow() @CTX_SWITCH; s += v; }
+    foreach (v; xs) { @CTX_SWITCH yieldNow(); s += v; }
     return s;
 }
 

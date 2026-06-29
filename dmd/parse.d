@@ -5889,6 +5889,18 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
                 s = new AST.ExpStatement(loc, exp);
                 break;
             }
+        case TOK.at:
+            /* A statement beginning with `@` is normally an attributed declaration
+             * (`@safe void f() {}`, `@safe S s;`, an attribute scope `@x:` or block
+             * `@x { }`, a nested function `@property name(T)(){...}`, etc.). The
+             * caller-required attribute prefix marker also begins with `@`
+             * (`@CTX_SWITCH yield();`). Default to a declaration (the historical
+             * behavior) and divert to a marked expression statement only when the
+             * tokens unambiguously form one — see isCallerAttrMarkedStatement().
+             */
+            if (peekNext() == TOK.identifier && isCallerAttrMarkedStatement())
+                goto Lexp;
+            goto Ldeclaration;
         case TOK.static_:
             {
                 // Look ahead to see if it's static assert() or static if()
@@ -5974,7 +5986,6 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
         case TOK.pure_:
         case TOK.ref_:
         case TOK.gshared:
-        case TOK.at:
         case TOK.struct_:
         case TOK.union_:
         case TOK.class_:
@@ -7200,6 +7211,75 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
 
     Lisnot:
         //printf("\tis not declaration\n");
+        return false;
+    }
+
+    /* Caller-required attribute prefix marker disambiguation (called from parseStatement
+     * when a statement begins with `@`, with `token` on the `@` and the next token an
+     * identifier — the candidate marker name).
+     *
+     * Returns true only when the tokens form a *marked expression statement*
+     * (`@CTX_SWITCH callee(args);`), as opposed to an attributed declaration. The check
+     * is deliberately conservative: anything not clearly a marked call is left to
+     * declaration parsing, so this never reinterprets a valid declaration as an
+     * expression.
+     */
+    private bool isCallerAttrMarkedStatement()
+    {
+        // token = `@`, peek(&token) = marker identifier, t0 = first token of the marked expr.
+        Token* t0 = peek(peek(&token));
+
+        // The marked expression must start like a call target. A storage-class /
+        // attribute keyword (`static`, `auto`, `extern`, ... or another `@`), a basic
+        // type keyword (`int`, ...), or `:` / `{` here means an attributed declaration,
+        // attribute scope, or attribute block — not a marker.
+        switch (t0.value)
+        {
+        case TOK.identifier:
+        case TOK.this_:
+        case TOK.super_:
+        case TOK.leftParenthesis:
+            break;
+        default:
+            return false;
+        }
+
+        // A typed declaration (`@uda Foo f;`, `@uda Foo f = e;`, `@uda Foo bar();`) is a
+        // declaration, not a marker.
+        if (isDeclaration(t0, NeedDeclaratorId.mustIfDstyle, TOK.reserved, null))
+            return false;
+
+        // Final discriminator: scan the would-be expression tracking paren/bracket depth.
+        // A declaration body has a `{` at depth 0 (e.g. an auto-return nested function
+        // template `@property name(T)(){...}` that isDeclaration does not recognize),
+        // whereas a marked-call statement reaches its terminating `;` at depth 0 with no
+        // top-level `{` (any lambda lives inside the call's parentheses, at depth > 0).
+        int depth = 0;
+        for (Token* t = t0; t.value != TOK.endOfFile; t = peek(t))
+        {
+            switch (t.value)
+            {
+            case TOK.leftParenthesis:
+            case TOK.leftBracket:
+                ++depth;
+                break;
+            case TOK.rightParenthesis:
+            case TOK.rightBracket:
+                if (depth)
+                    --depth;
+                break;
+            case TOK.leftCurly:
+                if (depth == 0)
+                    return false;   // declaration body
+                break;
+            case TOK.semicolon:
+                if (depth == 0)
+                    return true;    // end of a marked expression statement
+                break;
+            default:
+                break;
+            }
+        }
         return false;
     }
 
@@ -8906,6 +8986,29 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
                 e = parsePostExp(e);
                 break;
             }
+        case TOK.at:
+            // Caller-required attribute call-site marker (prefix): `@CTX_SWITCH callee(args)`.
+            // Captures the marker identifier and attaches it to the (call) expression it
+            // precedes. The marker binds to the following unary expression, so its whole
+            // postfix chain (`@CTX_SWITCH a.b().c()`) becomes the marked call.
+            if (peekNext() == TOK.identifier)
+            {
+                nextToken();            // skip `@`
+                Identifier id = token.ident;
+                nextToken();            // skip the marker identifier
+                e = parseUnaryExp();    // the marked expression (with its call postfix)
+                auto ce = e.isCallExp();
+                if (!ce)
+                {
+                    // no-parens form: `@CTX_SWITCH callee` is a marked zero-arg call
+                    ce = new AST.CallExp(loc, e);
+                    e = ce;
+                }
+                ce.markedCallerAttr = id;
+                break;
+            }
+            goto default;
+
         case TOK.throw_:
             {
                 nextToken();
@@ -8965,26 +9068,6 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
                 }
                 error("identifier or `new` expected following `.`, not `%s`", token.toChars());
                 break;
-
-            case TOK.at:
-                // Caller-required attribute call-site marker: `callee(args) @CTX_SWITCH`.
-                // Attaches the marker identifier to the (call) expression it follows.
-                if (peekNext() == TOK.identifier)
-                {
-                    nextToken();            // skip `@`
-                    Identifier id = token.ident;
-                    nextToken();            // skip the marker identifier
-                    auto ce = e.isCallExp();
-                    if (!ce)
-                    {
-                        // no-parens form: `callee @CTX_SWITCH` is a marked zero-arg call
-                        ce = new AST.CallExp(loc, e);
-                        e = ce;
-                    }
-                    ce.markedCallerAttr = id;
-                    continue;
-                }
-                return e;
 
             case TOK.plusPlus:
                 e = new AST.PostExp(EXP.plusPlus, loc, e);
