@@ -16370,6 +16370,18 @@ private void checkCallerAttr(CallExp ce, Scope* sc, Dsymbol callee)
     }
     bool markerMatched = false;
 
+    // A call is "auto-marked" when it is compiler-generated with no place for a user marker:
+    // a `foreach`->`opApply` lowering (ce.callerAttrAutoMarked), or a `foreach` range-primitive
+    // call (`__r.empty`/`.front`/`.popFront`/`.back`/`.popBack`) on the generated range temp.
+    // Such calls skip the E2 marker requirement but still propagate via E1.
+    bool autoMarked = ce.callerAttrAutoMarked;
+    if (!autoMarked)
+        if (auto dve = ce.e1.isDotVarExp())
+            if (auto ve = dve.e1.isVarExp())
+                if (auto vd = ve.var ? ve.var.isVarDeclaration() : null)
+                    if (vd.callerAttrForeachRange)
+                        autoMarked = true;
+
     if (callee)
     foreachUda(callee, sc, (Expression e) {
         const(char)[] name;
@@ -16386,7 +16398,7 @@ private void checkCallerAttr(CallExp ce, Scope* sc, Dsymbol callee)
         // E2: a `@name` call must carry the `() @name` marker — unless this is a compiler-generated
         // call that is implicitly marked (e.g. a `foreach`->`opApply` lowering), where there is no
         // place for a user marker; such calls still propagate via E1 below.
-        if ((markName is null || markName != name) && !ce.callerAttrAutoMarked)
+        if ((markName is null || markName != name) && !autoMarked)
         {
             error(ce.loc, "call to `@%.*s` function `%s` must be marked `%s() @%.*s`",
                 cast(int) name.length, name.ptr, callee.toPrettyChars(),

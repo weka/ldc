@@ -1261,6 +1261,12 @@ Statement statementSemanticVisit(Statement s, Scope* sc)
                         _init = new CompoundStatement(loc, new ExpStatement(loc, vinit), _init);
                 }
 
+                // Option A: `__r` is a compiler temp invisible to user code, so the only calls on
+                // it are the generated range primitives (.empty/.front/.popFront, or .back/.popBack
+                // for foreach_reverse). If any of them is @CTX_SWITCH there is no place for a user
+                // marker, so treat those calls as implicitly marked (they still propagate via E1).
+                r.callerAttrForeachRange = true;
+
                 // !__r.empty
                 Expression e = new VarExp(loc, r);
                 e = new DotIdExp(loc, e, Id.Fempty);
