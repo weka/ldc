@@ -5,7 +5,7 @@ void plain() {}
 
 @CTX_SWITCH void caller()
 {
-    @CTX_SWITCH plain();   // error: plain is not a @CTX_SWITCH function
+    plain@CTX_SWITCH();   // error: plain is not a @CTX_SWITCH function
 }
 
 /*

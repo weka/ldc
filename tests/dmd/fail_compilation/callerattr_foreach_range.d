@@ -11,9 +11,9 @@ alias CTX_SWITCH = callerAttr!"CTX_SWITCH";
 struct SwitchingRange
 {
     int i, n;
-    @CTX_SWITCH bool empty()    { @CTX_SWITCH yieldNow(); return i >= n; }
+    @CTX_SWITCH bool empty()    { yieldNow@CTX_SWITCH(); return i >= n; }
     @CTX_SWITCH int  front()    { return i; }
-    @CTX_SWITCH void popFront() { @CTX_SWITCH yieldNow(); ++i; }
+    @CTX_SWITCH void popFront() { yieldNow@CTX_SWITCH(); ++i; }
 }
 
 @CTX_SWITCH void good()

@@ -16291,7 +16291,7 @@ bool checkAddressable(Expression e, Scope* sc)
  * Option A — caller-required attributes (e.g. `@CTX_SWITCH`).
  *
  * Returns true (filling `name`/`fake`) if `ident`, resolved in `sc`, names a
- * `callerAttr` alias — i.e. a `@ATTR` prefix call-site marker.
+ * `callerAttr` alias — i.e. a `@ATTR` glued call-site marker (`callee@ATTR(args)`).
  */
 private bool callerAttrMarkerName(Scope* sc, Loc loc, Identifier ident, out const(char)[] name, out bool fake)
 {
@@ -16346,7 +16346,7 @@ private VarDeclaration callerAttrCalleeVar(Expression e1)
  * function-pointer `VarDeclaration` for an indirect call (may be null when the
  * callee carries no usable symbol, e.g. a function literal).
  *
- *  - the `@ATTR` prefix marker must match the callee's actual caller-attributes (E2/E3),
+ *  - the `@ATTR` glued marker must match the callee's actual caller-attributes (E2/E3),
  *  - a caller-required attribute propagates upward: the enclosing function must
  *    itself carry it (E1), unless the callee is a `callerAttrFake` migration shim.
  */
@@ -16395,14 +16395,14 @@ private void checkCallerAttr(CallExp ce, Scope* sc, Dsymbol callee)
         if (fake)
             return 0; // fake shim: no marker requirement, no propagation
 
-        // E2: a `@name` call must carry the prefix `@name callee()` marker — unless this is a
+        // E2: a `@name` call must carry the glued `callee@name()` marker — unless this is a
         // compiler-generated call that is implicitly marked (e.g. a `foreach`->`opApply` lowering),
         // where there is no place for a user marker; such calls still propagate via E1 below.
         if ((markName is null || markName != name) && !autoMarked)
         {
-            error(ce.loc, "call to `@%.*s` function `%s` must be marked `@%.*s %s()`",
+            error(ce.loc, "call to `@%.*s` function `%s` must be marked `%s@%.*s()`",
                 cast(int) name.length, name.ptr, callee.toPrettyChars(),
-                cast(int) name.length, name.ptr, ce.e1.toChars());
+                ce.e1.toChars(), cast(int) name.length, name.ptr);
             return 0;
         }
 

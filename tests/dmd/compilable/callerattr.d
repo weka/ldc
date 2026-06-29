@@ -1,4 +1,4 @@
-// Option A: caller-required attributes with the prefix `@ATTR callee()` call-site marker.
+// Option A: caller-required attributes with the glued `callee@ATTR(args)` call-site marker.
 // These all compile cleanly.
 import core.attribute : callerAttr, callerAttrFake;
 alias CTX_SWITCH      = callerAttr!"CTX_SWITCH";
@@ -10,20 +10,20 @@ void plain() {}
 // Propagation: a @CTX_SWITCH function may call @CTX_SWITCH functions when marked.
 @CTX_SWITCH void worker()
 {
-    @CTX_SWITCH yieldNow();   // marker matches; worker is @CTX_SWITCH
+    yieldNow@CTX_SWITCH();   // marker matches; worker is @CTX_SWITCH
     plain();                  // not CS, no marker needed
 }
 
 // The single root (e.g. the fiber main) starts the tree.
 @CTX_SWITCH void fiberMain()
 {
-    @CTX_SWITCH worker();
+    worker@CTX_SWITCH();
 }
 
 // Forwarder via the FAKE migration shim: not forced onto its callers.
 @CTX_SWITCH_FAKE void withLock(void delegate() dg)
 {
-    @CTX_SWITCH yieldNow();   // strict-fake: internal CS call still marked
+    yieldNow@CTX_SWITCH();   // strict-fake: internal CS call still marked
     dg();
 }
 
@@ -36,14 +36,14 @@ void notYetMigrated()
 struct Fiber
 {
     @CTX_SWITCH void yield() {}
-    @CTX_SWITCH void step() { @CTX_SWITCH this.yield(); }
+    @CTX_SWITCH void step() { this.yield@CTX_SWITCH(); }
 }
 
 // ----------------------------------------------------------------------------
 // Delegates / function pointers (indirect calls).
 //
 // A delegate parameter marked `@CTX_SWITCH` is itself a context-switching callee:
-// calling it requires the `@CTX_SWITCH ()` marker and propagates upward exactly like
+// calling it requires the `dg@CTX_SWITCH()` marker and propagates upward exactly like
 // a named function. This holds whether or not the parameter is `scope`.
 // A delegate parameter *without* `@CTX_SWITCH` is an ordinary callee: no marker,
 // no propagation.
@@ -53,26 +53,26 @@ struct Fiber
 // Non-scope @CTX_SWITCH delegate, forwarded by a FAKE shim (no propagation to callers).
 @CTX_SWITCH_FAKE void withDg(@CTX_SWITCH void delegate() dg)
 {
-    @CTX_SWITCH yieldNow();
-    @CTX_SWITCH dg();             // marked indirect call
+    yieldNow@CTX_SWITCH();
+    dg@CTX_SWITCH();             // marked indirect call
 }
 
 // `scope` @CTX_SWITCH delegate — same rules; `scope` does not change enforcement.
 @CTX_SWITCH_FAKE void withScopeDg(@CTX_SWITCH scope void delegate() dg)
 {
-    @CTX_SWITCH dg();
+    dg@CTX_SWITCH();
 }
 
 // A real @CTX_SWITCH function calling a @CTX_SWITCH (scope) delegate: propagation holds.
 @CTX_SWITCH void runScoped(@CTX_SWITCH scope void delegate() dg)
 {
-    @CTX_SWITCH dg();
+    dg@CTX_SWITCH();
 }
 
 // @CTX_SWITCH function-pointer parameter, called with the marker.
 @CTX_SWITCH void runFp(@CTX_SWITCH void function() fp)
 {
-    @CTX_SWITCH fp();
+    fp@CTX_SWITCH();
 }
 
 // (A context-switching lambda passed to a *plain* delegate parameter is rejected —
@@ -81,16 +81,16 @@ struct Fiber
 // Both kinds side by side: `dg` requires the marker, `dg_no_ctx` does not.
 @CTX_SWITCH void runMixed(@CTX_SWITCH void delegate() dg, void delegate() dg_no_ctx)
 {
-    @CTX_SWITCH withDg(dg);
+    withDg@CTX_SWITCH(dg);
 
     // An in-place lambda that itself performs a context switch. The lambda infers
     // `@CTX_SWITCH` from its body (like @nogc/@safe inference), so no annotation
     // and no FAKE shim are needed.
-    @CTX_SWITCH withDg(() {
-        @CTX_SWITCH yieldNow();
+    withDg@CTX_SWITCH(() {
+        yieldNow@CTX_SWITCH();
     });
 
-    @CTX_SWITCH dg();   // CS delegate: marker required
+    dg@CTX_SWITCH();   // CS delegate: marker required
     dg_no_ctx();        // plain delegate: no marker
 }
 
@@ -126,11 +126,11 @@ void usesWithDgPlain()
 // covered by fail_compilation/callerattr_propagation.d and callerattr_delegate.d:
 //
 //   void illegalNamed() {
-//       @CTX_SWITCH yieldNow();   // Error: non-`@CTX_SWITCH` function `illegalNamed`
+//       yieldNow@CTX_SWITCH();   // Error: non-`@CTX_SWITCH` function `illegalNamed`
 //                                 //        cannot call `@CTX_SWITCH` function `yieldNow`
 //   }
 //   void illegalDg(@CTX_SWITCH void delegate() dg) {
-//       @CTX_SWITCH dg();         // Error: non-`@CTX_SWITCH` function `illegalDg`
+//       dg@CTX_SWITCH();         // Error: non-`@CTX_SWITCH` function `illegalDg`
 //                                 //        cannot call `@CTX_SWITCH` function `illegalDg.dg`
 //   }
 
@@ -152,7 +152,7 @@ void usesDelegates()
 // its internal marker across all instantiations.
 @CTX_SWITCH_FAKE void suspendThisFiberT(bool withDelayFault = true)()
 {
-    @CTX_SWITCH yieldNow();     // marker inside a templated body
+    yieldNow@CTX_SWITCH();     // marker inside a templated body
 }
 void drivesTemplate()
 {
@@ -177,7 +177,7 @@ struct CtxContainer
     // context-switching iteration (chosen when the loop body calls a @CTX_SWITCH function)
     @CTX_SWITCH int opApply(scope @CTX_SWITCH int delegate(int) dg)
     {
-        foreach (x; data) { if (auto r = @CTX_SWITCH dg(x)) return r; }
+        foreach (x; data) { if (auto r = dg@CTX_SWITCH(x)) return r; }
         return 0;
     }
 }
@@ -194,14 +194,16 @@ void foreachPlain()
 @CTX_SWITCH void foreachCtxSwitch()
 {
     CtxContainer c;
-    foreach (x; c) { @CTX_SWITCH yieldNow(); }
+    foreach (x; c) { 
+        yieldNow@CTX_SWITCH();
+    }
 }
 
 // a FAKE function may host a context-switching foreach without forcing the requirement on its callers.
 @CTX_SWITCH_FAKE void foreachCtxSwitchFake()
 {
     CtxContainer c;
-    foreach (x; c) { @CTX_SWITCH yieldNow(); }
+    foreach (x; c) { yieldNow@CTX_SWITCH(); }
 }
 void drivesForeachFake() { foreachCtxSwitchFake(); }   // calling a FAKE: no marker, no propagation
 
@@ -213,5 +215,53 @@ void drivesForeachFake() { foreachCtxSwitchFake(); }   // calling a FAKE: no mar
     CtxContainer c;
     int sum;
     foreach (x; c) { sum += x; }    // plain body -> plain opApply, no @CTX_SWITCH involved
-    @CTX_SWITCH yieldNow();          // the genuine context switch
+    yieldNow@CTX_SWITCH();          // the genuine context switch
+}
+
+// ----------------------------------------------------------------------------
+// Method chaining: marking ONE call in a chain `a().b().c()`.
+//
+// The glued marker sits between a callee and that call's `(`, so it binds exactly that
+// one call — no parentheses needed, in any position. step1()/step3() are plain;
+// step2() is the only @CTX_SWITCH hop.
+struct Pipe
+{
+    int n;
+    Pipe step1() { return Pipe(n + 1); }                                    // plain
+    @CTX_SWITCH Pipe step2() { yieldNow@CTX_SWITCH(); return Pipe(n + 2); } // the only @CTX_SWITCH hop
+    Pipe step3() { return Pipe(n + 3); }                                    // plain
+}
+
+// Mark the MIDDLE call in step1().step2().step3(): just glue the marker to step2().
+@CTX_SWITCH void chainedMiddle()
+{
+    Pipe p;
+    auto r = p.step1().step2@CTX_SWITCH().step3();
+}
+
+// Mark the FIRST call.
+@CTX_SWITCH void chainedFirst()
+{
+    Pipe p;
+    auto r = p.step2@CTX_SWITCH().step1().step3();   // marks step2()
+}
+
+// Mark the LAST call.
+@CTX_SWITCH void chainedLast()
+{
+    Pipe p;
+    auto r = p.step1().step3().step2@CTX_SWITCH();   // marks step2()
+}
+
+// Templated call in a chain: the marker goes AFTER the `!(...)` template args and before
+// the call `(` — `map!(int)@CTX_SWITCH(x)`.
+struct Gen
+{
+    @CTX_SWITCH Gen map(T)(T x) { yieldNow@CTX_SWITCH(); return this; }   // template, @CTX_SWITCH
+    Gen plain() { return this; }                                          // plain
+}
+@CTX_SWITCH void chainedTemplate()
+{
+    Gen g;
+    auto r = g.plain().map!(int)@CTX_SWITCH(3).plain();   // marks map!(int)(3) only
 }

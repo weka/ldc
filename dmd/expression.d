@@ -3553,7 +3553,7 @@ extern (C++) final class CallExp : UnaExp
     bool ignoreAttributes;  /// don't enforce attributes (e.g. call @gc function in @nogc code)
     bool isUfcsRewrite;     /// the first argument was pushed in here by a UFCS rewrite
     VarDeclaration vthis2;  // container for multi-context
-    Identifier markedCallerAttr; /// Option A: alias name of the prefix caller-attr marker (`@CTX_SWITCH callee()`) written at this call site (null if none)
+    Identifier markedCallerAttr; /// Option A: alias name of the glued caller-attr marker (`callee@CTX_SWITCH(args)`) written at this call site (null if none)
     bool callerAttrAutoMarked;   /// Option A: compiler-generated call (e.g. a `foreach`->`opApply` lowering) that is treated as implicitly marked — skips the "must be marked" requirement (E2) but still propagates the caller-attr to the enclosing function (E1)
 
     /// Puts the `arguments` and `names` into an `ArgumentList` for easily passing them around.

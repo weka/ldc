@@ -7,7 +7,7 @@ Covers the three implementation commits:
 
 - `9f8aacdfa8` Add Option A caller-required attributes (`@CTX_SWITCH` via `.ATTR` marker)
 - `e29e51e529` Switch caller-attr marker to postfix `callee(args) @CTX_SWITCH` syntax
-  (later changed to the prefix `@CTX_SWITCH callee(args)` form — see §4)
+  (later changed to the glued `callee@CTX_SWITCH(args)` form — see §4)
 - `0c423f1bdc` caller-attr: foreach/opApply support + participate in name mangling
 
 Scope: ~1,300 lines across the DMD/LDC frontend (`dmd/`) plus the druntime
@@ -24,7 +24,7 @@ There are two halves to the feature:
 1. **A declaration side** — a function *carries* an attribute, written
    `@CTX_SWITCH` (which is just a UDA, `callerAttr!"CTX_SWITCH"`).
 2. **A call side** — every call to such a function must *acknowledge* it with a
-   prefix marker, `@CTX_SWITCH callee(args)`, and the enclosing function must
+   glued marker, `callee@CTX_SWITCH(args)`, and the enclosing function must
    itself carry the attribute (so it propagates up the call tree).
 
 The entire enforcement is **layered on top of existing UDA machinery**. There is
@@ -97,65 +97,65 @@ So "does this function carry `@CTX_SWITCH`?" reduces to: scan its UDAs with
 
 ## 4. Parsing the marker (`dmd/parse.d` + `dmd/expression.d`)
 
-The marker syntax `@CTX_SWITCH callee(args)` is new grammar — a **prefix**
-`@Identifier` on a unary expression. It is captured in two places.
-
-**(a) The marker itself, in `parseUnaryExp`.** A new `case TOK.at:` sits
-alongside the other unary prefixes (`&`, `*`, `!`, `cast`, …):
-
-```d
-case TOK.at:
-    if (peekNext() == TOK.identifier) {
-        nextToken();                 // skip '@'
-        Identifier id = token.ident;
-        nextToken();                 // skip marker name
-        e = parseUnaryExp();         // the marked expression (with its call postfix)
-        auto ce = e.isCallExp();
-        if (!ce) {                   // no-parens form: `@CTX_SWITCH tick`
-            ce = new AST.CallExp(loc, e);  // becomes a zero-arg call
-            e = ce;
-        }
-        ce.markedCallerAttr = id;
-        break;
-    }
-    goto default;
-```
-
-Because the marker binds the *following* unary expression, its whole postfix
-chain (`@CTX_SWITCH a.b().c()`) becomes the marked call — the marker attaches to
-the outermost `CallExp`, exactly as the postfix form did to the same call.
-
-**(b) Statement-level disambiguation, in `parseStatement`.** This is the price
-of the prefix form: a statement that *begins* with `@` was previously always an
-attributed declaration (`@safe void f() {}`). Now `@CTX_SWITCH yield();` is also
-a valid statement. A dedicated `case TOK.at:` decides between them by skipping
-the attribute run and looking at what follows:
+The marker syntax `callee@CTX_SWITCH(args)` is new grammar — a **glued/infix**
+`@Identifier` sitting between a callee (and any `!(...)` template args) and that
+call's `(`. It is captured entirely inside the postfix-expression loop, in
+`parsePostExp`:
 
 ```d
-case TOK.at:
+private AST.Expression parsePostExp(AST.Expression e)
 {
-    Token* tk;
-    if (skipAttributes(&token, &tk) &&
-        tk.value != TOK.colon && tk.value != TOK.leftCurly &&
-        !isDeclaration(tk, NeedDeclaratorId.mustIfDstyle, TOK.reserved, null))
-        goto Lexp;          // prefix-marked expression statement
-    goto Ldeclaration;      // declaration, attribute scope `@x:`, or block `@x { }`
+    Identifier pendingCallerAttr = null;   // marker glued before an upcoming call `(`
+    while (1) switch (token.value)
+    {
+    case TOK.at:
+        if (peekNext() == TOK.identifier) {
+            nextToken();                       // skip '@'
+            pendingCallerAttr = token.ident;
+            nextToken();                       // skip marker name
+            if (token.value != TOK.leftParenthesis) {
+                // no-parens form: `callee@CTX_SWITCH` is a marked zero-arg call
+                auto ce = new AST.CallExp(loc, e);
+                ce.markedCallerAttr = pendingCallerAttr;
+                e = ce; pendingCallerAttr = null;
+            }
+            continue;
+        }
+        return e;
+
+    case TOK.leftParenthesis:                  // the call: attach the pending marker
+        ...
+        e = new AST.CallExp(loc, e, args, names);
+        if (pendingCallerAttr) {
+            e.isCallExp().markedCallerAttr = pendingCallerAttr;
+            pendingCallerAttr = null;
+        }
+        continue;
+    ...
+    }
 }
 ```
 
-This works *by construction*: after `skipAttributes` lands `tk` on the callee
-token, `isDeclaration` sees the exact same token stream a plain (un-marked)
-statement would — and `yield();`, `obj.m();`, `dg();` etc. already resolve to
-expressions there. The `colon`/`leftCurly` guards preserve attribute scopes
-(`@safe:`) and blocks (`@safe { }`). Note this only matters when the statement
-*starts* with the marker; `auto x = @CTX_SWITCH yield();` starts with `auto`, so
-its initializer reaches `parseUnaryExp` (a) directly with no ambiguity.
+The flow: the callee (`foo`, `obj.m`, or a template instance `m!(int)`) is built
+by the earlier loop iterations; when `@name` is seen it is **stashed** in
+`pendingCallerAttr`; the very next `(` builds the `CallExp` and claims the marker.
+Because the marker binds the call whose `(` immediately follows it, it targets
+**exactly one** call — any call in a chain, no parentheses needed
+(`a().b@CTX_SWITCH().c()` marks `b()`). Template args come first, so the marker
+lands after them: `m!(int)@CTX_SWITCH(x)` (writing `m@CTX_SWITCH!(int)(x)` would
+read as instantiating the *marker*, `CTX_SWITCH!(int)` — so the marker must
+follow the `!(...)`).
+
+**No statement-level ambiguity.** This is the big win of the glued form over the
+earlier prefix design: a marked call never *starts* with `@` — it starts with the
+callee. So `parseStatement`'s `case TOK.at:` stays exactly as upstream (an `@` at
+statement start is always an attributed declaration), and there is **no
+`skipAttributes`/`isDeclaration` disambiguation** and **no risk** of mis-parsing
+attributed declarations like `@trusted static void f(){}` or `@property g(T)(){}`.
 
 The marker stored (`markedCallerAttr`) is the **raw identifier token**
 (`CTX_SWITCH`), *not yet resolved* to an attribute — resolution happens in
-semantic, in the correct scope. The **no-parens form** (`@CTX_SWITCH tick`) is
-desugared into a zero-arg `CallExp`, so everything downstream only deals with a
-`CallExp`.
+semantic, in the correct scope.
 
 `expression.d` adds two fields to `CallExp`:
 
@@ -170,7 +170,7 @@ errors "call must be marked." The copy fixes it.
 > **The implementation spec is stale here.** It describes a `.ATTR`
 > member-access syntax (`callee.CTX_SWITCH(args)`) that had to be *intercepted*
 > inside `resolveUFCS` before UFCS rewriting — fragile. The shipped code uses the
-> prefix-`@` syntax and captures the marker structurally at parse time, so there
+> glued-`@` syntax and captures the marker structurally at parse time, so there
 > is **no `resolveUFCS` interception at all** anymore. Trust the code over that
 > doc.
 
@@ -205,7 +205,7 @@ resolve the written marker (if any) to its real attribute name
 for each caller-attr UDA the callee carries:
     if it's the marked one → markerMatched = true
     if fake → skip entirely (no marker needed, no propagation)   ← the migration shim
-    E2: not marked (and not auto-marked) → "call to `@X` function `foo` must be marked `@X foo()`"
+    E2: not marked (and not auto-marked) → "call to `@X` function `foo` must be marked `foo@X()`"
     E1: enclosing sc.func doesn't carry X (real or fake):
           if sc.func is a lambda → INFER X (record it) instead of erroring
           else → "non-`@X` <kind> `f` cannot call `@X` function `g`"
@@ -372,7 +372,7 @@ Not necessarily bugs, but where a critical eye pays off:
 5. **Stale doc.** `ctx-switch-option-a-implementation-spec.md` still describes the
    `.ATTR` member-access syntax and `resolveUFCS` interception, which the code no
    longer uses. If that doc is meant to track reality, update it to the
-   prefix-`@` design.
+   glued-`@` design.
 
 ---
 
@@ -383,18 +383,18 @@ To tie it together, here's the path for:
 ```d
 @CTX_SWITCH void scan(ref RobinHashTable!(K,V) t) {
     foreach (k, ref v; t) {
-        @CTX_SWITCH yield();   // OK
+        yield@CTX_SWITCH();   // OK
     }
 }
 ```
 
-1. **Parse** (`parse.d`): `@CTX_SWITCH yield()` → `CallExp` with
+1. **Parse** (`parse.d`): `yield@CTX_SWITCH()` → `CallExp` with
    `markedCallerAttr = CTX_SWITCH`. The `foreach` is an ordinary
    `ForeachStatement`.
 2. **Lowering** (`statementsem.d`): the loop body becomes a delegate literal
    `flde`; the loop lowers to `t.opApply(flde)`, a `CallExp` flagged
    `callerAttrAutoMarked = true`.
-3. **Semantic of the body**: `@CTX_SWITCH yield()` hits `checkCallerAttr` — the
+3. **Semantic of the body**: `yield@CTX_SWITCH()` hits `checkCallerAttr` — the
    marker matches `yield`'s real attr (E2 satisfied), and the enclosing `sc.func`
    is the body *lambda* `flde`, which doesn't carry `@CTX_SWITCH`, so E1 *infers*
    it: `inferredCallerAttrsByFunc[flde] = ["CTX_SWITCH"]` (and records the loc).

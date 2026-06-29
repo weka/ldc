@@ -14,7 +14,7 @@ void withDgPlain(void delegate() dg)
 void runPlainWithLambda()
 {
     withDgPlain(() {
-        @CTX_SWITCH yieldNow();
+        yieldNow@CTX_SWITCH();
     });
 }
 
