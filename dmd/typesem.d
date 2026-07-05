@@ -27,6 +27,7 @@ import dmd.dclass;
 import dmd.declaration;
 import dmd.denum;
 import dmd.dimport;
+import dmd.attrib : isCallerAttrExp;
 import dmd.dinterpret;
 import dmd.dmangle;
 import dmd.dmodule;
@@ -1997,6 +1998,15 @@ Type typeSemantic(Type type, const ref Loc loc, Scope* sc)
 
                 fparam.type = fparam.type.cAdjustParamType(sc); // adjust C array and function parameter types
 
+                // Weka (Option A): fold a parameter's caller-required attribute UDAs
+                // (`@mayYield` etc.) into the underlying delegate/function-pointer
+                // `TypeFunction`'s type identity, so overloads differing only by the
+                // caller-attr become distinct types (even when the delegate type is
+                // routed through an alias). Runs before the enclosing function type's
+                // `deco` is computed, and operates on a COPY of the callee type so a
+                // possibly-shared/cached type is never mutated.
+                foldParamCallerAttrs(fparam, argsc, loc);
+
                 Type t = fparam.type.toBasetype();
 
                 /* If fparam after semantic() turns out to be a tuple, the number of parameters may
@@ -2950,6 +2960,103 @@ Type merge2(Type type)
     else
         assert(0);
     return t;
+}
+
+/***************************************
+ * Weka (Option A): fold a parameter's caller-required attribute UDAs
+ * (`@mayYield` = `callerAttr!("NAME", fake)`) into the underlying delegate /
+ * function-pointer `TypeFunction`'s type identity.
+ *
+ * When `fparam`'s type is a delegate or function pointer and `fparam` carries one
+ * or more caller-attr UDAs, this replaces `fparam.type` with a fresh type whose
+ * inner `TypeFunction` records those attributes in `callerAttrs`. Because
+ * `callerAttrs` participate in the type mangle (`deco`), two parameters that
+ * differ only by a caller-attr become distinct types, so overloads that differ
+ * only by such an attribute no longer collide — even when the delegate type is
+ * written through an alias.
+ *
+ * The callee `TypeFunction` and its enclosing delegate/pointer are COPIED (never
+ * mutated in place), so a shared/cached type is never disturbed. Runs before the
+ * enclosing function type's `deco` is computed.
+ */
+void foldParamCallerAttrs(Parameter fparam, Scope* sc, const ref Loc loc)
+{
+    if (!fparam || !fparam.userAttribDecl || !fparam.type)
+        return;
+
+    // Collect the caller-attr UDA expressions carried by the parameter.
+    auto udas = fparam.userAttribDecl.getAttributes();
+    if (!udas)
+        return;
+    arrayExpressionSemantic((*udas)[], sc, true);
+
+    Expressions* attrs = null;
+    void collect(Expression e)
+    {
+        if (!e)
+            return;
+        const(char)[] name;
+        bool fake;
+        if (isCallerAttrExp(e, name, fake))
+        {
+            if (!attrs)
+                attrs = new Expressions();
+            attrs.push(e);
+        }
+    }
+    foreach (uda; (*udas)[])
+    {
+        if (auto tup = uda ? uda.isTupleExp() : null)
+        {
+            foreach (e; (*tup.exps)[])
+                collect(e);
+        }
+        else
+            collect(uda);
+    }
+    if (!attrs)
+        return;
+
+    // The caller-attr only makes sense on a callable parameter type. Locate the
+    // delegate / function-pointer and its inner TypeFunction.
+    Type bt = fparam.type.toBasetype();
+    TypeFunction tf;
+    bool isDelegate;
+    if (auto td = bt.isTypeDelegate())
+    {
+        tf = td.next ? td.next.isTypeFunction() : null;
+        isDelegate = true;
+    }
+    else if (auto tp = bt.isTypePointer())
+    {
+        tf = tp.next ? tp.next.isTypeFunction() : null;
+    }
+    if (!tf)
+        return; // not a callable; leave as an ordinary (ignored) UDA
+
+    // Copy the inner TypeFunction, attach the caller-attrs, and re-mangle so it gets a
+    // distinct deco. Keep the copy (which retains parameter identifiers); `merge()`
+    // canonicalizes with names stripped, so use it only for the interned `deco` string
+    // (mirrors `tf.deco = tf.merge().deco` in the TypeFunction semantic visitor).
+    auto tfCopy = cast(TypeFunction) tf.copy();
+    tfCopy.callerAttrs = attrs;
+    tfCopy.deco = null;
+    tfCopy.deco = tfCopy.merge().deco;
+
+    // Rebuild the enclosing delegate / pointer around the modified TypeFunction and
+    // intern it for a deco.
+    Type rebuilt;
+    if (isDelegate)
+        rebuilt = new TypeDelegate(tfCopy);
+    else
+        rebuilt = new TypePointer(tfCopy);
+    rebuilt.deco = rebuilt.merge().deco;
+
+    // Preserve any type qualifiers that were on the original parameter type.
+    if (bt.mod)
+        rebuilt = rebuilt.addMod(bt.mod);
+
+    fparam.type = rebuilt;
 }
 
 /***************************************
@@ -6052,6 +6159,16 @@ Lcovariant:
         goto Lnotcovariant;
     }
 
+    // Weka (Option A): caller-required attributes (`@mayYield` etc.) are part of the
+    // function/delegate type identity and gate conversion ASYMMETRICALLY. A source
+    // function that REQUIRES a real caller-attr may not silently lose it: the target
+    // must carry every REAL (non-fake) caller-attr the source carries. Extra attrs on
+    // the target are fine (a non-yielding callee is acceptable where yielding is
+    // permitted). Erasure (source carries an attr the target lacks) is only allowed via
+    // an explicit cast, which bypasses `implicitConvTo` entirely.
+    if (!callerAttrsCovariant(t1, t2))
+        goto Lnotcovariant;
+
     //printf("\tcovaraint: 1\n");
     return Covariant.yes;
 
@@ -6062,6 +6179,71 @@ Ldistinct:
 Lnotcovariant:
     //printf("\tcovaraint: 2\n");
     return Covariant.no;
+}
+
+/*******************************
+ * Weka (Option A): caller-required-attribute compatibility for function-type
+ * conversion. A conversion `src -> tgt` is allowed only if `tgt` carries every
+ * REAL (non-fake) caller-attr that `src` carries. Extra caller-attrs on `tgt`
+ * are fine (plain -> `@mayYield` is allowed); dropping one (`@mayYield` -> plain)
+ * is not, and must be done with an explicit cast instead.
+ *
+ * Params:
+ *  src = source function type (converting FROM)
+ *  tgt = target function type (converting TO)
+ * Returns:
+ *  true if every real caller-attr of `src` is also present on `tgt`.
+ */
+bool callerAttrsCovariant(TypeFunction src, TypeFunction tgt)
+{
+    // Fast path: identical attribute pointers (incl. both null).
+    if (src.callerAttrs is tgt.callerAttrs)
+        return true;
+
+    // Collect the target's real caller-attr names.
+    static void realNames(TypeFunction tf, ref const(char)[][] names)
+    {
+        if (!tf.callerAttrs)
+            return;
+        void take(Expression e)
+        {
+            if (!e)
+                return;
+            const(char)[] n;
+            bool fake;
+            if (isCallerAttrExp(e, n, fake) && !fake)
+                names ~= n;
+        }
+        foreach (e; (*tf.callerAttrs)[])
+        {
+            if (auto tup = e ? e.isTupleExp() : null)
+            {
+                foreach (te; (*tup.exps)[])
+                    take(te);
+            }
+            else
+                take(e);
+        }
+    }
+
+    const(char)[][] srcNames;
+    realNames(src, srcNames);
+    if (srcNames.length == 0)
+        return true; // source requires nothing; any target is fine
+
+    const(char)[][] tgtNames;
+    realNames(tgt, tgtNames);
+
+    // Every real caller-attr of `src` must be present on `tgt`.
+    foreach (sn; srcNames)
+    {
+        bool found;
+        foreach (tn; tgtNames)
+            if (sn == tn) { found = true; break; }
+        if (!found)
+            return false;
+    }
+    return true;
 }
 
 /************************************

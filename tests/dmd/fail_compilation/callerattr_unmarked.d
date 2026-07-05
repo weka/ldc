@@ -1,16 +1,16 @@
 import core.attribute : callerAttr;
-alias CTX_SWITCH = callerAttr!"CTX_SWITCH";
+alias mayYield = callerAttr!"mayYield";
 
-@CTX_SWITCH void yieldNow() {}
+@mayYield void yieldNow() {}
 
-@CTX_SWITCH void worker()
+@mayYield void worker()
 {
-    yieldNow();   // error: missing the @CTX_SWITCH marker
+    yieldNow();   // error: missing the @mayYield marker
 }
 
 /*
 TEST_OUTPUT:
 ---
-fail_compilation/callerattr_unmarked.d(8): Error: call to `@CTX_SWITCH` function `callerattr_unmarked.yieldNow` must be marked `yieldNow@CTX_SWITCH()`
+fail_compilation/callerattr_unmarked.d(8): Error: call to `@mayYield` function `callerattr_unmarked.yieldNow` must be marked `yieldNow@mayYield()`
 ---
 */

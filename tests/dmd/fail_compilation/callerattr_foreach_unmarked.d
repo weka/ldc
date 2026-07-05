@@ -1,8 +1,8 @@
-// Negative cases around @CTX_SWITCH and foreach/opApply.
+// Negative cases around @mayYield and foreach/opApply.
 import core.attribute : callerAttr;
-alias CTX_SWITCH = callerAttr!"CTX_SWITCH";
+alias mayYield = callerAttr!"mayYield";
 
-@CTX_SWITCH void yieldNow() {}
+@mayYield void yieldNow() {}
 
 struct CtxContainer
 {
@@ -10,11 +10,11 @@ struct CtxContainer
     int opApply(scope int delegate(int) dg)
     { foreach (x; data) if (auto r = dg(x)) return r; return 0; }
     
-    @CTX_SWITCH int opApply(scope @CTX_SWITCH int delegate(int) dg)
-    { foreach (x; data) if (auto r = dg@CTX_SWITCH(x)) return r; return 0; }
+    @mayYield int opApply(scope @mayYield int delegate(int) dg)
+    { foreach (x; data) if (auto r = dg@mayYield(x)) return r; return 0; }
 }
 
-// (a) calling a @CTX_SWITCH function WITHOUT the marker, inside a foreach body -> must be marked (E2)
+// (a) calling a @mayYield function WITHOUT the marker, inside a foreach body -> must be marked (E2)
 void missingMarkerInForeach()
 {
     CtxContainer c;
@@ -23,16 +23,16 @@ void missingMarkerInForeach()
     }
 }
 
-// (b) a non-@CTX_SWITCH function running a marked @CTX_SWITCH call -> cannot call (E1)
+// (b) a non-@mayYield function running a marked @mayYield call -> cannot call (E1)
 void directCallNoAttr()
 {
-    yieldNow@CTX_SWITCH();
+    yieldNow@mayYield();
 }
 
 /*
 TEST_OUTPUT:
 ---
-fail_compilation/callerattr_foreach_unmarked.d(22): Error: call to `@CTX_SWITCH` function `callerattr_foreach_unmarked.yieldNow` must be marked `yieldNow@CTX_SWITCH()`
-fail_compilation/callerattr_foreach_unmarked.d(29): Error: non-`@CTX_SWITCH` function `callerattr_foreach_unmarked.directCallNoAttr` cannot call `@CTX_SWITCH` function `callerattr_foreach_unmarked.yieldNow`
+fail_compilation/callerattr_foreach_unmarked.d(22): Error: call to `@mayYield` function `callerattr_foreach_unmarked.yieldNow` must be marked `yieldNow@mayYield()`
+fail_compilation/callerattr_foreach_unmarked.d(29): Error: non-`@mayYield` function `callerattr_foreach_unmarked.directCallNoAttr` cannot call `@mayYield` function `callerattr_foreach_unmarked.yieldNow`
 ---
 */

@@ -402,87 +402,26 @@ void mangleFuncType(TypeFunction t, TypeFunction ta, ubyte modMask, Type tret, r
     buf.writeByte('Z' - t.parameterList.varargs); // mark end of arg list
     if (tret !is null)
         mangleType(tret, 0, buf, backref);
+    // Weka (Option A): caller-required attributes (`@mayYield` etc.) are part of the
+    // function/delegate TYPE identity. Emit them into `deco` so two otherwise-identical
+    // function types that differ only by a caller-attr get distinct decos, and therefore
+    // `Type.equals` / `Parameter.opEquals` treat them as distinct (breaking the overload
+    // collision even when the delegate type is routed through an alias). This replaces the
+    // old collision-gated symbol-level `mangleCallerAttrDisc` discriminator.
+    // Encoding per attr: 'Y' <'F' fake | 'R' real> <len> <name>.
+    mangleCallerAttrs(t.callerAttrs, buf);
     t.inuse--;
 }
 
 /*************************************************************
+ * Emit the caller-required attributes carried by a function/delegate type into
+ * its mangle, in declaration order. Encoding matches the retired symbol-level
+ * discriminator: 'Y' <'F' fake | 'R' real> <len> <name> per caller-attr.
  */
-/****************************************************************
- * Option A — caller-required attributes participate in name mangling, but ONLY
- * where they must to break an otherwise-identical symbol collision.
- *
- * A `@(callerAttr!"NAME")` (or its `callerAttrFake` variant) is an ordinary UDA,
- * invisible to the mangler. When two overloads differ ONLY by the attribute —
- * e.g. `RobinHashTable`'s plain vs `@CTX_SWITCH` `opApply` — they mangle to the
- * same symbol and codegen silently drops one ("skipping definition ... same
- * mangled name"). To fix that we append a discriminator to the attribute-bearing
- * overload's symbol.
- *
- * Critically, the discriminator is emitted ONLY when `fd` has a same-name,
- * same-type overload sibling (the real collision). A standalone caller-attr
- * function (`yield`, `submitTask`, a socket `send`/`recv`, ...) keeps its
- * baseline mangle, so its definition and every cross-module call site agree —
- * otherwise the discriminator would be applied inconsistently across separately
- * compiled modules (it depends on whether the UDA happens to be semantically
- * resolved when the symbol is first mangled and cached), producing `undefined
- * symbol` link errors. Gating on collision also makes the result independent of
- * that resolution timing for non-overloaded functions: with no sibling we emit
- * nothing regardless. The colliding `opApply` overloads are co-resolved members
- * of the same struct template, so their treatment is consistent everywhere.
- */
-void mangleCallerAttrDisc(Dsymbol sym, ref OutBuffer buf)
+void mangleCallerAttrs(Expressions* callerAttrs, ref OutBuffer buf)
 {
-    auto fd = sym ? sym.isFuncDeclaration() : null;
-    if (!fd || !fd.userAttribDecl || !fd.type)
+    if (!callerAttrs)
         return;
-    auto udas = fd.userAttribDecl.getAttributes();
-    if (!udas)
-        return;
-
-    // Does `fd` carry any caller-attr UDA at all?
-    bool hasAttr;
-    foreach (uda; (*udas)[])
-    {
-        const(char)[] n;
-        bool f;
-        if (auto tup = uda.isTupleExp())
-        {
-            foreach (e; (*tup.exps)[])
-                if (e && isCallerAttrExp(e, n, f)) { hasAttr = true; break; }
-        }
-        else if (uda && isCallerAttrExp(uda, n, f))
-            hasAttr = true;
-        if (hasAttr)
-            break;
-    }
-    if (!hasAttr)
-        return;
-
-    // Gate: only disambiguate when a same-name/same-type overload sibling exists.
-    // Enumerate the WHOLE overload set from its head — `overnext` is singly
-    // linked, so starting from `fd` alone could miss earlier-declared siblings
-    // (the `@CTX_SWITCH` overload is typically declared after the plain one).
-    Dsymbol head = fd;
-    if (auto p = fd.parent)
-        if (auto sds = p.isScopeDsymbol())
-            if (sds.symtab)
-                if (auto s = sds.symtab.lookup(fd.ident))
-                    head = s;
-
-    bool collides;
-    overloadApply(head, (Dsymbol s) {
-        auto f = s.isFuncDeclaration();
-        if (f && f !is fd && f.type && f.type.equals(fd.type))
-        {
-            collides = true;
-            return 1;
-        }
-        return 0;
-    });
-    if (!collides)
-        return;
-
-    // Emit: 'Y' <'F' fake | 'R' real> <len> <name> per caller-attr.
     void emit(Expression e)
     {
         if (!e)
@@ -491,24 +430,37 @@ void mangleCallerAttrDisc(Dsymbol sym, ref OutBuffer buf)
         bool fake;
         if (isCallerAttrExp(e, name, fake))
         {
+            // Weka (Option B — gating): do NOT mangle FAKE (`@mayYieldUnchecked`) caller-attrs
+            // into the symbol name. Fakes are non-propagating migration shims; putting them in
+            // the mangle gives widely-shared boundary functions (e.g. ReactorThreadPool.submitTask)
+            // a caller-attr name suffix that some cross-unit / template-instantiated references
+            // fail to reproduce, causing "undefined symbol" link errors. The attribute still lives
+            // on the TYPE (`callerAttrs`) for conversion/enforcement — only the mangled NAME reverts
+            // to baseline, so definitions and all references agree. REAL `@mayYield` is still
+            // mangled (needed to keep overload siblings like the dual `opApply` distinct).
+            if (fake)
+                return;
             buf.writeByte('Y');
-            buf.writeByte(fake ? 'F' : 'R');
+            buf.writeByte('R');
             buf.print(cast(int) name.length);
             buf.writestring(name);
         }
     }
 
-    foreach (uda; (*udas)[])
+    foreach (e; (*callerAttrs)[])
     {
-        if (auto tup = uda.isTupleExp())
+        if (auto tup = e ? e.isTupleExp() : null)
         {
-            foreach (e; (*tup.exps)[])
-                emit(e);
+            foreach (te; (*tup.exps)[])
+                emit(te);
         }
         else
-            emit(uda);
+            emit(e);
     }
 }
+
+/*************************************************************
+ */
 
 void mangleParameter(Parameter p, ref OutBuffer buf, ref Backref backref)
 {
@@ -677,7 +629,10 @@ public:
         if (fd.needThis() || fd.isNested())
             buf.writeByte('M');
 
-        mangleCallerAttrDisc(fd, *buf);
+        // Weka (Option A): caller-required attributes are now part of the function TYPE
+        // identity and are emitted by `mangleFuncType` (see `mangleCallerAttrs`). The old
+        // collision-gated symbol-level discriminator (`mangleCallerAttrDisc`) is retired so
+        // the attribute is encoded exactly once and consistently across compilation units.
 
         if (!fd.type || fd.type.ty == Terror)
         {

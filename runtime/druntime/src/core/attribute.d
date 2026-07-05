@@ -308,21 +308,21 @@ enum standalone;
  *
  * `callerAttr!"NAME"` produces a compiler-recognized UDA type. A function tagged
  * with such a UDA "carries" the named caller-required attribute; every call to it
- * must be written with the member-access marker `callee.NAME(args)`, and the
+ * must be written with the glued call-site marker `callee@NAME(args)`, and the
  * enclosing function must itself carry `NAME` (the property propagates upward to
- * a single declared root). `callerAttrFake!"NAME"` is the migration variant: it
- * carries the attribute for forwarding but does not force the requirement onto
+ * a single declared root). `callerAttrUnchecked!"NAME"` is the migration variant:
+ * it carries the attribute for forwarding but does not force the requirement onto
  * its callers.
  *
  * Example:
  * ---
- * import core.attribute : callerAttr, callerAttrFake;
- * alias CTX_SWITCH      = callerAttr!"CTX_SWITCH";
- * alias CTX_SWITCH_FAKE = callerAttrFake!"CTX_SWITCH";
+ * import core.attribute : callerAttr, callerAttrUnchecked;
+ * alias mayYield          = callerAttr!"mayYield";
+ * alias mayYieldUnchecked = callerAttrUnchecked!"mayYield";
  *
- * @CTX_SWITCH void yieldNow() {}
- * @CTX_SWITCH void worker() { yieldNow.CTX_SWITCH(); }   // ok
- * void bad()                { yieldNow.CTX_SWITCH(); }   // error: bad is not @CTX_SWITCH
+ * @mayYield void yieldNow() {}
+ * @mayYield void worker() { yieldNow@mayYield(); }   // ok
+ * void bad()              { yieldNow@mayYield(); }   // error: bad is not @mayYield
  * ---
  */
 struct callerAttr(string name_, bool fake_ = false)
@@ -332,7 +332,7 @@ struct callerAttr(string name_, bool fake_ = false)
 }
 
 /// ditto
-template callerAttrFake(string name_)
+template callerAttrUnchecked(string name_)
 {
-    alias callerAttrFake = callerAttr!(name_, true);
+    alias callerAttrUnchecked = callerAttr!(name_, true);
 }

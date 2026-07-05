@@ -1,25 +1,25 @@
 // A `foreach` over a range whose iteration primitives (`empty`/`front`/`popFront`) are
-// @CTX_SWITCH propagates the attribute to the enclosing function (E1). The compiler-generated
+// @mayYield propagates the attribute to the enclosing function (E1). The compiler-generated
 // primitive calls are implicitly marked (there is no place for a user marker), but the
-// requirement that the enclosing function itself carry @CTX_SWITCH is NOT waived: a
-// non-@CTX_SWITCH function may not host such a loop.
+// requirement that the enclosing function itself carry @mayYield is NOT waived: a
+// non-@mayYield function may not host such a loop.
 import core.attribute : callerAttr;
-alias CTX_SWITCH = callerAttr!"CTX_SWITCH";
+alias mayYield = callerAttr!"mayYield";
 
-@CTX_SWITCH void yieldNow() {}
+@mayYield void yieldNow() {}
 
 struct SwitchingRange
 {
     int i, n;
-    @CTX_SWITCH bool empty()    { yieldNow@CTX_SWITCH(); return i >= n; }
-    @CTX_SWITCH int  front()    { return i; }
-    @CTX_SWITCH void popFront() { yieldNow@CTX_SWITCH(); ++i; }
+    @mayYield bool empty()    { yieldNow@mayYield(); return i >= n; }
+    @mayYield int  front()    { return i; }
+    @mayYield void popFront() { yieldNow@mayYield(); ++i; }
 }
 
-@CTX_SWITCH void good()
+@mayYield void good()
 {
     int s;
-    foreach (v; SwitchingRange(0, 3)) { s += v; }   // ok: enclosing carries @CTX_SWITCH
+    foreach (v; SwitchingRange(0, 3)) { s += v; }   // ok: enclosing carries @mayYield
 }
 
 void bad()
@@ -31,8 +31,8 @@ void bad()
 /*
 TEST_OUTPUT:
 ---
-fail_compilation/callerattr_foreach_range.d(28): Error: non-`@CTX_SWITCH` function `callerattr_foreach_range.bad` cannot call `@CTX_SWITCH` function `callerattr_foreach_range.SwitchingRange.empty`
-fail_compilation/callerattr_foreach_range.d(28): Error: non-`@CTX_SWITCH` function `callerattr_foreach_range.bad` cannot call `@CTX_SWITCH` function `callerattr_foreach_range.SwitchingRange.popFront`
-fail_compilation/callerattr_foreach_range.d(28): Error: non-`@CTX_SWITCH` function `callerattr_foreach_range.bad` cannot call `@CTX_SWITCH` function `callerattr_foreach_range.SwitchingRange.front`
+fail_compilation/callerattr_foreach_range.d(28): Error: non-`@mayYield` function `callerattr_foreach_range.bad` cannot call `@mayYield` function `callerattr_foreach_range.SwitchingRange.empty`
+fail_compilation/callerattr_foreach_range.d(28): Error: non-`@mayYield` function `callerattr_foreach_range.bad` cannot call `@mayYield` function `callerattr_foreach_range.SwitchingRange.popFront`
+fail_compilation/callerattr_foreach_range.d(28): Error: non-`@mayYield` function `callerattr_foreach_range.bad` cannot call `@mayYield` function `callerattr_foreach_range.SwitchingRange.front`
 ---
 */

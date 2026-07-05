@@ -3763,6 +3763,16 @@ private extern(D) Expression applyOpApply(ForeachStatement fs, Expression flde,
     }
     assert(tab.ty == Tstruct || tab.ty == Tclass);
     assert(sapply);
+
+    // Weka (Option A): the `foreach` body was lowered to `flde` and analyzed; if that lambda
+    // performs a context-switching call it has inferred caller-attrs (e.g. `@mayYield`). Reflect
+    // those into the lambda's delegate TYPE so overload resolution of `aggr.opApply(flde)` matches
+    // the `@mayYield` `opApply` parameter EXACTLY and — per the asymmetric conversion rule — no
+    // longer matches the plain overload (a yielding body must not silently bind a plain delegate).
+    // The attribute expressions are scavenged from the opApply overloads' own parameters so we
+    // reuse fully-resolved `callerAttr!(name)` TypeExps rather than synthesizing them.
+    reflectForeachBodyCallerAttrs(flde, sapply, sc2);
+
     /* Call:
      *  aggr.apply(flde)
      */
@@ -3783,6 +3793,106 @@ private extern(D) Expression applyOpApply(ForeachStatement fs, Expression flde,
         return null;
     }
     return ec;
+}
+
+/*******************************
+ * Weka (Option A): reflect a `foreach` body lambda's INFERRED real caller-attributes into
+ * its delegate TYPE, so `aggr.opApply(flde)` resolves to the matching `@mayYield` overload.
+ *
+ * `flde` is the lambda the loop body was lowered to; after its body semantic it may carry
+ * inferred caller-attrs (a context-switching call inside the loop). We copy the lambda's
+ * `TypeFunction`, attach `callerAttr!(name)` UDA TypeExps for each inferred real attribute
+ * (scavenged from an `opApply` overload parameter that already carries that name, so they are
+ * fully resolved), re-mangle for a distinct deco, and rebuild the lambda's delegate type.
+ *
+ * Params:
+ *  flde   = the FuncExp for the loop-body lambda
+ *  sapply = an `opApply` overload (head of the overload set) to scavenge attr exprs from
+ *  sc     = current scope
+ */
+private void reflectForeachBodyCallerAttrs(Expression flde, Dsymbol sapply, Scope* sc)
+{
+    import dmd.attrib : isCallerAttrExp;
+
+    auto fe = flde ? flde.isFuncExp() : null;
+    if (!fe || !fe.fd)
+        return;
+    auto names = funcInferredCallerAttrNames(fe.fd);
+    if (names.length == 0)
+        return;
+
+    auto ltf = fe.fd.type ? fe.fd.type.isTypeFunction() : null;
+    if (!ltf)
+        return;
+
+    // Find a resolved `callerAttr!(name)` TypeExp for `name` among the opApply overloads'
+    // parameter UDAs.
+    Expression findAttrExp(const(char)[] name)
+    {
+        Expression found;
+        overloadApply(sapply, (Dsymbol s) {
+            auto f = s.isFuncDeclaration();
+            auto tf = f && f.type ? f.type.isTypeFunction() : null;
+            if (!tf)
+                return 0;
+            foreach (i, p; tf.parameterList)
+            {
+                if (!p.userAttribDecl)
+                    continue;
+                auto udas = p.userAttribDecl.getAttributes();
+                if (!udas)
+                    continue;
+                arrayExpressionSemantic((*udas)[], sc, true);
+                foreach (uda; (*udas)[])
+                {
+                    void probe(Expression e)
+                    {
+                        if (found || !e)
+                            return;
+                        const(char)[] n;
+                        bool fake;
+                        if (isCallerAttrExp(e, n, fake) && !fake && n == name)
+                            found = e;
+                    }
+                    if (auto tup = uda ? uda.isTupleExp() : null)
+                    {
+                        foreach (e; (*tup.exps)[])
+                            probe(e);
+                    }
+                    else
+                        probe(uda);
+                }
+            }
+            return found ? 1 : 0;
+        });
+        return found;
+    }
+
+    Expressions* attrs = null;
+    foreach (name; names)
+    {
+        if (auto e = findAttrExp(name))
+        {
+            if (!attrs)
+                attrs = new Expressions();
+            attrs.push(e);
+        }
+    }
+    if (!attrs)
+        return;
+
+    // Copy the lambda's TypeFunction, attach the caller-attrs, re-intern for a distinct deco,
+    // and rebuild the lambda's delegate type. Keep the copy (retains param idents); `merge()`
+    // canonicalizes with names stripped, so use it only for the deco string.
+    auto tfCopy = cast(TypeFunction) ltf.copy();
+    tfCopy.callerAttrs = attrs;
+    tfCopy.deco = null;
+    tfCopy.deco = tfCopy.merge().deco;
+    fe.fd.type = tfCopy;
+
+    auto tdg = new TypeDelegate(tfCopy);
+    tdg.deco = tdg.merge().deco;
+    fe.type = tdg;
 }
 
 private extern(D) Expression applyDelegate(ForeachStatement fs, Expression flde,

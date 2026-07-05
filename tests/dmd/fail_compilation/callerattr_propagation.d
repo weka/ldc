@@ -1,16 +1,16 @@
 import core.attribute : callerAttr;
-alias CTX_SWITCH = callerAttr!"CTX_SWITCH";
+alias mayYield = callerAttr!"mayYield";
 
-@CTX_SWITCH void yieldNow() {}
+@mayYield void yieldNow() {}
 
 void oops()
 {
-    yieldNow@CTX_SWITCH();   // error: oops is not @CTX_SWITCH
+    yieldNow@mayYield();   // error: oops is not @mayYield
 }
 
 /*
 TEST_OUTPUT:
 ---
-fail_compilation/callerattr_propagation.d(8): Error: non-`@CTX_SWITCH` function `callerattr_propagation.oops` cannot call `@CTX_SWITCH` function `callerattr_propagation.yieldNow`
+fail_compilation/callerattr_propagation.d(8): Error: non-`@mayYield` function `callerattr_propagation.oops` cannot call `@mayYield` function `callerattr_propagation.yieldNow`
 ---
 */

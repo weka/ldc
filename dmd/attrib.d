@@ -1349,7 +1349,7 @@ bool isEnumAttribute(Expression e, Identifier id)
  *
  * Detects a `callerAttr!("NAME", fake)` instantiation, i.e. an instance of the
  * `callerAttr` struct template from `core.attribute`. On success fills `name`
- * (the attribute's string name) and `fake` (true for the `callerAttrFake`
+ * (the attribute's string name) and `fake` (true for the `callerAttrUnchecked`
  * migration variant).
  *
  * Returns: true if `sd` is such an instantiation.

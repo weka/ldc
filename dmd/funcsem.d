@@ -1122,6 +1122,81 @@ Ldone:
         if (param && param.userAttribDecl)
             param.userAttribDecl.dsymbolSemantic(sc);
     }
+
+    // Weka (Option A): fold a caller-required attribute (`@mayYield` etc.) applied to
+    // the function itself into its `TypeFunction.callerAttrs`, making the attribute
+    // part of the function's TYPE identity (and hence its `deco`/mangle). This keeps
+    // overloads distinguished by the type mechanism (replacing the retired symbol-level
+    // discriminator) consistently at every definition and call site.
+    foldFuncDeclCallerAttrs(funcdecl, sc);
+}
+
+/***********************************************************
+ * Weka (Option A): if `funcdecl` carries caller-required attribute UDAs
+ * (`@mayYield` = `callerAttr!("NAME", fake)`), record them on a COPY of its
+ * `TypeFunction` (never mutating the possibly-shared original) and re-mangle so
+ * the attribute participates in the type's `deco`. See `foldParamCallerAttrs`
+ * (typesem.d) for the parameter-side counterpart.
+ */
+private void foldFuncDeclCallerAttrs(FuncDeclaration funcdecl, Scope* sc)
+{
+    import dmd.attrib : isCallerAttrExp;
+    import dmd.expressionsem : arrayExpressionSemantic;
+    if (!funcdecl || !funcdecl.userAttribDecl || !funcdecl.type)
+        return;
+    auto tf = funcdecl.type.isTypeFunction();
+    if (!tf || tf.callerAttrs !is null)
+        return;
+
+    auto udas = funcdecl.userAttribDecl.getAttributes();
+    if (!udas)
+        return;
+    arrayExpressionSemantic((*udas)[], sc, true);
+
+    Expressions* attrs = null;
+    void collect(Expression e)
+    {
+        if (!e)
+            return;
+        const(char)[] name;
+        bool fake;
+        if (isCallerAttrExp(e, name, fake))
+        {
+            if (!attrs)
+                attrs = new Expressions();
+            attrs.push(e);
+        }
+    }
+    foreach (uda; (*udas)[])
+    {
+        if (auto tup = uda ? uda.isTupleExp() : null)
+        {
+            foreach (e; (*tup.exps)[])
+                collect(e);
+        }
+        else
+            collect(uda);
+    }
+    if (!attrs)
+        return;
+
+    // Attach the caller-attrs on a copy and re-intern for a distinct deco. Keep the
+    // COPY (which retains parameter identifiers) as `funcdecl.type`; `merge()` returns
+    // a canonicalized type with parameter names stripped, so use it only to obtain the
+    // interned `deco` string (mirrors `tf.deco = tf.merge().deco` in typesem.d).
+    auto tfCopy = cast(TypeFunction) tf.copy();
+    tfCopy.callerAttrs = attrs;
+    tfCopy.deco = null;
+    tfCopy.deco = tfCopy.merge().deco;
+    funcdecl.type = tfCopy;
+    // Weka (Option A): invalidate any mangled name cached BEFORE this fold. `mangleExact`
+    // caches `fd.mangleString` and never recomputes it; if some unit mangled this function
+    // (e.g. via trace-descriptor CTFE or a template instantiation) before the caller-attr
+    // was folded in, the stale PLAIN name would stick — while a unit that folds first emits
+    // the WITH-attr symbol, producing cross-module "undefined symbol" link errors (seen for
+    // ReactorThreadPool.submitTask). Resetting forces every reference to re-mangle with the
+    // caller-attr, so definitions and references agree.
+    funcdecl.mangleString = null;
 }
 
 

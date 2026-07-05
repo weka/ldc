@@ -2,28 +2,28 @@
 // Companion to callerattr_inline.d (which covers the opApply foreach lowering). This covers the
 // OTHER foreach lowering: the range protocol (empty/front/popFront).
 //
-// A range whose iteration primitives are themselves @CTX_SWITCH (e.g. a lazy range that does I/O
+// A range whose iteration primitives are themselves @mayYield (e.g. a lazy range that does I/O
 // on advance) must be iterable with `foreach`: the compiler-generated `__r.empty`/`__r.front`/
 // `__r.popFront` calls carry the caller-attr and propagate to the enclosing function, exactly as
-// a @CTX_SWITCH opApply does. Verified to hold under inlining/optimization.
-import core.attribute : callerAttr, callerAttrFake;
-alias CTX_SWITCH      = callerAttr!"CTX_SWITCH";
-alias CTX_SWITCH_FAKE = callerAttrFake!"CTX_SWITCH";
+// a @mayYield opApply does. Verified to hold under inlining/optimization.
+import core.attribute : callerAttr, callerAttrUnchecked;
+alias mayYield      = callerAttr!"mayYield";
+alias mayYieldUnchecked = callerAttrUnchecked!"mayYield";
 
 __gshared int switches;
-pragma(inline, true) @CTX_SWITCH void yieldNow() { ++switches; }
+pragma(inline, true) @mayYield void yieldNow() { ++switches; }
 
 // (A) A range whose iteration primitives context-switch (lazy/RPC-like). The foreach lowering's
-//     generated __r.empty / __r.front / __r.popFront calls are @CTX_SWITCH and must be auto-marked
+//     generated __r.empty / __r.front / __r.popFront calls are @mayYield and must be auto-marked
 //     by the compiler (the user cannot annotate a compiler-generated call).
 struct SwitchingRange {
     int i, n;
-    pragma(inline, true) @CTX_SWITCH bool empty()    { yieldNow@CTX_SWITCH(); return i >= n; }
-    pragma(inline, true) @CTX_SWITCH int  front()    { return i; }
-    pragma(inline, true) @CTX_SWITCH void popFront() { yieldNow@CTX_SWITCH(); ++i; }
+    pragma(inline, true) @mayYield bool empty()    { yieldNow@mayYield(); return i >= n; }
+    pragma(inline, true) @mayYield int  front()    { return i; }
+    pragma(inline, true) @mayYield void popFront() { yieldNow@mayYield(); ++i; }
 }
 
-@CTX_SWITCH_FAKE int sumSwitchingRange() {
+@mayYieldUnchecked int sumSwitchingRange() {
     int s;
     foreach (v; SwitchingRange(0, 4)) { s += v; }   // iteration itself switches; body does not
     return s;
@@ -38,9 +38,9 @@ struct PlainRange {
     pragma(inline, true) void popFront() { ++i; }
 }
 
-@CTX_SWITCH_FAKE int sumPlainRangeSwitchingBody() {
+@mayYieldUnchecked int sumPlainRangeSwitchingBody() {
     int s;
-    foreach (v; PlainRange(0, 4)) { yieldNow@CTX_SWITCH(); s += v; }
+    foreach (v; PlainRange(0, 4)) { yieldNow@mayYield(); s += v; }
     return s;
 }
 
@@ -48,7 +48,7 @@ void main() {
     switches = 0;
     assert(sumSwitchingRange() == 6);            // 0+1+2+3
     // empty() is called 5x (i=0..3 false, i=4 true) and popFront() 4x; each yieldNow()s.
-    // front() is @CTX_SWITCH too (its generated call must be auto-marked) but doesn't yield.
+    // front() is @mayYield too (its generated call must be auto-marked) but doesn't yield.
     assert(switches == 9);
 
     switches = 0;

@@ -16348,7 +16348,7 @@ private VarDeclaration callerAttrCalleeVar(Expression e1)
  *
  *  - the `@ATTR` glued marker must match the callee's actual caller-attributes (E2/E3),
  *  - a caller-required attribute propagates upward: the enclosing function must
- *    itself carry it (E1), unless the callee is a `callerAttrFake` migration shim.
+ *    itself carry it (E1), unless the callee is a `callerAttrUnchecked` migration shim.
  */
 private void checkCallerAttr(CallExp ce, Scope* sc, Dsymbol callee)
 {
@@ -16480,6 +16480,20 @@ private void recordInferredCallerAttr(FuncDeclaration fd, const(char)[] name)
     }
     else
         inferredCallerAttrsByFunc[key] = [name];
+}
+
+/// Weka (Option A): the REAL caller-attribute names inferred for `fd` (e.g. a `foreach`
+/// body lowered to a lambda that performs a context-switching call). Used to reflect the
+/// inferred attribute into the lambda's delegate TYPE so it matches a `@mayYield` `opApply`
+/// parameter exactly (and, per the asymmetric conversion rule, no longer matches the plain
+/// overload). Returns an empty slice if none.
+const(char)[][] funcInferredCallerAttrNames(FuncDeclaration fd)
+{
+    if (!fd)
+        return null;
+    if (auto existing = cast(void*) fd in inferredCallerAttrsByFunc)
+        return *existing;
+    return null;
 }
 
 /// Does `fd` carry caller-attribute `name` — either explicitly (UDA) or inferred (lambda)?
