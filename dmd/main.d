@@ -690,6 +690,12 @@ version (IN_LLVM)
     if (global.errors)
         removeHdrFilesAndFail(params, modules);
 
+    version (IN_WEKA)
+    {
+        if (params.doHdrGenerationOnly)
+            return 0;
+    }
+
     {
     timeTraceBeginEvent(TimeTraceEventType.semaGeneral);
     scope (exit) timeTraceEndEvent(TimeTraceEventType.semaGeneral);

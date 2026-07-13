@@ -376,6 +376,9 @@ void parseCommandLine(Strings &sourceFiles) {
   global.params.dihdr.name = opts::fromPathString(hdrFile);
   global.params.dihdr.doOutput |=
       global.params.dihdr.dir.length || global.params.dihdr.name.length;
+#if IN_WEKA
+  global.params.dihdr.doOutput |= global.params.doHdrGenerationOnly;
+#endif
 
   global.params.cxxhdr.dir = opts::fromPathString(cxxHdrDir);
   global.params.cxxhdr.name = opts::fromPathString(cxxHdrFile);
