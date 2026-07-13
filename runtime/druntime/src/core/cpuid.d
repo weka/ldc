@@ -912,6 +912,24 @@ void cpuidX86()
     } else {
         cf.processorName = "Unknown CPU";
     }
+
+version (WEKA)
+{
+    // WEKA_IGNORE_BROKEN_CACHE_SIZE:
+    // The logic attempting to determine cache sizes and cache line sizes
+    // is broken for new CPUs (for example on AMD EPYC 9454).  The code is not
+    // very sustainable, as it won't know about new CPU variants, and represents
+    // technical debt in any event.  The only known consumer of the datacaches
+    // is an optimization for doing big integer math in Phobos, which we never
+    // use (and is only relevant for truly enormous numbers.)  We just set a
+    // configuration which will work and matches most modern CPUs (high end low
+    // core counts CPUs might have larger L1, but that's ok).
+    datacache[0].size = 32;
+    datacache[0].associativity = 4;
+    datacache[0].lineSize = 64;
+}
+else
+{
     // Determine cache sizes
 
     // Intel docs specify that they return 0 for 0x8000_0005.
@@ -966,6 +984,7 @@ void cpuidX86()
             datacache[0].lineSize = 32;
         }
     }
+}
     if (cf.probablyIntel && max_cpuid >= 0x0B) {
         // For Intel i7 and later, use function 0x0B to determine
         // cores and hyperthreads.
