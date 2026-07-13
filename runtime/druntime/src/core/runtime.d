@@ -737,6 +737,29 @@ version (DefineBacktrace_using_UnwindBacktrace)
  *   or `null`. If called from a finalizer (destructor), always returns `null`
  *   as trace handlers allocate.
  */
+version (WEKA)
+{
+    // Weka's code casts the result of defaultTraceHandler to a
+    // redefined struct such that external code can access the data
+    // inside this Voldemort type. Do static asserts here to check that
+    // Weka's struct has the same size as the Voldemort type, etc.
+
+    // weka/tracing/tracing.d's struct:
+    struct DefaultTraceInfoABI {
+        void*  _vtable;
+        void*  _monitor;
+        void*  _interface;
+        int       numframes;
+        bool      alreadyHandled;  // use the padding for this extra member
+        void*[1]  callstack;
+    }
+    // make sure the ABI matches
+    static assert ({static interface I {} static class C: I {} return __traits(classInstanceSize, C);}() == (void*[3]).sizeof);
+    static assert (DefaultTraceInfo.numframes.offsetof == DefaultTraceInfoABI.numframes.offsetof);
+    static assert (DefaultTraceInfo.callstack.offsetof == DefaultTraceInfoABI.callstack.offsetof);
+}
+
+version (WEKA) pragma(inline, false) // Needed because of mangling hack in weka/lib/exception.d to call the DefaultTraceInfo ctor.
 Throwable.TraceInfo defaultTraceHandler( void* ptr = null ) // @nogc
 {
     // NOTE: with traces now being allocated using C malloc, no need to worry
