@@ -706,6 +706,14 @@ cl::opt<CoverageIncrement> coverageIncrement(
                clEnumValN(CoverageIncrement::boolean, "boolean",
                           "Don't read, just set counter to 1")));
 
+#if IN_WEKA
+static cl::opt<bool, true, FlagParser<bool>> wekaMods(
+    "wekamods",
+    cl::desc(
+        "(*) Enable specific Weka mods: emit all functions in COMDAT for ELF"),
+    cl::location(global.params.enableWekaMods), cl::init(false));
+#endif
+
 // Compilation time tracing options
 static cl::opt<bool, true> fTimeTrace(
     "ftime-trace", cl::ZeroOrMore, cl::location(global.params.timeTrace),

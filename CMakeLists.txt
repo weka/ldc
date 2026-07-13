@@ -473,6 +473,8 @@ append("-I${PROJECT_SOURCE_DIR}" DFLAGS_LDC)
 append("-I${PROJECT_BINARY_DIR}" DFLAGS_LDC)
 append("-J${PROJECT_SOURCE_DIR}/dmd/res" DFLAGS_LDC)
 
+append("-version=IN_WEKA" DFLAGS_LDC)  # Define to enable the Weka modifications
+append("-DIN_WEKA" LDC_CXXFLAGS)       # Define to enable the Weka modifications
 append("-version=IN_LLVM" DFLAGS_LDC)
 append("-DIN_LLVM" LDC_CXXFLAGS)
 append("-DOPAQUE_VTBLS" LDC_CXXFLAGS)
@@ -660,6 +662,10 @@ if(LDC_ENABLE_PLUGINS)
                 append("-disable-linker-strip-dead" DFLAGS_LDC)
             endif()
         endif()
+
+        message(STATUS "-- WEKA: Disabling linker warnings (many warnings emitted for symbols that cannot be exported for plugin support)")
+        set(LDC_LINKERFLAG_LIST "${LDC_LINKERFLAG_LIST};-Wl,-exported_symbol;-Wl,'__*';-Wl,-w")
+
     elseif(UNIX)
         # For plugin support, we need to link with --export-dynamic on Unix.
         # Make sure the linker supports --export-dynamic (on Solaris it is not supported and also not needed).

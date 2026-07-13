@@ -357,6 +357,10 @@ struct Param
     // Windows-specific:
     bool dllexport;      // dllexport ~all defined symbols?
     DLLImport dllimport; // dllimport data symbols not defined in any root module?
+
+#if IN_WEKA
+    bool enableWekaMods; // Enable specific Weka mods like the template instantiation mods
+#endif
 #endif // IN_LLVM
 };
 

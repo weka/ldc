@@ -29,6 +29,15 @@ import dmd.lexer : CompileEnv;
 import dmd.targetcompiler;
 import dmd.utils;
 
+version (IN_WEKA)
+{
+    bool IN_WEKA() { return global.params.enableWekaMods; }
+}
+else
+{
+    enum IN_WEKA = false;
+}
+
 version (IN_LLVM)
 {
     enum IN_LLVM = true;
@@ -349,6 +358,11 @@ version (IN_LLVM)
     // Windows-specific:
     bool dllexport;      // dllexport ~all defined symbols?
     DLLImport dllimport; // dllimport data symbols not defined in any root module?
+
+    version (IN_WEKA)
+    {
+        bool enableWekaMods; // Enable specific Weka mods like the template instantiation mods
+    }
 } // IN_LLVM
 
     ///

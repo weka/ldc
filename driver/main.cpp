@@ -130,6 +130,9 @@ void printVersion(llvm::raw_ostream &OS) {
   OS << "  based on DMD " << ldc::dmd_version << " and LLVM "
      << ldc::llvm_version << "\n";
   OS << "  built with " << ldc::built_with_Dcompiler_version << "\n";
+#if IN_WEKA
+  OS << "  with Weka.io modifications\n";
+#endif
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
   OS << "  compiled with address sanitizer enabled\n";
@@ -978,6 +981,9 @@ void registerPredefinedTargetVersions() {
 /// Registers all predefined D version identifiers for the current
 /// configuration with VersionCondition.
 void registerPredefinedVersions() {
+#if IN_WEKA
+  VersionCondition::addPredefinedGlobalIdent("WEKA");
+#endif
   VersionCondition::addPredefinedGlobalIdent("LDC");
   VersionCondition::addPredefinedGlobalIdent("all");
   VersionCondition::addPredefinedGlobalIdent("D_Version2");
