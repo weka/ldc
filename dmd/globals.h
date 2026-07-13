@@ -355,6 +355,8 @@ struct Param
 
     LinkonceTemplates linkonceTemplates; // -linkonce-templates
 
+    uint64_t maxVariableSize = UINT64_MAX; // error if __gshared/TLS/stack variable exceeds this
+
     // Windows-specific:
     bool dllexport;      // dllexport ~all defined symbols?
     DLLImport dllimport; // dllimport data symbols not defined in any root module?

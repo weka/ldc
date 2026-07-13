@@ -356,6 +356,8 @@ version (IN_LLVM)
 
     LinkonceTemplates linkonceTemplates; // -linkonce-templates
 
+    ulong maxVariableSize = ulong.max; // error if __gshared/TLS/stack variable exceeds this
+
     // Windows-specific:
     bool dllexport;      // dllexport ~all defined symbols?
     DLLImport dllimport; // dllimport data symbols not defined in any root module?

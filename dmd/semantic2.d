@@ -317,6 +317,32 @@ private extern(C++) final class Semantic2Visitor : Visitor
 
             }
         }
+        version (IN_LLVM)
+        {
+            const varSizeLimit = global.params.maxVariableSize;
+            if (varSizeLimit < ulong.max
+                && !sc.intypeof
+                && !vd.isField()
+                && !vd.isParameter()
+                && !(vd.storage_class & (STC.manifest | STC.extern_ | STC.ctfe | STC.ref_))
+                && !vd.errors)
+            {
+                const bool isGsharedOrTLS = (vd.storage_class & STC.gshared) != 0 || vd.isThreadlocal();
+                const bool isStackLocal   = !vd.isDataseg() && !vd.isField();
+                if (isGsharedOrTLS || isStackLocal)
+                {
+                    const varSz = vd.type.size(vd.loc);
+                    if (varSz != SIZE_INVALID && varSz > varSizeLimit)
+                    {
+                        const(char)* kind = isGsharedOrTLS ? (vd.isThreadlocal() ? "TLS" : "__gshared") : "stack";
+                        error(vd.loc, "%s variable `%s` is %llu bytes, exceeding `--max-variable-size=%llu`",
+                            kind, vd.toPrettyChars(), cast(ulong)varSz, cast(ulong)varSizeLimit);
+                        vd.errors = true;
+                    }
+                }
+            }
+        }
+
         vd.semanticRun = PASS.semantic2done;
     }
 
