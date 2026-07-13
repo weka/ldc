@@ -5108,10 +5108,20 @@ debug (LOGGING)
 }
 else
 {
+    version (WEKA)
+        extern (C) __gshared void function(void *p, size_t size) nothrow g_log_malloc_call = null;
+
     struct LeakDetector
     {
         static void initialize(Gcx* gcx) nothrow { }
-        static void log_malloc(void *p, size_t size) nothrow { }
+        static void log_malloc(void *p, size_t size) nothrow
+        {
+            version (WEKA)
+            {
+                if (!(g_log_malloc_call is null))
+                    g_log_malloc_call(p, size);
+            }
+        }
         static void log_free(void *p, size_t size) nothrow @nogc {}
         static void log_collect() nothrow { }
         static void log_parent(void *p, void *parent) nothrow { }
