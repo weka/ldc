@@ -113,6 +113,14 @@ static cl::opt<bool, true> conservativeRTInfo(
         "fall back to conservative scanning for the affected types."),
     cl::ZeroOrMore, cl::location(global.params.conservativeRTInfo));
 
+static cl::opt<uint64_t, true> ctfeMaxAllocSize(
+    "ctfe-max-alloc",
+    cl::desc("Error if a single CTFE `new` expression allocates more than "
+             "<size> bytes (0 = no limit, default). Catches accidental "
+             "runaway allocations such as `new ubyte[1 << 30]` inside "
+             "compile-time evaluated code."),
+    cl::ZeroOrMore, cl::location(global.params.ctfeMaxAllocSize));
+
 static cl::opt<uint64_t, true> maxVariableSize(
     "max-variable-size",
     cl::desc("Error if a `__gshared`, TLS, or stack variable exceeds this "
