@@ -100,6 +100,19 @@ static cl::opt<bool, true>
     vgc("vgc", cl::desc("List all gc allocations including hidden ones"),
         cl::ZeroOrMore, cl::location(global.params.v.gc));
 
+static cl::opt<bool, true> conservativeRTInfo(
+    "conservative-rtinfo",
+    cl::desc(
+        "Skip object.RTInfo!T template instantiation. The compiler emits "
+        "m_RTInfo as rtinfoHasPointers (cast(void*)1) for types that contain "
+        "pointers (or are conservatively assumed to) and rtinfoNoPointers "
+        "(null) for the rest. Avoids per-type pointer-bitmap arrays and the "
+        "associated CTFE / symbol-mangle cost. Intended use: when the GC is "
+        "always run as conservative (the default druntime GC) - the bitmap "
+        "is never read, so emitting it is pure waste. Precise GC modes will "
+        "fall back to conservative scanning for the affected types."),
+    cl::ZeroOrMore, cl::location(global.params.conservativeRTInfo));
+
 // Dummy data type for custom parsers where the help output shouldn't display
 // any value.
 using DummyDataType = bool;

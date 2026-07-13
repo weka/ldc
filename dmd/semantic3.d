@@ -1802,8 +1802,11 @@ void semanticTypeInfoMembers(StructDeclaration sd)
 void semanticRTInfo(AggregateDeclaration ad)
 {
     // Instantiate RTInfo!S to provide a pointer bitmap for the GC
-    // Don't do it in -betterC or on error types
-    if (ad.getRTInfo || !global.params.useTypeInfo || !Type.rtinfo)
+    // Don't do it in -betterC, with -conservative-rtinfo, or on error types.
+    // Under -conservative-rtinfo, codegen leaves m_RTInfo as null and the
+    // irstruct / irclass paths fall back to rtinfoHasPointers (1) /
+    // rtinfoNoPointers (0) based on hasPointers().
+    if (ad.getRTInfo || !global.params.useTypeInfo || !Type.rtinfo || global.params.conservativeRTInfo)
         return;
     if (!ad.rtInfoScope || !ad.type || ad.type.ty == Terror)
         return;

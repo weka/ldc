@@ -219,6 +219,7 @@ extern (C++) struct Param
     bool ignoreUnsupportedPragmas = true;  // rather than error on them
     bool useModuleInfo = true;   // generate runtime module information
     bool useTypeInfo = true;     // generate runtime type information
+    bool conservativeRTInfo;    // skip RTInfo!T instantiation; emit only rtinfoHasPointers/rtinfoNoPointers
     bool useExceptions = true;   // support exception handling
     bool useGC = true;           // support features that require the D runtime GC
     bool betterC;           // be a "better C" compiler; no dependency on D runtime

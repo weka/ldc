@@ -224,6 +224,7 @@ struct Param
     d_bool ignoreUnsupportedPragmas;      // rather than error on them
     d_bool useModuleInfo; // generate runtime module information
     d_bool useTypeInfo;   // generate runtime type information
+    d_bool conservativeRTInfo; // skip RTInfo!T instantiation; emit only rtinfoHasPointers/rtinfoNoPointers
     d_bool useExceptions; // support exception handling
     d_bool useGC;         // support features that require the D runtime GC
     d_bool betterC;       // be a "better C" compiler; no dependency on D runtime
