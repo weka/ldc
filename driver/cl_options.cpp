@@ -712,6 +712,11 @@ static cl::opt<bool, true, FlagParser<bool>> wekaMods(
     cl::desc(
         "(*) Enable specific Weka mods: emit all functions in COMDAT for ELF"),
     cl::location(global.params.enableWekaMods), cl::init(false));
+
+static cl::opt<uint32_t, true>
+    templateCodegenDepth("template-codegen-depth",
+             cl::desc("Don't codegen templates beyond this recusion depth (0 = off)."),
+             cl::location(global.params.templateCodegenDepth), cl::init(0));
 #endif
 
 // Compilation time tracing options
