@@ -237,9 +237,10 @@ bool isOverlappedWith(VarDeclaration _this, VarDeclaration v)
     const tsz = _this.type.size();
     assert(vsz != SIZE_INVALID && tsz != SIZE_INVALID);
 
-    // Overlap is checked by comparing bit offsets
-    auto bitoffset  = _this.offset * 8;
-    auto vbitoffset =     v.offset * 8;
+    // Overlap is checked by comparing bit offsets.
+    // Cast to ulong before multiplying to avoid uint overflow for fields at offsets >= 512 MB.
+    ulong bitoffset  = cast(ulong)_this.offset * 8;
+    ulong vbitoffset = cast(ulong)    v.offset * 8;
 
     // Bitsize of types are overridden by any bitfield widths.
     ulong tbitsize;
