@@ -731,11 +731,22 @@ else
  * Throws:
  *  $(LREF InvalidMemoryOperationError).
  */
-extern (C) noreturn onInvalidMemoryOperationError(void* pretend_sideffect = null, string file = __FILE__, size_t line = __LINE__) @trusted pure nothrow @nogc /* dmd @@@BUG11461@@@ */
+// WEKA: `pure` dropped so the version(WEKA) branch can call abort().
+extern (C) noreturn onInvalidMemoryOperationError(void* pretend_sideffect = null, string file = __FILE__, size_t line = __LINE__) @trusted nothrow @nogc /* dmd @@@BUG11461@@@ */
+{
+version (WEKA)
+{
+    // No point unwinding. Abort immediately, so that the backtrace shows the offender.
+    // TODO: How about a runtime flag for choosing between throw and abort? (also for the other throwing functions here?)
+    static import core.stdc.stdlib;
+    core.stdc.stdlib.abort();
+}
+else
 {
     // The same restriction applies as for onOutOfMemoryError. The GC is in an
     // undefined state, thus no allocation must occur while generating this object.
     throw staticError!InvalidMemoryOperationError(file, line);
+}
 }
 
 
