@@ -1113,10 +1113,16 @@ void DtoDefineFunction(FuncDeclaration *fd, bool linkageAvailableExternally) {
   llvm::Function *const func = irFunc->getLLVMFunc();
 
   if (!func->empty()) {
+#if IN_WEKA
+    auto savedWarningCount = global.warnings;
+#endif
     warning(fd->loc,
             "skipping definition of function `%s` due to previous definition "
             "for the same mangled name: %s",
             fd->toPrettyChars(), mangleExact(fd));
+#if IN_WEKA
+    global.warnings = savedWarningCount;
+#endif
     return;
   }
 
