@@ -3832,7 +3832,9 @@ template RTInfoImpl(size_t[] pointerBitmap)
 template RTInfo(T)
 {
     enum pointerBitmap = __traits(getPointerBitmap, T);
-    static if (pointerBitmap[1 .. $] == size_t[pointerBitmap.length - 1].init)
+    // The LDC/Weka frontend returns just [T.sizeof] (length 1) when the type
+    // has no pointers, instead of a full zeroed payload.
+    static if (pointerBitmap.length == 1)
         enum RTInfo = rtinfoNoPointers;
     else
         enum RTInfo = RTInfoImpl!(pointerBitmap).ptr;
