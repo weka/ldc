@@ -357,7 +357,9 @@ version (IN_LLVM)
 
     LinkonceTemplates linkonceTemplates; // -linkonce-templates
 
-    ulong maxVariableSize = ulong.max; // error if __gshared/TLS/stack variable exceeds this
+    ulong maxInitSymbolSize        = ulong.max; // error if __initZ symbol exceeds this
+    ulong maxInitSymbolSizeWarning = ulong.max; // warn if __initZ symbol exceeds this
+    ulong maxVariableSize          = ulong.max; // error if __gshared/TLS/stack variable exceeds this
 
     // Windows-specific:
     bool dllexport;      // dllexport ~all defined symbols?

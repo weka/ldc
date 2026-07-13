@@ -9309,6 +9309,16 @@ private extern(C++) class FinalizeSizeVisitor : Visitor
 
         outerCd.sizeok = Sizeok.done;
 
+        version (IN_LLVM)
+        {
+            if (outerCd.structsize > global.params.maxInitSymbolSize)
+            {
+                error(outerCd.loc, "init symbol `%s` is %llu bytes, exceeding `--max-init-symbol-size=%llu`",
+                    outerCd.toPrettyChars(), cast(ulong)outerCd.structsize, cast(ulong)global.params.maxInitSymbolSize);
+                outerCd.errors = true;
+            }
+        }
+
         // Calculate fields[i].overlapped
         outerCd.checkOverlappedFields();
     }
@@ -9432,6 +9442,16 @@ private extern(C++) class FinalizeSizeVisitor : Visitor
 
 
         sd.argTypes = target.toArgTypes(sd.type);
+
+        version (IN_LLVM)
+        {
+            if (!sd.zeroInit && sd.structsize > global.params.maxInitSymbolSize)
+            {
+                error(sd.loc, "init symbol `%s` is %llu bytes, exceeding `--max-init-symbol-size=%llu`",
+                    sd.toPrettyChars(), cast(ulong)sd.structsize, cast(ulong)global.params.maxInitSymbolSize);
+                sd.errors = true;
+            }
+        }
     }
 }
 

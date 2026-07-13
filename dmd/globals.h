@@ -356,7 +356,9 @@ struct Param
 
     LinkonceTemplates linkonceTemplates; // -linkonce-templates
 
-    uint64_t maxVariableSize = UINT64_MAX; // error if __gshared/TLS/stack variable exceeds this
+    uint64_t maxInitSymbolSize        = UINT64_MAX; // error if __initZ symbol exceeds this
+    uint64_t maxInitSymbolSizeWarning = UINT64_MAX; // warn if __initZ symbol exceeds this
+    uint64_t maxVariableSize          = UINT64_MAX; // error if __gshared/TLS/stack variable exceeds this
 
     // Windows-specific:
     bool dllexport;      // dllexport ~all defined symbols?

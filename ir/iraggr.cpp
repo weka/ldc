@@ -104,6 +104,23 @@ LLGlobalVariable *IrAggr::getInitSymbol(bool define) {
     auto initConstant = getDefaultInit();
     if (!init->hasInitializer()) {
       init = gIR->setGlobalVarInitializer(init, initConstant, aggrdecl);
+
+      const uint64_t symSize = getTypeAllocSize(initConstant->getType());
+      if (symSize > global.params.maxInitSymbolSize) {
+        error(aggrdecl->loc,
+              "init symbol `%s` is %llu bytes, exceeding "
+              "`--max-init-symbol-size=%llu`",
+              aggrdecl->toPrettyChars(),
+              (unsigned long long)symSize,
+              (unsigned long long)global.params.maxInitSymbolSize);
+      } else if (symSize > global.params.maxInitSymbolSizeWarning) {
+        warning(aggrdecl->loc,
+                "init symbol `%s` is %llu bytes, exceeding "
+                "`--max-init-symbol-size-warning=%llu`",
+                aggrdecl->toPrettyChars(),
+                (unsigned long long)symSize,
+                (unsigned long long)global.params.maxInitSymbolSizeWarning);
+      }
     }
   }
 
