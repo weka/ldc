@@ -652,8 +652,8 @@ auto _d_aaIn(T : V[K], K, V, K2)(const shared T a, auto ref scope K2 key)
     return _d_aaIn(cast(V[K]) a, key);
 }
 
-// fake purity for backward compatibility with runtime hooks
-private extern(C) bool gc_inFinalizer() pure nothrow @safe;
+// fake purity/@nogc for backward compatibility with runtime hooks
+private extern(C) bool gc_inFinalizer() pure nothrow @safe @nogc;
 
 /// Delete entry scope const AA, return true if it was present
 auto _d_aaDel(T : V[K], K, V, K2)(T a, auto ref K2 key)
@@ -675,7 +675,15 @@ auto _d_aaDel(T : V[K], K, V, K2)(T a, auto ref K2 key)
         // `shrink` reallocates, and allocating from a finalizer leads to
         // InvalidMemoryError: https://issues.dlang.org/show_bug.cgi?id=21442
         if (aa.length * SHRINK_DEN < aa.dim * SHRINK_NUM && !__ctfe && !gc_inFinalizer())
-            aa.shrink();
+        {
+            // The extern(C) hook this lowering replaced (_aaDelX) advertised
+            // @nogc while shrinking; fake @nogc here to keep `aa.remove`
+            // callable from @nogc code, as it was through v2.108.
+            static void doShrink(typeof(aa) impl) pure nothrow @safe { impl.shrink(); }
+            () @trusted {
+                (cast(void function(typeof(aa)) pure nothrow @safe @nogc) &doShrink)(aa);
+            }();
+        }
 
         return true;
     }
