@@ -299,7 +299,17 @@ template hasElaborateDestructor(S)
         // uncommented code.
         // enum hasElaborateDestructor = __traits(hasMember, S, "__xdtor");
 
-        enum hasElaborateDestructor = hasDtor([__traits(allMembers, S)]);
+        // __traits(allMembers) does not force dtor aggregation, so when this
+        // template is instantiated before S's semantic completes, __xdtor is
+        // missing from the scan and `false` gets memoized for a type that does
+        // have a destructor. __traits(hasMember) does force full member
+        // resolution; use it as a gate and keep the allMembers scan as the
+        // authoritative answer (hasMember alone has false positives, see the
+        // issue above).
+        static if (__traits(hasMember, S, "__xdtor"))
+            enum hasElaborateDestructor = hasDtor([__traits(allMembers, S)]);
+        else
+            enum bool hasElaborateDestructor = false;
     }
     else
     {
