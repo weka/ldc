@@ -158,7 +158,12 @@ do
     memcpy(ptr, (*p).ptr, datasize);
 
     // handle postblit
-    __doPostblit!T(cast(T[])ptr[0 .. datasize]);
+    // Guarded so that `reserve` and `.capacity` remain usable on arrays of
+    // non-copyable elements: instantiating __doPostblit for such a type is a
+    // compile error (its __xpostblit cannot be called), and there is no
+    // postblit to run anyway -- the memcpy above already moved the data.
+    static if (__traits(isCopyable, T))
+        __doPostblit!T(cast(T[])ptr[0 .. datasize]);
 
     if (!(attrs & BlkAttr.NO_SCAN))
     {
