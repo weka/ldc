@@ -945,7 +945,12 @@ Expression opOverloadBinaryAssign(BinAssignExp e, Scope* sc, Type[2] aliasThisSt
 
                 /* Rewrite a[arguments] op= e2 as:
                  *      a.opIndexOpAssign!(op)(e2, arguments)
+                 *
+                 * `a` becomes a method-call receiver, not an AA assignment
+                 * target: lower AA index reads in it that were deferred by
+                 * markArrayExpModifiable().
                  */
+                ae.e1 = revertModifiableAAIndexReads(ae.e1, sc);
                 Expressions* a = ae.arguments.copy();
                 a.insert(0, e.e2);
                 Expression result = dotTemplateCall(ae.e1, Id.opIndexOpAssign, opToArg(sc, e.op), (*a)[]);
@@ -971,7 +976,10 @@ Expression opOverloadBinaryAssign(BinAssignExp e, Scope* sc, Type[2] aliasThisSt
 
                 /* Rewrite (a[i..j] op= e2) as:
                  *      a.opSliceOpAssign!(op)(e2, i, j)
+                 *
+                 * as above, `a` is a receiver now, not an assignment target
                  */
+                ae.e1 = revertModifiableAAIndexReads(ae.e1, sc);
                 auto result = ie ?
                     dotTemplateCall(ae.e1, Id.opSliceOpAssign, opToArg(sc, e.op), e.e2, ie.lwr, ie.upr) :
                     dotTemplateCall(ae.e1, Id.opSliceOpAssign, opToArg(sc, e.op), e.e2);

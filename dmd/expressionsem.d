@@ -807,6 +807,13 @@ private Expression checkOpAssignTypes(BinExp binExp, Scope* sc)
 
 private Expression extractOpDollarSideEffect(Scope* sc, UnaExp ue)
 {
+    /* `ue.e1` is an operator-overload receiver, never an AA assignment
+     * target: lower AA index reads in it that were deferred by
+     * markArrayExpModifiable() before they get moved into a temporary's
+     * initializer, out of reach of the assignment lowering.
+     */
+    ue.e1 = revertModifiableAAIndexReads(ue.e1, sc);
+
     Expression e0;
     Expression e1 = Expression.extractLast(ue.e1, e0);
     // https://issues.dlang.org/show_bug.cgi?id=12585
@@ -11116,7 +11123,12 @@ version (IN_LLVM)
 
                     /* Rewrite (a[arguments] = e2) as:
                      *      a.opIndexAssign(e2, arguments)
+                     *
+                     * `a` becomes a method-call receiver, not an AA assignment
+                     * target: lower AA index reads in it that were deferred by
+                     * markArrayExpModifiable().
                      */
+                    ae.e1 = revertModifiableAAIndexReads(ae.e1, sc);
                     Expressions* a = ae.arguments.copy();
                     a.insert(0, exp.e2);
                     res = new DotIdExp(exp.loc, ae.e1, Id.opIndexAssign);
@@ -11145,7 +11157,10 @@ version (IN_LLVM)
 
                     /* Rewrite (a[i..j] = e2) as:
                      *      a.opSliceAssign(e2, i, j)
+                     *
+                     * as above, `a` is a receiver now, not an assignment target
                      */
+                    ae.e1 = revertModifiableAAIndexReads(ae.e1, sc);
                     auto a = new Expressions(exp.e2);
                     if (ie)
                     {
@@ -18913,7 +18928,7 @@ Expression revertIndexAssignToRvalues(IndexExp ie, Scope* sc)
 }
 
 // Ditto, but traverses DotVarExp from `alias this` rewrites.
-private Expression revertModifiableAAIndexReads(Expression e, Scope* sc)
+Expression revertModifiableAAIndexReads(Expression e, Scope* sc)
 {
     // Recurse through dot-accesses (alias this produces DotVarExp on an inner IndexExp)
     if (auto dve = e.isDotVarExp())

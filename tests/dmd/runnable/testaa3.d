@@ -462,6 +462,56 @@ void test22567()
 
 /***************************************************/
 
+// nested AA assignment resolving to an operator overload on the element:
+// the receiver AA IndexExp must be lowered to an rvalue read, not left
+// deferred for an AA assignment lowering that never happens
+void testOpIndexAssignReceiver()
+{
+    static struct S
+    {
+        int v;
+        void opIndexAssign(int val, string key) { v = val; }
+        void opIndexOpAssign(string op)(int val, string key) { mixin("v " ~ op ~ "= val;"); }
+    }
+
+    S[string] aa;
+    aa["x"] = S(1);
+    aa["x"]["y"] = 2;
+    assert(aa["x"].v == 2);
+    aa["x"]["y"] += 3;
+    assert(aa["x"].v == 5);
+
+    bool threw;
+    try
+        aa["missing"]["y"] = 3;
+    catch (Error e)
+        threw = true;
+    assert(threw);
+    assert(aa.length == 1);
+
+    // receiver with side effects goes through the __dop temporary extraction
+    static struct J
+    {
+        S[string] store;
+        @property ref S[string] object() return { return store; }
+    }
+
+    J res;
+    res.store["x"] = S(1);
+    res.object["x"]["y"] = 2;
+    assert(res.store["x"].v == 2);
+
+    threw = false;
+    try
+        res.object["missing"]["y"] = 3;
+    catch (Error e)
+        threw = true;
+    assert(threw);
+    assert(res.store.length == 1);
+}
+
+/***************************************************/
+
 void main()
 {
     assert(testLiteral());
@@ -491,4 +541,5 @@ void main()
     testShared();
     test22567();
     test22556();
+    testOpIndexAssignReceiver();
 }
