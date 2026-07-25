@@ -24,6 +24,7 @@ import dmd.attribsem;
 import dmd.canthrow;
 import dmd.dclass;
 import dmd.declaration;
+import dmd.delegatize : lambdaCheckForNestedRef;
 import dmd.dimport;
 import dmd.dinterpret;
 import dmd.dmodule;
@@ -1116,6 +1117,14 @@ Expression semanticTraits(TraitsExp e, Scope* sc)
                 // Prevent semantic() from replacing Symbol with its initializer
                 die.wantsym = true;
             ex = ex.expressionSemantic(scx);
+            /* The trait arguments were analyzed in a CTFE scope (issue 24762),
+             * where checkNestedReference() does not record references to
+             * enclosing-function variables. The result of getMember is a
+             * runtime expression reusing the already-analyzed first argument,
+             * so record its nested references now, in the true scope.
+             */
+            if (!ex.isErrorExp() && lambdaCheckForNestedRef(ex, scx))
+                return ErrorExp.get();
             return ex;
         }
         else if (e.ident == Id.getVirtualFunctions ||

@@ -2761,6 +2761,35 @@ void test19384()
 
 
 /***************************************************/
+// a nested function whose only reference to a captured variable appears
+// inside a __traits(getMember) argument: the reference must still be
+// recorded as a closure variable even though trait arguments are analyzed
+// in a CTFE scope
+
+struct TraitsCaptureNVKV
+{
+    int field;
+    int doit(int x) { return field + x; }
+}
+
+struct TraitsCaptureSSD
+{
+    TraitsCaptureNVKV nvkv;
+}
+
+TraitsCaptureSSD traitsCaptureG = TraitsCaptureSSD(TraitsCaptureNVKV(41));
+
+int testTraitsGetMemberCapture()
+{
+    auto ssd = &traitsCaptureG;
+    int call()
+    {
+        return __traits(getMember, ssd.nvkv, "doit")(1);
+    }
+    return call();
+}
+
+/***************************************************/
 
 int main()
 {
@@ -2858,6 +2887,7 @@ int main()
     test15422b();
     test15757();
     test19384();
+    assert(testTraitsGetMemberCapture() == 42);
 
     printf("Success\n");
     return 0;
