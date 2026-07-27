@@ -37,6 +37,7 @@ import core.internal.gc.bits;
 import core.internal.gc.os;
 import core.gc.config;
 import core.gc.gcinterface;
+version (WEKA) import core.internal.gc.scavenger;
 
 import core.internal.container.treap;
 import core.internal.spinlock;
@@ -723,6 +724,7 @@ class ConservativeGC : GC
                     lpool.setFreePageOffsets(pagenum + newsz, freesz - newPages);
                 gcx.usedLargePages += newPages;
                 lpool.freepages -= newPages;
+                version (WEKA) wekaScavengerOnPagesCarved(&lpool.base, pagenum + psz, newPages);
                 debug (PRINTF) printFreeInfo(pool);
             }
             else
@@ -813,6 +815,7 @@ class ConservativeGC : GC
                 lpool.setFreePageOffsets(pagenum + psz + sz, freesz - sz);
             lpool.freepages -= sz;
             gcx.usedLargePages += sz;
+            version (WEKA) wekaScavengerOnPagesCarved(&lpool.base, pagenum + psz, sz);
             return (psz + sz) * PAGESIZE;
         }
     }
@@ -2660,6 +2663,7 @@ struct Gcx
                         debug(COLLECT_PRINTF) printf("\tcollecting big %p\n", p);
                         leakDetector.log_free(q, sentinel_size(q, npages * PAGESIZE - SENTINEL_EXTRA));
                         pool.pagetable[pn..pn+npages] = Bins.B_FREE;
+                        version (WEKA) wekaScavengerOnPagesFreed(pool, pn, npages);
                         if (pn < pool.searchStart) pool.searchStart = pn;
                         freedLargePages += npages;
                         pool.freepages += npages;
@@ -2790,6 +2794,7 @@ struct Gcx
                             pool.freeAllPageBits(pn);
 
                             pool.pagetable[pn] = Bins.B_FREE;
+                            version (WEKA) wekaScavengerOnPagesFreed(pool, pn, 1);
                             // add to free chain
                             pool.binPageChain[pn] = cast(uint) pool.searchStart;
                             pool.searchStart = pn;
@@ -3536,6 +3541,7 @@ struct Pool
     size_t npages;
     size_t freepages;     // The number of pages not in use.
     Bins* pagetable;
+    version (WEKA) ubyte* scavengedMap; // one byte/page: WEKA scavenger dirty/clean tracking, see scavenger.d
 
     bool isLargeObject;
 
@@ -3665,11 +3671,15 @@ struct Pool
         this.freepages = npages;
         this.searchStart = 0;
         this.largestFree = npages;
+
+        version (WEKA) wekaScavengerOnPoolCreate(&this);
     }
 
 
     void Dtor() nothrow
     {
+        version (WEKA) wekaScavengerOnPoolDestroy(&this);
+
         if (baseAddr)
         {
             int result;
@@ -4140,6 +4150,7 @@ struct LargeObjectPool
                         bPageOffsets[i + offset] = cast(uint) offset;
                 }
                 freepages -= n;
+                version (WEKA) wekaScavengerOnPagesCarved(&this.base, i, n);
                 return i;
             }
             if (p > largest)
@@ -4174,6 +4185,7 @@ struct LargeObjectPool
         }
         freepages += npages;
         largestFree = freepages; // invalidate
+        version (WEKA) wekaScavengerOnPagesFreed(&this.base, pagenum, npages);
     }
 
     /**
@@ -4436,6 +4448,7 @@ struct SmallObjectPool
         binPageChain[pn] = Pool.PageRecovered;
         pagetable[pn] = bin;
         freepages--;
+        version (WEKA) wekaScavengerOnPagesCarved(&this.base, pn, 1);
 
         // Convert page to free list
         size_t size = binsize[bin];
@@ -5159,4 +5172,60 @@ void undefinedWrite(T)(ref T var, T value) nothrow
     }
     else
         var = value;
+}
+
+// ============================================================================
+// WEKA GC madvise scavenger -- extern(C) entry points consumed by the
+// consuming WEKA application. All the bookkeeping/mechanism lives in
+// core.internal.gc.scavenger; these wrappers only resolve the live Gcx
+// instance and take the GC lock, following the exact shape of
+// ConservativeGC.minimize() above (lockNR / scope(failure) unlock / unlock).
+// ============================================================================
+
+version (WEKA)
+{
+    extern (C) size_t weka_gc_scavenge(size_t maxBytes) nothrow
+    {
+        auto gcx = Gcx.instance;
+        if (gcx is null)
+        {
+            return 0; // GC not initialized yet, or not the conservative GC
+        }
+
+        ConservativeGC.lockNR();
+        scope (failure) ConservativeGC.gcLock.unlock();
+        auto scavenged = wekaScavengerPass(gcx, maxBytes);
+        ConservativeGC.gcLock.unlock();
+        return scavenged;
+    }
+
+    extern (C) size_t weka_gc_dirty_free_bytes() nothrow
+    {
+        return wekaScavengerDirtyFreeBytes();
+    }
+
+    extern (C) int weka_gc_scavenger_arm(int heapIsMlocked) nothrow
+    {
+        auto gcx = Gcx.instance;
+        if (gcx is null)
+        {
+            return Status.NOT_ARMED; // GC not initialized yet, or not the conservative GC
+        }
+
+        ConservativeGC.lockNR();
+        scope (failure) ConservativeGC.gcLock.unlock();
+        auto status = wekaScavengerArm(gcx, heapIsMlocked != 0);
+        ConservativeGC.gcLock.unlock();
+        return status;
+    }
+
+    extern (C) int weka_gc_scavenger_status() nothrow
+    {
+        return wekaScavengerStatus();
+    }
+
+    extern (C) void weka_gc_scavenger_inject_fail(int mode) nothrow
+    {
+        wekaScavengerInjectFail(mode);
+    }
 }
