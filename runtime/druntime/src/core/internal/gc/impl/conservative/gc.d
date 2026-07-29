@@ -1910,6 +1910,10 @@ struct Gcx
             cstdlib.free(pool);
         }
 
+        // Whole-pool unmap above can only take a pool that is 100% free. Pages free inside pools that
+        // survived are the general case of the same job, so release those too (bounded, see gcopt).
+        version (WEKA) wekaScavengerMinimizePhase(&this);
+
         debug(PRINTF) printf("Done minimizing.\n");
     }
 

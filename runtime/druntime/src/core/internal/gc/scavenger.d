@@ -63,6 +63,7 @@ version (linux) {} else
     void wekaScavengerOnPagesFreed(Pool*, size_t, size_t) nothrow @nogc {}
     void wekaScavengerOnPagesCarved(Pool*, size_t, size_t) nothrow @nogc {}
     size_t wekaScavengerPass(Gcx*, size_t) nothrow @nogc { return 0; }
+    void wekaScavengerMinimizePhase(Gcx*) nothrow @nogc {}
     size_t wekaScavengerDirtyFreeBytes() nothrow @nogc { return 0; }
     void wekaScavengerInjectFail(int) nothrow @nogc {}
 
@@ -690,6 +691,34 @@ size_t wekaScavengerPass(Gcx* gcx, size_t maxBytes) nothrow @nogc
         g_poolCursor = (g_poolCursor + 1) % pools.length;
 
         return scavenged;
+    }
+}
+
+/// The scavenge phase of minimize(), called once the whole-pool unmap phase is done: the pools that
+/// survived it are mostly-free-but-pinned, and their free pages are what page scavenging exists for.
+/// Bounded by gcopt scavengeBudget so an existing minimize() caller cannot inherit an unbounded syscall
+/// storm -- a caller with more to release calls minimize() again.
+void wekaScavengerMinimizePhase(Gcx* gcx) nothrow @nogc
+{
+    static if (compiledOut)
+    {
+        return;
+    }
+    else
+    {
+        // Only once something armed the scavenger: arming normalizes the pools and establishes whether
+        // the heap is mlocked, and guessing that wrong turns every madvise into EINVAL.
+        if (!config.scavenge || !g_armed || g_stickyDisabled)
+        {
+            return;
+        }
+
+        if (g_dirtyFreePages * PAGESIZE <= config.scavengeMinFree)
+        {
+            return;
+        }
+
+        wekaScavengerPass(gcx, config.scavengeBudget);
     }
 }
 
