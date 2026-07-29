@@ -34,6 +34,7 @@ module core.internal.gc.scavenger;
 version (WEKA):
 
 import core.internal.gc.impl.conservative.gc : Pool, Gcx, Bins, PAGESIZE;
+import core.gc.config : config;
 
 /// Status codes returned by `wekaScavengerArm`/`wekaScavengerStatus`.
 /// Mirrored 1:1 by the consuming WEKA application -- keep the numeric
@@ -46,6 +47,7 @@ enum Status : int
     DISABLED_MLOCK2_ENOSYS  = 3,
     DISABLED_SYSCALL_FAILED = 4,
     DISABLED_MAPS_PRESSURE  = 5, // transient; reported for the last pass only
+    DISABLED_BY_CONFIG      = 6, // gcopt scavenge:0
 }
 
 // The mechanism itself is Linux-only: dropping a page out of RSS while keeping
@@ -229,9 +231,13 @@ private
         auto addr = pool.baseAddr;
         auto len = pool.npages * PAGESIZE;
 
-        // Advisory only -- a failure here doesn't compromise correctness,
-        // it just means THP interaction is whatever it was before.
-        wekaMadvise(addr, len, MADV_NOHUGEPAGE);
+        // Advisory only -- a failure here doesn't compromise correctness, it just means THP interaction
+        // is whatever it was before. A THP-backed pool cannot be released a page at a time, so turning
+        // this off (gcopt scavengeNoHugePages:0) largely defeats scavenging on a THP=always host.
+        if (config.scavengeNoHugePages)
+        {
+            wekaMadvise(addr, len, MADV_NOHUGEPAGE);
+        }
 
         bool failed;
         if (g_heapMlocked)
@@ -582,6 +588,13 @@ int wekaScavengerArm(Gcx* gcx, bool heapIsMlocked) nothrow @nogc
         if (g_armed)
         {
             return g_status; // one-time; already armed, report current status
+        }
+
+        if (!config.scavenge)
+        {
+            g_status = Status.DISABLED_BY_CONFIG;
+            g_stickyDisabled = true;
+            return g_status;
         }
 
         if (heapIsMlocked && mlock2(null, 0, MLOCK_ONFAULT) != 0 && errno == ENOSYS)
