@@ -92,11 +92,18 @@ else debug (VALGRIND)
 else
     private enum compiledOut = false;
 
-private enum MIN_RUN_PAGES = 16; // 64KB -- below this, syscall/VMA churn isn't worth it
+// Below this, syscall and VMA churn isn't worth it. Expressed in bytes and converted with the GC's own
+// PAGESIZE rather than assuming 4K, so it stays 64KB whatever the pool page size is.
+private enum MIN_RUN_BYTES = 64 * 1024;
+private enum MIN_RUN_PAGES = MIN_RUN_BYTES / PAGESIZE;
 private enum MLOCK_ONFAULT = 1;
 private enum MAP_COUNT_HEADROOM_NUM = 9;  // stop a pass above 90% of vm.max_map_count
 private enum MAP_COUNT_HEADROOM_DEN = 10;
 
+// Mutated only under the GC lock: the hooks run inside gc.d with the lock already held, and every
+// extern(C) entry point that writes takes ConservativeGC.lockNR() the way minimize() does. The status and
+// dirty-bytes readers, and the test-only fail injector, are deliberately lock-free -- a stale read of a
+// counter or a status code is harmless.
 private
 {
     __gshared size_t g_dirtyFreePages;   // pages with B_FREE && !scavenged, across all pools
