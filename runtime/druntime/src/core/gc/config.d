@@ -27,6 +27,13 @@ struct Config
     float heapSizeFactor = 2.0; // heap size to used memory ratio
     string cleanup = "collect"; // select gc cleanup method none|collect|finalize
 
+    // Page scavenging (Linux only): hand whole free pool pages back to the OS from minimize(), for the
+    // common case where a pool is mostly free but too sparsely populated to be unmapped whole.
+    bool scavenge = false;                      // enable the scavenge phase of minimize()
+    @MemVal size_t scavengeBudget = 256 << 20;  // most bytes one minimize() may release; caller loops for more
+    @MemVal size_t scavengeMinFree = 16 << 20;  // leave the heap alone below this much resident-free
+    bool scavengeNoHugePages = true;            // MADV_NOHUGEPAGE tracked pools; page-granular release needs it
+
 @nogc nothrow:
 
     bool initialize()
@@ -52,6 +59,8 @@ struct Config
         auto _minPoolSize = minPoolSize.bytes2prettyStruct;
         auto _maxPoolSize = maxPoolSize.bytes2prettyStruct;
         auto _incPoolSize = incPoolSize.bytes2prettyStruct;
+        auto _scavengeBudget = scavengeBudget.bytes2prettyStruct;
+        auto _scavengeMinFree = scavengeMinFree.bytes2prettyStruct;
         printf(" - select gc implementation (default = conservative)
 
     initReserve:N  - initial memory to reserve in MB (%lld%c)
@@ -62,13 +71,20 @@ struct Config
     heapSizeFactor:N - targeted heap size to used memory ratio (%g)
     cleanup:none|collect|finalize - how to treat live objects when terminating (collect)
 
+    scavenge:0|1   - release free pool pages to the OS from minimize() (%d)
+    scavengeBudget:N - most memory one minimize() may release in MB (%lld%c)
+    scavengeMinFree:N - skip scavenging below this much resident-free memory in MB (%lld%c)
+    scavengeNoHugePages:0|1 - MADV_NOHUGEPAGE scavenged pools (%d)
+
     Memory-related values can use B, K, M or G suffixes.
 ".ptr,
                _initReserve.v, _initReserve.u,
                _minPoolSize.v, _minPoolSize.u,
                _maxPoolSize.v, _maxPoolSize.u,
                _incPoolSize.v, _incPoolSize.u,
-               cast(long)parallel, heapSizeFactor);
+               cast(long)parallel, heapSizeFactor,
+               scavenge, _scavengeBudget.v, _scavengeBudget.u,
+               _scavengeMinFree.v, _scavengeMinFree.u, scavengeNoHugePages);
     }
 
     string errorName() @nogc nothrow { return "GC"; }
