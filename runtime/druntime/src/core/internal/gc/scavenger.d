@@ -48,6 +48,23 @@ enum ScavengeStatus : int
     DISABLED_PAGE_SIZE_MISMATCH = 7, // kernel page size is not the GC's PAGESIZE -- see scavengerArm
 }
 
+/// Why the minimize()-driven phase did or did not act. The phase runs inside minimize() and cannot log,
+/// having no access to the host application's tracing, so a live system reads these instead. All monotonic.
+struct ScavengeStats
+{
+    ulong minimizeCalls;       // phase entered
+    ulong minimizePasses;      // phase ran a scavenge pass
+    ulong scavengedBytes;      // bytes the phase reclaimed
+    ulong skippedDisabled;     // gcopt scavenge:0
+    ulong skippedSticky;       // sticky-disabled by an earlier syscall failure
+    ulong skippedNotArmed;     // arming was attempted and did not report OK
+    ulong skippedBelowMinFree; // dirty-free under gcopt scavengeMinFree
+    ulong armedFromMinimize;   // the phase armed the scavenger itself
+    ulong lockedPromotions;    // madvise said EINVAL: promoted to the locked-heap sequence
+    ulong continuations;       // phase hit its budget and asked to be called back
+}
+
+
 // Linux-only mechanism -- see the module documentation. Everywhere else the hooks below are no-ops, so
 // gc.d's call sites stay source-compatible on every target for the price of one null pointer per pool.
 version (linux) {} else
@@ -58,6 +75,9 @@ version (linux) {} else
     void scavengerOnPagesCarved(Pool*, size_t, size_t) nothrow @nogc {}
     size_t scavengerPass(Gcx*, size_t) nothrow @nogc { return 0; }
     void scavengerMinimizePhase(Gcx*) nothrow @nogc {}
+    ScavengeStats scavengerStats() nothrow @nogc { return ScavengeStats.init; }
+    int scavengerMinimizeContinuationDue() nothrow @nogc { return 0; }
+    size_t scavengerMinFree() nothrow @nogc { return 0; }
     size_t scavengerDirtyFreeBytes() nothrow @nogc { return 0; }
 
     // Reported as never-armed rather than as a distinct "unsupported platform" code: to every caller a
@@ -107,6 +127,8 @@ private
     __gshared int    g_status = ScavengeStatus.NOT_ARMED;
     __gshared size_t g_poolCursor;        // rotates which pool a pass starts scanning from
     __gshared bool   g_lockedDetected;    // madvise said EINVAL: the heap is locked, switch modes and retry
+    __gshared ScavengeStats g_stats;
+    __gshared bool   g_minimizeContinuationDue; // budget-capped phase left reclaimable pages behind
     __gshared size_t g_kernelPageSize = PAGESIZE; // madvise/mlock2 granularity; see scavengePool
     __gshared long   g_maxMapCount;       // vm.max_map_count, read once: 0 = not yet read, -1 = unreadable
 
@@ -704,6 +726,7 @@ private bool switchToLockedHeap(Gcx* gcx) nothrow @nogc
     }
 
     g_heapMlocked = true;
+    ++g_stats.lockedPromotions;
 
     foreach (pool; gcx.pooltable[])
     {
@@ -799,27 +822,78 @@ void scavengerMinimizePhase(Gcx* gcx) nothrow @nogc
     }
     else
     {
-        if (!config.scavenge || g_stickyDisabled)
+        ++g_stats.minimizeCalls;
+
+        if (!config.scavenge)
         {
+            g_minimizeContinuationDue = false;
+            ++g_stats.skippedDisabled;
+            return;
+        }
+
+        if (g_stickyDisabled)
+        {
+            g_minimizeContinuationDue = false;
+            ++g_stats.skippedSticky;
             return;
         }
 
         // Arm before consulting the counter: until arming recomputes it from the pagetables it only holds
         // whatever the hooks happened to see, which understates a heap that was already free when we
         // started.
-        if (!g_armed && scavengerArm(gcx, /* heapIsMlocked = */ false) != ScavengeStatus.OK)
+        if (!g_armed)
         {
-            return;
+            ++g_stats.armedFromMinimize;
+            if (scavengerArm(gcx, /* heapIsMlocked = */ false) != ScavengeStatus.OK)
+            {
+                g_minimizeContinuationDue = false;
+                ++g_stats.skippedNotArmed;
+                return;
+            }
         }
 
         if (g_dirtyFreePages * PAGESIZE <= config.scavengeMinFree)
         {
+            g_minimizeContinuationDue = false;
+            ++g_stats.skippedBelowMinFree;
             return;
         }
 
-        cast(void) scavengerPass(gcx, config.scavengeBudget);
+        ++g_stats.minimizePasses;
+        const scavenged = scavengerPass(gcx, config.scavengeBudget);
+        g_stats.scavengedBytes += scavenged;
+
+        // The budget bounds the scavenge phase only, so a big heap needs more than one visit. Nothing calls
+        // minimize() again on a quiet process, so ask the application to come back rather than strand the
+        // remainder. Same rule as the policy path: reclaimed something, and still above the gate.
+        g_minimizeContinuationDue = scavenged > 0 && (g_dirtyFreePages * PAGESIZE) > config.scavengeMinFree;
+        if (g_minimizeContinuationDue)
+        {
+            ++g_stats.continuations;
+        }
     }
 }
+
+/// Whether the last minimize() scavenge phase stopped on its budget with reclaimable pages left. The
+/// caller drives the follow-up; this module has no timer of its own.
+int scavengerMinimizeContinuationDue() nothrow @nogc
+{
+    return g_minimizeContinuationDue ? 1 : 0;
+}
+
+/// gcopt scavengeMinFree, so a follow-up uses the same gate the phase itself applies.
+size_t scavengerMinFree() nothrow @nogc
+{
+    return config.scavengeMinFree;
+}
+
+/// A snapshot of the phase's counters. Returned by value rather than by reference so a caller cannot
+/// observe one field advancing while it reads another.
+ScavengeStats scavengerStats() nothrow @nogc
+{
+    return g_stats;
+}
+
 
 /// `g_dirtyFreePages * PAGESIZE`. Lock-free read of a counter mutated only under the GC lock -- fine for a
 /// monitoring gauge (the same tolerance as other unguarded __gshared GC stat counters, e.g.
@@ -896,10 +970,14 @@ unittest
     GC.collect();
 
     immutable dirtyBefore = scavengerDirtyFreeBytes();
+    immutable scavengedBefore = scavengerStats().scavengedBytes;
     assert(dirtyBefore > 0, "the collected blocks should be counted as dirty-free");
 
     GC.minimize();
     assert(scavengerDirtyFreeBytes() < dirtyBefore, "minimize() should have scavenged dirty-free pages");
+    // Name the mechanism, not just the outcome: a pool unmapped whole would also drop the counter.
+    assert(scavengerStats().scavengedBytes > scavengedBefore,
+        "the drop must come from the scavenge phase");
 
     assert(pinned[0] !is null); // keeps the pins observably live past the assertions
 }
