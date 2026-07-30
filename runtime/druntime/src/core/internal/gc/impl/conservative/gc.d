@@ -5234,6 +5234,18 @@ version (WEKA)
         return wekaScavengerCounter(which);
     }
 
+    // Set when the phase stopped on its budget with reclaimable pages left; the application drives the
+    // follow-up pass, and weka_gc_scavenger_min_free() is the gate the phase itself uses.
+    extern (C) int weka_gc_scavenger_minimize_continuation_due() nothrow
+    {
+        return wekaScavengerMinimizeContinuationDue();
+    }
+
+    extern (C) size_t weka_gc_scavenger_min_free() nothrow
+    {
+        return wekaScavengerMinFree();
+    }
+
     extern (C) void weka_gc_scavenger_inject_fail(int mode) nothrow
     {
         wekaScavengerInjectFail(mode);

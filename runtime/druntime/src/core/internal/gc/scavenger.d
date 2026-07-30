@@ -64,7 +64,8 @@ enum Counter : int
     SKIP_BELOW_MIN_FREE = 6, // dirty-free under gcopt scavengeMinFree
     ARM_FROM_MINIMIZE   = 7, // the phase armed the scavenger itself
     LOCKED_PROMOTIONS   = 8, // madvise said EINVAL: promoted to the locked-heap sequence
-    COUNT               = 9,
+    MINIMIZE_CONTINUATIONS = 9, // phase hit its budget and asked to be called back
+    COUNT               = 10,
 }
 
 // The mechanism itself is Linux-only: dropping a page out of RSS while keeping
@@ -82,6 +83,8 @@ version (linux) {} else
     size_t wekaScavengerPass(Gcx*, size_t) nothrow @nogc { return 0; }
     void wekaScavengerMinimizePhase(Gcx*) nothrow @nogc {}
     ulong wekaScavengerCounter(int) nothrow @nogc { return 0; }
+    int wekaScavengerMinimizeContinuationDue() nothrow @nogc { return 0; }
+    size_t wekaScavengerMinFree() nothrow @nogc { return 0; }
     size_t wekaScavengerDirtyFreeBytes() nothrow @nogc { return 0; }
     void wekaScavengerInjectFail(int) nothrow @nogc {}
 
@@ -136,6 +139,7 @@ private
     __gshared int    g_injectFailMode;    // test hook: 0=off, 1=next madvise(DONTNEED) fails, 2=next mlock2 fails
     __gshared bool   g_lockedDetected;    // madvise said EINVAL: the heap is locked, switch modes and retry
     __gshared ulong[Counter.COUNT] g_counters;
+    __gshared bool   g_minimizeContinuationDue; // budget-capped phase left reclaimable pages behind
 
     version (X86_64)
         enum SYS_mlock2 = 325;
@@ -786,12 +790,14 @@ void wekaScavengerMinimizePhase(Gcx* gcx) nothrow @nogc
 
         if (!config.scavenge)
         {
+            g_minimizeContinuationDue = false;
             ++g_counters[Counter.SKIP_DISABLED];
             return;
         }
 
         if (g_stickyDisabled)
         {
+            g_minimizeContinuationDue = false;
             ++g_counters[Counter.SKIP_STICKY];
             return;
         }
@@ -804,19 +810,31 @@ void wekaScavengerMinimizePhase(Gcx* gcx) nothrow @nogc
             ++g_counters[Counter.ARM_FROM_MINIMIZE];
             if (wekaScavengerArm(gcx, /* heapIsMlocked = */ false) != Status.OK)
             {
-                ++g_counters[Counter.SKIP_NOT_ARMED];
+                g_minimizeContinuationDue = false;
+            ++g_counters[Counter.SKIP_NOT_ARMED];
                 return;
             }
         }
 
         if (g_dirtyFreePages * PAGESIZE <= config.scavengeMinFree)
         {
+            g_minimizeContinuationDue = false;
             ++g_counters[Counter.SKIP_BELOW_MIN_FREE];
             return;
         }
 
         ++g_counters[Counter.MINIMIZE_PASSES];
-        g_counters[Counter.MINIMIZE_SCAVENGED] += wekaScavengerPass(gcx, config.scavengeBudget);
+        const scavenged = wekaScavengerPass(gcx, config.scavengeBudget);
+        g_counters[Counter.MINIMIZE_SCAVENGED] += scavenged;
+
+        // The budget bounds the scavenge phase only, so a big heap needs more than one visit. Nothing calls
+        // minimize() again on a quiet process, so ask the application to come back rather than strand the
+        // remainder. Same rule as the policy path: reclaimed something, and still above the gate.
+        g_minimizeContinuationDue = scavenged > 0 && (g_dirtyFreePages * PAGESIZE) > config.scavengeMinFree;
+        if (g_minimizeContinuationDue)
+        {
+            ++g_counters[Counter.MINIMIZE_CONTINUATIONS];
+        }
     }
 }
 
@@ -825,6 +843,19 @@ void wekaScavengerMinimizePhase(Gcx* gcx) nothrow @nogc
 /// other unguarded gshared GC stat counters, e.g. `Gcx.mappedPages`).
 /// One counter by index (see `Counter`); out-of-range reads return 0 so an application built against a
 /// different revision cannot fault here.
+/// Whether the last minimize() scavenge phase stopped on its budget with reclaimable pages left. The
+/// application drives the follow-up; druntime has no timer of its own.
+int wekaScavengerMinimizeContinuationDue() nothrow @nogc
+{
+    return g_minimizeContinuationDue ? 1 : 0;
+}
+
+/// gcopt scavengeMinFree, so a follow-up uses the same gate the phase itself applies.
+size_t wekaScavengerMinFree() nothrow @nogc
+{
+    return config.scavengeMinFree;
+}
+
 ulong wekaScavengerCounter(int which) nothrow @nogc
 {
     if (which < 0 || which >= Counter.COUNT)
