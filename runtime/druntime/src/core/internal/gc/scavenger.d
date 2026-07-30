@@ -79,6 +79,7 @@ version (linux) {} else
     int scavengerMinimizeContinuationDue() nothrow @nogc { return 0; }
     size_t scavengerMinFree() nothrow @nogc { return 0; }
     size_t scavengerDirtyFreeBytes() nothrow @nogc { return 0; }
+    void scavengerInjectFail(int) nothrow @nogc {}
 
     // Reported as never-armed rather than as a distinct "unsupported platform" code: to every caller a
     // process that cannot scavenge is indistinguishable from one that never armed.
@@ -126,6 +127,7 @@ private
     __gshared bool   g_stickyDisabled;
     __gshared int    g_status = ScavengeStatus.NOT_ARMED;
     __gshared size_t g_poolCursor;        // rotates which pool a pass starts scanning from
+    __gshared int    g_injectFailMode;    // test hook: 0=off, 1=next madvise(DONTNEED) fails, 2=next mlock2 fails
     __gshared bool   g_lockedDetected;    // madvise said EINVAL: the heap is locked, switch modes and retry
     __gshared ScavengeStats g_stats;
     __gshared bool   g_minimizeContinuationDue; // budget-capped phase left reclaimable pages behind
@@ -160,8 +162,25 @@ private
         }
         else
         {
+            if (g_injectFailMode == 2)
+            {
+                g_injectFailMode = 0;
+                return -1;
+            }
             return cast(int) syscall(cast(long) SYS_mlock2, addr, len, flags);
         }
+    }
+
+    // Routes madvise(DONTNEED) through the inject_fail test hook; NOHUGEPAGE
+    // calls are unaffected (best-effort/advisory, never on the failure path).
+    int madviseHook(void* addr, size_t len, int advice) nothrow @nogc
+    {
+        if (advice == MADV_DONTNEED && g_injectFailMode == 1)
+        {
+            g_injectFailMode = 0;
+            return -1;
+        }
+        return madvise(addr, len, advice);
     }
 
     // Clamped decrement: a transient inconsistency that ever tried to
@@ -250,7 +269,7 @@ private
         // this off (gcopt scavengeNoHugePages:0) largely defeats scavenging on a THP=always host.
         if (config.scavengeNoHugePages)
         {
-            cast(void) madvise(addr, len, MADV_NOHUGEPAGE);
+            cast(void) madviseHook(addr, len, MADV_NOHUGEPAGE);
         }
 
         bool failed;
@@ -290,7 +309,7 @@ private
             return false;
         }
 
-        if (madvise(addr, len, MADV_DONTNEED) != 0)
+        if (madviseHook(addr, len, MADV_DONTNEED) != 0)
         {
             // EINVAL on a range we believe is unlocked is the kernel telling us it is locked after all
             // (mlockall, or someone else's mlock). Ask the pass to switch to the locked sequence and
@@ -913,6 +932,14 @@ int scavengerStatus() nothrow @nogc
         return ScavengeStatus.DISABLED_DEBUG_BUILD;
     else
         return g_status;
+}
+
+/// Test hook: force the next madvise(DONTNEED) (mode 1) or mlock2 (mode 2)
+/// call to behave as failed, to exercise the sticky-disable path
+/// end-to-end. 0 turns injection off.
+void scavengerInjectFail(int mode) nothrow @nogc
+{
+    g_injectFailMode = mode;
 }
 
 version (unittest)
