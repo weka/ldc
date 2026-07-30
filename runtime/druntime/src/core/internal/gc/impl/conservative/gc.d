@@ -37,6 +37,7 @@ import core.internal.gc.bits;
 import core.internal.gc.os;
 import core.gc.config;
 import core.gc.gcinterface;
+import core.internal.gc.scavenger;
 
 import core.internal.container.treap;
 import core.internal.spinlock;
@@ -723,6 +724,7 @@ class ConservativeGC : GC
                     lpool.setFreePageOffsets(pagenum + newsz, freesz - newPages);
                 gcx.usedLargePages += newPages;
                 lpool.freepages -= newPages;
+                scavengerOnPagesCarved(&lpool.base, pagenum + psz, newPages);
                 debug (PRINTF) printFreeInfo(pool);
             }
             else
@@ -813,6 +815,7 @@ class ConservativeGC : GC
                 lpool.setFreePageOffsets(pagenum + psz + sz, freesz - sz);
             lpool.freepages -= sz;
             gcx.usedLargePages += sz;
+            scavengerOnPagesCarved(&lpool.base, pagenum + psz, sz);
             return (psz + sz) * PAGESIZE;
         }
     }
@@ -1907,6 +1910,10 @@ struct Gcx
             cstdlib.free(pool);
         }
 
+        // Whole-pool unmap above can only take a pool that is 100% free. Pages free inside pools that
+        // survived are the general case of the same job, so release those too (bounded, see gcopt).
+        scavengerMinimizePhase(&this);
+
         debug(PRINTF) printf("Done minimizing.\n");
     }
 
@@ -2660,6 +2667,7 @@ struct Gcx
                         debug(COLLECT_PRINTF) printf("\tcollecting big %p\n", p);
                         leakDetector.log_free(q, sentinel_size(q, npages * PAGESIZE - SENTINEL_EXTRA));
                         pool.pagetable[pn..pn+npages] = Bins.B_FREE;
+                        scavengerOnPagesFreed(pool, pn, npages);
                         if (pn < pool.searchStart) pool.searchStart = pn;
                         freedLargePages += npages;
                         pool.freepages += npages;
@@ -2790,6 +2798,7 @@ struct Gcx
                             pool.freeAllPageBits(pn);
 
                             pool.pagetable[pn] = Bins.B_FREE;
+                            scavengerOnPagesFreed(pool, pn, 1);
                             // add to free chain
                             pool.binPageChain[pn] = cast(uint) pool.searchStart;
                             pool.searchStart = pn;
@@ -3536,6 +3545,7 @@ struct Pool
     size_t npages;
     size_t freepages;     // The number of pages not in use.
     Bins* pagetable;
+    ubyte* scavengedMap; // one byte/page: scavenger dirty/clean tracking, see core.internal.gc.scavenger
 
     bool isLargeObject;
 
@@ -3665,11 +3675,15 @@ struct Pool
         this.freepages = npages;
         this.searchStart = 0;
         this.largestFree = npages;
+
+        scavengerOnPoolCreate(&this);
     }
 
 
     void Dtor() nothrow
     {
+        scavengerOnPoolDestroy(&this);
+
         if (baseAddr)
         {
             int result;
@@ -4140,6 +4154,7 @@ struct LargeObjectPool
                         bPageOffsets[i + offset] = cast(uint) offset;
                 }
                 freepages -= n;
+                scavengerOnPagesCarved(&this.base, i, n);
                 return i;
             }
             if (p > largest)
@@ -4174,6 +4189,7 @@ struct LargeObjectPool
         }
         freepages += npages;
         largestFree = freepages; // invalidate
+        scavengerOnPagesFreed(&this.base, pagenum, npages);
     }
 
     /**
@@ -4436,6 +4452,7 @@ struct SmallObjectPool
         binPageChain[pn] = Pool.PageRecovered;
         pagetable[pn] = bin;
         freepages--;
+        scavengerOnPagesCarved(&this.base, pn, 1);
 
         // Convert page to free list
         size_t size = binsize[bin];

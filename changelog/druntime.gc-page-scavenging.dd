@@ -1,0 +1,41 @@
+The conservative GC can now return free pages of surviving pools to the OS
+
+`GC.minimize()` could only release a memory pool that was entirely free. One live
+object anywhere in a pool pinned every page of it, so a long-lived program whose
+heap grew once and then freed most of it kept paying for that peak in resident
+memory no matter how much of each pool had become free.
+
+On Linux the conservative GC can now also release the individual free pages of
+pools that survive, with `madvise(MADV_DONTNEED)`. It runs as a final phase of
+`GC.minimize()` and is off by default; enable it with the `scavenge` GC
+configuration option:
+
+-------
+./myprogram --DRT-gcopt=scavenge:1
+-------
+
+A released page is handed back to the kernel but stays mapped, so the GC needs no
+extra bookkeeping to reuse it: the first write after the page is carved out again
+simply faults in a fresh zero page.
+
+Programs that lock their heap into memory are supported. Where a plain `madvise`
+would be refused because the range is locked, the sequence becomes
+`munlock`/`madvise(MADV_DONTNEED)`/`mlock2(MLOCK_ONFAULT)`, which drops the page
+from the resident set while keeping the `mlockall(MCL_CURRENT|MCL_FUTURE)`
+guarantee: the page is locked again at the moment it faults back in, so it is
+never swappable. This is detected automatically.
+
+Three further options tune the phase:
+
+$(UL
+  $(LI `scavengeMinFree` - leave the heap alone while less than this much of it is
+    resident-but-free, so that small amounts of free memory do not pay for
+    syscalls. Defaults to 16 MB.)
+  $(LI `scavengeBudget` - the most memory one `GC.minimize()` call may release,
+    bounding how long the phase can run; call `GC.minimize()` again to release
+    more. Defaults to 256 MB.)
+  $(LI `scavengeNoHugePages` - apply `MADV_NOHUGEPAGE` to the pools being tracked.
+    A pool backed by transparent huge pages cannot be released a page at a time,
+    so turning this off largely defeats scavenging on a host with THP set to
+    `always`. On by default.)
+)
