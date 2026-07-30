@@ -29,7 +29,7 @@ struct Config
 
     // Page scavenging (Linux only): hand whole free pool pages back to the OS from minimize(), for the
     // common case where a pool is mostly free but too sparsely populated to be unmapped whole.
-    bool scavenge = false;                      // enable the scavenge phase of minimize()
+    bool scavenge = true;                       // enable the scavenge phase of minimize()
     @MemVal size_t scavengeBudget = 256 << 20;  // most bytes one minimize() may release; caller loops for more
     @MemVal size_t scavengeMinFree = 16 << 20;  // leave the heap alone below this much resident-free
     bool scavengeNoHugePages = true;            // MADV_NOHUGEPAGE tracked pools; page-granular release needs it
