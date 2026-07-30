@@ -5228,6 +5228,12 @@ version (WEKA)
         return wekaScavengerStatus();
     }
 
+    // Why the minimize() scavenge phase did or did not act; see core.internal.gc.scavenger.Counter.
+    extern (C) ulong weka_gc_scavenger_counter(int which) nothrow
+    {
+        return wekaScavengerCounter(which);
+    }
+
     extern (C) void weka_gc_scavenger_inject_fail(int mode) nothrow
     {
         wekaScavengerInjectFail(mode);

@@ -50,6 +50,23 @@ enum Status : int
     DISABLED_BY_CONFIG      = 6, // gcopt scavenge:0
 }
 
+/// Counters for the minimize()-driven phase, so a live system can say why it did or did not act -- the
+/// phase itself cannot log, since druntime has no access to the application's tracing. Read one at a time
+/// through `weka_gc_scavenger_counter`; the consuming application mirrors these indices.
+enum Counter : int
+{
+    MINIMIZE_CALLS      = 0, // phase entered
+    MINIMIZE_PASSES     = 1, // phase ran a scavenge pass
+    MINIMIZE_SCAVENGED  = 2, // bytes the phase reclaimed
+    SKIP_DISABLED       = 3, // gcopt scavenge:0
+    SKIP_STICKY         = 4, // sticky-disabled by an earlier syscall failure
+    SKIP_NOT_ARMED      = 5, // arming was attempted and did not report OK
+    SKIP_BELOW_MIN_FREE = 6, // dirty-free under gcopt scavengeMinFree
+    ARM_FROM_MINIMIZE   = 7, // the phase armed the scavenger itself
+    LOCKED_PROMOTIONS   = 8, // madvise said EINVAL: promoted to the locked-heap sequence
+    COUNT               = 9,
+}
+
 // The mechanism itself is Linux-only: dropping a page out of RSS while keeping
 // the mlockall() guarantee takes madvise(MADV_DONTNEED) followed immediately by
 // mlock2(MLOCK_ONFAULT), and no other platform offers that pair. Elsewhere the
@@ -64,6 +81,7 @@ version (linux) {} else
     void wekaScavengerOnPagesCarved(Pool*, size_t, size_t) nothrow @nogc {}
     size_t wekaScavengerPass(Gcx*, size_t) nothrow @nogc { return 0; }
     void wekaScavengerMinimizePhase(Gcx*) nothrow @nogc {}
+    ulong wekaScavengerCounter(int) nothrow @nogc { return 0; }
     size_t wekaScavengerDirtyFreeBytes() nothrow @nogc { return 0; }
     void wekaScavengerInjectFail(int) nothrow @nogc {}
 
@@ -117,6 +135,7 @@ private
     __gshared size_t g_poolCursor;        // rotates which pool a pass starts scanning from
     __gshared int    g_injectFailMode;    // test hook: 0=off, 1=next madvise(DONTNEED) fails, 2=next mlock2 fails
     __gshared bool   g_lockedDetected;    // madvise said EINVAL: the heap is locked, switch modes and retry
+    __gshared ulong[Counter.COUNT] g_counters;
 
     version (X86_64)
         enum SYS_mlock2 = 325;
@@ -670,6 +689,7 @@ private bool switchToLockedHeap(Gcx* gcx) nothrow @nogc
     }
 
     g_heapMlocked = true;
+    ++g_counters[Counter.LOCKED_PROMOTIONS];
 
     foreach (pool; gcx.pooltable[])
     {
@@ -762,31 +782,57 @@ void wekaScavengerMinimizePhase(Gcx* gcx) nothrow @nogc
     }
     else
     {
-        if (!config.scavenge || g_stickyDisabled)
+        ++g_counters[Counter.MINIMIZE_CALLS];
+
+        if (!config.scavenge)
         {
+            ++g_counters[Counter.SKIP_DISABLED];
+            return;
+        }
+
+        if (g_stickyDisabled)
+        {
+            ++g_counters[Counter.SKIP_STICKY];
             return;
         }
 
         // Arm before consulting the counter: until arming recomputes it from the pagetables it only holds
         // whatever the hooks happened to see, which understates a heap that was already free when we
         // started.
-        if (!g_armed && wekaScavengerArm(gcx, /* heapIsMlocked = */ false) != Status.OK)
+        if (!g_armed)
         {
-            return;
+            ++g_counters[Counter.ARM_FROM_MINIMIZE];
+            if (wekaScavengerArm(gcx, /* heapIsMlocked = */ false) != Status.OK)
+            {
+                ++g_counters[Counter.SKIP_NOT_ARMED];
+                return;
+            }
         }
 
         if (g_dirtyFreePages * PAGESIZE <= config.scavengeMinFree)
         {
+            ++g_counters[Counter.SKIP_BELOW_MIN_FREE];
             return;
         }
 
-        wekaScavengerPass(gcx, config.scavengeBudget);
+        ++g_counters[Counter.MINIMIZE_PASSES];
+        g_counters[Counter.MINIMIZE_SCAVENGED] += wekaScavengerPass(gcx, config.scavengeBudget);
     }
 }
 
 /// `g_dirtyFreePages * PAGESIZE`. Lock-free read of a counter mutated only
 /// under the GC lock -- fine for a monitoring gauge (same tolerance as
 /// other unguarded gshared GC stat counters, e.g. `Gcx.mappedPages`).
+/// One counter by index (see `Counter`); out-of-range reads return 0 so an application built against a
+/// different revision cannot fault here.
+ulong wekaScavengerCounter(int which) nothrow @nogc
+{
+    if (which < 0 || which >= Counter.COUNT)
+    {
+        return 0;
+    }
+    return g_counters[which];
+}
 size_t wekaScavengerDirtyFreeBytes() nothrow @nogc
 {
     static if (compiledOut)
