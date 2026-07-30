@@ -79,7 +79,7 @@ version (linux):
 
 import core.sys.linux.sys.mman : madvise, MADV_DONTNEED, MADV_NOHUGEPAGE;
 import core.sys.posix.sys.mman : mlock, munlock;
-import core.stdc.errno : errno, ENOSYS;
+import core.stdc.errno : errno, ENOSYS, EINVAL;
 import core.stdc.string : memset;
 static import cstdlib = core.stdc.stdlib;
 
@@ -116,6 +116,7 @@ private
     __gshared int    g_status = Status.NOT_ARMED;
     __gshared size_t g_poolCursor;        // rotates which pool a pass starts scanning from
     __gshared int    g_injectFailMode;    // test hook: 0=off, 1=next madvise(DONTNEED) fails, 2=next mlock2 fails
+    __gshared bool   g_lockedDetected;    // madvise said EINVAL: the heap is locked, switch modes and retry
 
     version (X86_64)
         enum SYS_mlock2 = 325;
@@ -279,6 +280,16 @@ private
 
         if (wekaMadvise(addr, len, MADV_DONTNEED) != 0)
         {
+            // EINVAL on a range we believe is unlocked is the kernel telling us it is locked after all
+            // (mlockall, or someone else's mlock). Ask the pass to switch to the locked sequence and
+            // retry -- and note the lock is pre-existing, so re-locking afterwards restores what was
+            // there rather than locking memory that wasn't.
+            if (!g_heapMlocked && errno == EINVAL)
+            {
+                g_lockedDetected = true;
+                return false;
+            }
+
             if (g_heapMlocked)
             {
                 relockBestEffort(addr, len);
@@ -345,7 +356,7 @@ private
             auto runAddr = pool.baseAddr + runStart * PAGESIZE;
             if (!scavengeRun(runAddr, runLen * PAGESIZE))
             {
-                return scavenged; // sticky-disabled inside scavengeRun(); stop the whole pass
+                return scavenged; // sticky-disabled, or lock detected: either way the pass handles it
             }
 
             foreach (i; runStart .. runStart + runLen)
@@ -644,13 +655,48 @@ int wekaScavengerArm(Gcx* gcx, bool heapIsMlocked) nothrow @nogc
 /// resuming from a rotating pool cursor so consecutive passes don't always
 /// restart at pool 0. Assumes the caller holds the GC lock. Returns 0 if
 /// unarmed, sticky-disabled, or under map-count pressure this pass.
+// Promotes the process to the locked-heap sequence after madvise reported EINVAL, and re-normalizes every
+// pool so their lock flags are uniform again -- otherwise later per-run munlock/mlock2 keeps splitting VMAs
+// that the kernel would have merged, burning vm.max_map_count entries.
+private bool switchToLockedHeap(Gcx* gcx) nothrow @nogc
+{
+    g_lockedDetected = false;
+
+    if (mlock2(null, 0, MLOCK_ONFAULT) != 0 && errno == ENOSYS)
+    {
+        g_status = Status.DISABLED_MLOCK2_ENOSYS;
+        g_stickyDisabled = true;
+        return false;
+    }
+
+    g_heapMlocked = true;
+
+    foreach (pool; gcx.pooltable[])
+    {
+        if (!normalizeAndTrackPool(pool, /* freshPool = */ false))
+        {
+            return false; // sticky-disabled inside
+        }
+    }
+
+    return true;
+}
+
 size_t wekaScavengerPass(Gcx* gcx, size_t maxBytes) nothrow @nogc
 {
     static if (compiledOut)
         return 0;
     else
     {
-        if (!g_armed || g_stickyDisabled)
+        // Arm on first use so a caller only has to enable the feature, not sequence it. Arming assumes an
+        // unlocked heap: that way nothing is mlocked that wasn't already, and if the heap turns out to be
+        // locked the first madvise says so (EINVAL) and switchToLockedHeap() promotes us.
+        if (!g_armed && wekaScavengerArm(gcx, /* heapIsMlocked = */ false) != Status.OK)
+        {
+            return 0;
+        }
+
+        if (g_stickyDisabled)
         {
             return 0;
         }
@@ -673,17 +719,27 @@ size_t wekaScavengerPass(Gcx* gcx, size_t maxBytes) nothrow @nogc
         }
 
         size_t scavenged;
-        foreach (offset; 0 .. pools.length)
+        // At most two laps: the second only happens if the first discovered the heap is locked, which can
+        // only be discovered once per process.
+        foreach (lap; 0 .. 2)
         {
-            if (maxBytes - scavenged < MIN_RUN_PAGES * PAGESIZE)
+            foreach (offset; 0 .. pools.length)
             {
-                break;
+                if (maxBytes - scavenged < MIN_RUN_PAGES * PAGESIZE)
+                {
+                    break;
+                }
+
+                auto pool = pools[(g_poolCursor + offset) % pools.length];
+                scavenged += scavengePool(pool, maxBytes - scavenged);
+
+                if (g_stickyDisabled || g_lockedDetected)
+                {
+                    break;
+                }
             }
 
-            auto pool = pools[(g_poolCursor + offset) % pools.length];
-            scavenged += scavengePool(pool, maxBytes - scavenged);
-
-            if (g_stickyDisabled)
+            if (!g_lockedDetected || !switchToLockedHeap(gcx))
             {
                 break;
             }
@@ -706,9 +762,15 @@ void wekaScavengerMinimizePhase(Gcx* gcx) nothrow @nogc
     }
     else
     {
-        // Only once something armed the scavenger: arming normalizes the pools and establishes whether
-        // the heap is mlocked, and guessing that wrong turns every madvise into EINVAL.
-        if (!config.scavenge || !g_armed || g_stickyDisabled)
+        if (!config.scavenge || g_stickyDisabled)
+        {
+            return;
+        }
+
+        // Arm before consulting the counter: until arming recomputes it from the pagetables it only holds
+        // whatever the hooks happened to see, which understates a heap that was already free when we
+        // started.
+        if (!g_armed && wekaScavengerArm(gcx, /* heapIsMlocked = */ false) != Status.OK)
         {
             return;
         }
