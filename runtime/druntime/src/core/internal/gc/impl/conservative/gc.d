@@ -5177,3 +5177,82 @@ void undefinedWrite(T)(ref T var, T value) nothrow
     else
         var = value;
 }
+
+// ============================================================================
+// Page scavenger -- extern(C) entry points for an application that wants to
+// drive scavenging itself rather than leave it to minimize(). All the
+// bookkeeping lives in core.internal.gc.scavenger; these wrappers only
+// resolve the live Gcx instance and take the GC lock, following the shape of
+// ConservativeGC.minimize() above (lockNR / scope(failure) unlock / unlock).
+//
+// Posix-gated because resolving the live Gcx goes through Gcx.instance, which the GC only maintains there
+// (it exists for the fork-safety machinery). The mechanism is Linux-only in any case, so on the remaining
+// Posix targets these report a scavenger that never armed.
+// ============================================================================
+
+version (Posix):
+
+extern (C) size_t gc_scavenger_pass(size_t maxBytes) nothrow
+{
+    auto gcx = Gcx.instance;
+    if (gcx is null)
+    {
+        return 0; // GC not initialized yet, or not the conservative GC
+    }
+
+    ConservativeGC.lockNR();
+    scope (failure) ConservativeGC.gcLock.unlock();
+    auto scavenged = scavengerPass(gcx, maxBytes);
+    ConservativeGC.gcLock.unlock();
+    return scavenged;
+}
+
+extern (C) size_t gc_scavenger_dirty_free_bytes() nothrow @nogc
+{
+    return scavengerDirtyFreeBytes();
+}
+
+extern (C) int gc_scavenger_arm(int heapIsMlocked) nothrow
+{
+    auto gcx = Gcx.instance;
+    if (gcx is null)
+    {
+        return ScavengeStatus.NOT_ARMED; // GC not initialized yet, or not the conservative GC
+    }
+
+    ConservativeGC.lockNR();
+    scope (failure) ConservativeGC.gcLock.unlock();
+    auto status = scavengerArm(gcx, heapIsMlocked != 0);
+    ConservativeGC.gcLock.unlock();
+    return status;
+}
+
+extern (C) int gc_scavenger_status() nothrow @nogc
+{
+    return scavengerStatus();
+}
+
+// Why the minimize() scavenge phase did or did not act; see core.internal.gc.scavenger.ScavengeStats.
+// Returned whole so the caller gets a coherent snapshot, and so adding a counter cannot silently
+// renumber the ones a caller already reads.
+extern (C) ScavengeStats gc_scavenger_stats() nothrow @nogc
+{
+    return scavengerStats();
+}
+
+// Set when the phase stopped on its budget with reclaimable pages left; the application drives the
+// follow-up pass, and gc_scavenger_min_free() is the gate the phase itself uses.
+extern (C) int gc_scavenger_continuation_due() nothrow @nogc
+{
+    return scavengerMinimizeContinuationDue();
+}
+
+extern (C) size_t gc_scavenger_min_free() nothrow @nogc
+{
+    return scavengerMinFree();
+}
+
+extern (C) void gc_scavenger_inject_fail(int mode) nothrow @nogc
+{
+    scavengerInjectFail(mode);
+}
