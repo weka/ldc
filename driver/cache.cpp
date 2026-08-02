@@ -383,6 +383,13 @@ std::string cacheLookup(llvm::StringRef cacheObjectHash) {
   return "";
 }
 
+// Storing into the cache is a pure optimization: the object file has already
+// been written to its output location by the caller, and nothing in this
+// compilation reads it back. So every failure below is a warning followed by a
+// bail-out, never fatal() -- the worst consequence is a cache miss next time.
+// (Contrast recoverObjectFile(), where a failure really does lose the object
+// file and must stay fatal.) This matters most for a cache directory shared
+// between concurrent compilers, where a store can lose a benign race.
 void cacheObjectFile(llvm::StringRef objectFile,
                      llvm::StringRef cacheObjectHash) {
   if (opts::cacheDir.empty())
@@ -390,10 +397,11 @@ void cacheObjectFile(llvm::StringRef objectFile,
 
   if (!llvm::sys::fs::exists(opts::cacheDir)) {
     if (auto errorcode = llvm::sys::fs::create_directories(opts::cacheDir)) {
-      error(Loc(), "Unable to create cache directory: %s (errno %d: %s)",
-            opts::cacheDir.c_str(), errorcode.value(),
-            errorcode.message().c_str());
-      fatal();
+      warning(Loc(),
+              "Unable to create cache directory, not caching: %s (errno %d: %s)",
+              opts::cacheDir.c_str(), errorcode.value(),
+              errorcode.message().c_str());
+      return;
     }
   }
 
@@ -407,31 +415,36 @@ void cacheObjectFile(llvm::StringRef objectFile,
   llvm::SmallString<128> tempFile;
   if (auto errorcode = llvm::sys::fs::createUniqueFile(
           llvm::Twine(cacheFile) + ".tmp%%%%%%%", tempFile)) {
-    error(
-        Loc(),
-        "Could not create name of temporary file in the cache (errno %d: %s)",
-        errorcode.value(), errorcode.message().c_str());
-    fatal();
+    warning(Loc(),
+            "Could not create name of temporary file in the cache, not caching "
+            "(errno %d: %s)",
+            errorcode.value(), errorcode.message().c_str());
+    return;
   }
 
   IF_LOG Logger::println("Copy object file to temp file: %s to %s",
                          objectFile.str().c_str(), tempFile.c_str());
   if (auto errorcode = llvm::sys::fs::copy_file(objectFile, tempFile.c_str())) {
-    error(Loc(),
-          "Failed to copy object file to cache: %s to %s (errno %d: %s)",
-          objectFile.str().c_str(), tempFile.c_str(), errorcode.value(),
-          errorcode.message().c_str());
-    fatal();
+    warning(Loc(),
+            "Failed to copy object file to cache, not caching: %s to %s "
+            "(errno %d: %s)",
+            objectFile.str().c_str(), tempFile.c_str(), errorcode.value(),
+            errorcode.message().c_str());
+    llvm::sys::fs::remove(tempFile.c_str());
+    return;
   }
   IF_LOG Logger::println("Rename temp file to cache file: %s to %s",
                          tempFile.c_str(), cacheFile.c_str());
   if (auto errorcode =
           llvm::sys::fs::rename(tempFile.c_str(), cacheFile.c_str())) {
-    error(Loc(),
-          "Failed to rename temp file to cache file: %s to %s (errno %d: %s)",
-          tempFile.c_str(), cacheFile.c_str(), errorcode.value(),
-          errorcode.message().c_str());
-    fatal();
+    warning(Loc(),
+            "Failed to rename temp file to cache file, not caching: %s to %s "
+            "(errno %d: %s)",
+            tempFile.c_str(), cacheFile.c_str(), errorcode.value(),
+            errorcode.message().c_str());
+    // Best-effort cleanup; the temp file is already gone if we lost a race.
+    llvm::sys::fs::remove(tempFile.c_str());
+    return;
   }
 }
 

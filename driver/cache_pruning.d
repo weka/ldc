@@ -74,6 +74,11 @@ struct CachePruner
 {
     enum timestampFilename = "ircache_prune_timestamp";
 
+    // Minimum age before a temp file is considered orphaned rather than in flight.
+    // Writing one cache entry takes milliseconds, so this leaves several orders of
+    // magnitude of headroom while still bounding how long dead temps linger.
+    enum tempFileGracePeriod = dur!"hours"(1);
+
     string cachePath; // absolute path
     Duration pruneInterval; // minimum time between pruning
     Duration expireDuration; // cache file expiration
@@ -109,8 +114,13 @@ struct CachePruner
         auto filePattern = "ircache_????????????????????????????????.{o,obj}";
         auto cacheFiles = dirEntries(cachePath, filePattern, SpanMode.shallow, /+ followSymlink +/ false);
 
-        // Delete all temporary files.
-        deleteFiles(cachePath, filePattern ~ ".tmp???????");
+        // Delete orphaned temporary files, i.e. those left behind by compilers that
+        // died between creating the temp file and renaming it into place.
+        // Only files old enough to be certainly dead are removed: the cache directory
+        // may be shared by concurrent compilers (potentially on other machines), and
+        // unlinking a temp file that is still being written makes its owner's
+        // rename() fail with ENOENT, aborting an otherwise healthy compilation.
+        deleteFilesOlderThan(cachePath, filePattern ~ ".tmp???????", tempFileGracePeriod);
 
         // Files that have not yet expired, may still be removed during pruning for size later.
         // This array holds the prune candidates after pruning for expiry.
@@ -124,12 +134,17 @@ struct CachePruner
     }
 
 private:
-    void deleteFiles(string path, string filePattern)
+    void deleteFilesOlderThan(string path, string filePattern, Duration minAge)
     {
+        const cutoff = Clock.currTime - minAge;
         foreach (DirEntry f; dirEntries(path, filePattern, SpanMode.shallow, /+ followSymlink +/ false))
         {
             try
             {
+                // A file modified recently may still be in flight in another process.
+                if (f.timeLastModified >= cutoff)
+                    continue;
+
                 remove(f.name);
             }
             catch (FileException)
