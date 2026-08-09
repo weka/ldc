@@ -37,6 +37,7 @@ import core.internal.gc.bits;
 import core.internal.gc.os;
 import core.gc.config;
 import core.gc.gcinterface;
+import core.internal.gc.scavenger;
 
 import core.internal.container.treap;
 import core.internal.spinlock;
@@ -723,6 +724,7 @@ class ConservativeGC : GC
                     lpool.setFreePageOffsets(pagenum + newsz, freesz - newPages);
                 gcx.usedLargePages += newPages;
                 lpool.freepages -= newPages;
+                scavengerOnPagesCarved(&lpool.base, pagenum + psz, newPages);
                 debug (PRINTF) printFreeInfo(pool);
             }
             else
@@ -813,6 +815,7 @@ class ConservativeGC : GC
                 lpool.setFreePageOffsets(pagenum + psz + sz, freesz - sz);
             lpool.freepages -= sz;
             gcx.usedLargePages += sz;
+            scavengerOnPagesCarved(&lpool.base, pagenum + psz, sz);
             return (psz + sz) * PAGESIZE;
         }
     }
@@ -1907,6 +1910,10 @@ struct Gcx
             cstdlib.free(pool);
         }
 
+        // Whole-pool unmap above can only take a pool that is 100% free. Pages free inside pools that
+        // survived are the general case of the same job, so release those too (bounded, see gcopt).
+        scavengerMinimizePhase(&this);
+
         debug(PRINTF) printf("Done minimizing.\n");
     }
 
@@ -2660,6 +2667,7 @@ struct Gcx
                         debug(COLLECT_PRINTF) printf("\tcollecting big %p\n", p);
                         leakDetector.log_free(q, sentinel_size(q, npages * PAGESIZE - SENTINEL_EXTRA));
                         pool.pagetable[pn..pn+npages] = Bins.B_FREE;
+                        scavengerOnPagesFreed(pool, pn, npages);
                         if (pn < pool.searchStart) pool.searchStart = pn;
                         freedLargePages += npages;
                         pool.freepages += npages;
@@ -2790,6 +2798,7 @@ struct Gcx
                             pool.freeAllPageBits(pn);
 
                             pool.pagetable[pn] = Bins.B_FREE;
+                            scavengerOnPagesFreed(pool, pn, 1);
                             // add to free chain
                             pool.binPageChain[pn] = cast(uint) pool.searchStart;
                             pool.searchStart = pn;
@@ -3536,6 +3545,7 @@ struct Pool
     size_t npages;
     size_t freepages;     // The number of pages not in use.
     Bins* pagetable;
+    ubyte* scavengedMap; // one byte/page: scavenger dirty/clean tracking, see core.internal.gc.scavenger
 
     bool isLargeObject;
 
@@ -3665,11 +3675,15 @@ struct Pool
         this.freepages = npages;
         this.searchStart = 0;
         this.largestFree = npages;
+
+        scavengerOnPoolCreate(&this);
     }
 
 
     void Dtor() nothrow
     {
+        scavengerOnPoolDestroy(&this);
+
         if (baseAddr)
         {
             int result;
@@ -4140,6 +4154,7 @@ struct LargeObjectPool
                         bPageOffsets[i + offset] = cast(uint) offset;
                 }
                 freepages -= n;
+                scavengerOnPagesCarved(&this.base, i, n);
                 return i;
             }
             if (p > largest)
@@ -4174,6 +4189,7 @@ struct LargeObjectPool
         }
         freepages += npages;
         largestFree = freepages; // invalidate
+        scavengerOnPagesFreed(&this.base, pagenum, npages);
     }
 
     /**
@@ -4436,6 +4452,7 @@ struct SmallObjectPool
         binPageChain[pn] = Pool.PageRecovered;
         pagetable[pn] = bin;
         freepages--;
+        scavengerOnPagesCarved(&this.base, pn, 1);
 
         // Convert page to free list
         size_t size = binsize[bin];
@@ -5159,4 +5176,83 @@ void undefinedWrite(T)(ref T var, T value) nothrow
     }
     else
         var = value;
+}
+
+// ============================================================================
+// Page scavenger -- extern(C) entry points for an application that wants to
+// drive scavenging itself rather than leave it to minimize(). All the
+// bookkeeping lives in core.internal.gc.scavenger; these wrappers only
+// resolve the live Gcx instance and take the GC lock, following the shape of
+// ConservativeGC.minimize() above (lockNR / scope(failure) unlock / unlock).
+//
+// Posix-gated because resolving the live Gcx goes through Gcx.instance, which the GC only maintains there
+// (it exists for the fork-safety machinery). The mechanism is Linux-only in any case, so on the remaining
+// Posix targets these report a scavenger that never armed.
+// ============================================================================
+
+version (Posix):
+
+extern (C) size_t gc_scavenger_pass(size_t maxBytes) nothrow
+{
+    auto gcx = Gcx.instance;
+    if (gcx is null)
+    {
+        return 0; // GC not initialized yet, or not the conservative GC
+    }
+
+    ConservativeGC.lockNR();
+    scope (failure) ConservativeGC.gcLock.unlock();
+    auto scavenged = scavengerPass(gcx, maxBytes);
+    ConservativeGC.gcLock.unlock();
+    return scavenged;
+}
+
+extern (C) size_t gc_scavenger_dirty_free_bytes() nothrow @nogc
+{
+    return scavengerDirtyFreeBytes();
+}
+
+extern (C) int gc_scavenger_arm(int heapIsMlocked) nothrow
+{
+    auto gcx = Gcx.instance;
+    if (gcx is null)
+    {
+        return ScavengeStatus.NOT_ARMED; // GC not initialized yet, or not the conservative GC
+    }
+
+    ConservativeGC.lockNR();
+    scope (failure) ConservativeGC.gcLock.unlock();
+    auto status = scavengerArm(gcx, heapIsMlocked != 0);
+    ConservativeGC.gcLock.unlock();
+    return status;
+}
+
+extern (C) int gc_scavenger_status() nothrow @nogc
+{
+    return scavengerStatus();
+}
+
+// Why the minimize() scavenge phase did or did not act; see core.internal.gc.scavenger.ScavengeStats.
+// Returned whole so the caller gets a coherent snapshot, and so adding a counter cannot silently
+// renumber the ones a caller already reads.
+extern (C) ScavengeStats gc_scavenger_stats() nothrow @nogc
+{
+    return scavengerStats();
+}
+
+// Set when the phase stopped on its budget with reclaimable pages left; the application drives the
+// follow-up pass, and gc_scavenger_min_free() is the gate the phase itself uses.
+extern (C) int gc_scavenger_continuation_due() nothrow @nogc
+{
+    return scavengerMinimizeContinuationDue();
+}
+
+extern (C) size_t gc_scavenger_min_free() nothrow @nogc
+{
+    return scavengerMinFree();
+}
+
+extern (C) void gc_scavenger_inject_fail(int mode) nothrow @nogc
+{
+    scavengerInjectFail(mode);
 }
