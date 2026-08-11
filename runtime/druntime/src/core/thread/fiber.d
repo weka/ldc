@@ -1853,16 +1853,19 @@ private:
         }
         else version (AsmAArch64_Posix)
         {
-            // Like others, FP registers and return address (lr) are kept
-            // below the saved stack top (tstack) to hide from GC scanning.
+            // Unlike others, the FP registers and return address (lr) are
+            // NOT hidden below tstack: d8-d15 are callee saved, so the
+            // compiler may keep a live GC pointer in one of them across a
+            // suspension, and hiding them lets the GC collect reachable
+            // memory (see threadasm.S).
             // fiber_switchContext expects newp sp to look like this:
             //   19: x19
             //   ...
-            //    9: x29 (fp)  <-- newp tstack
+            //    9: x29 (fp)
             //    8: x30 (lr)  [&fiber_entryPoint]
             //    7: d8
             //   ...
-            //    0: d15
+            //    0: d15      <-- newp tstack (sp)
 
             version (StackGrowsDown) {}
             else
@@ -1872,7 +1875,8 @@ private:
             // zero initialized.
             pstack -= size_t.sizeof * 11;    // skip past x19-x29
             push(cast(size_t) &fiber_trampoline); // see threadasm.S for docs
-            pstack += size_t.sizeof;         // adjust sp (newp) above lr
+            pstack -= size_t.sizeof * 8;     // reserve d8-d15
+            (cast(size_t*) pstack)[0 .. 8] = 0; // now GC-scanned; clear stale data on fiber reuse
         }
         else version (AsmARM_Posix)
         {
