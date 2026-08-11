@@ -1,6 +1,6 @@
 include ../common.mak
 
-TESTS:=tlsgc_sections test_import tlsstack join_detach
+TESTS:=tlsgc_sections test_import tlsstack join_detach fiber_aarch64_gc_scan
 
 # some .d files support Posix only
 ifneq ($(OS),windows)
@@ -32,6 +32,11 @@ $(ROOT)/test_import.done: $(ROOT)/%.done : $(ROOT)/%$(DOTEXE)
 	@touch $@
 
 $(ROOT)/tlsstack.done: $(ROOT)/%.done : $(ROOT)/%$(DOTEXE)
+	@echo Testing $*
+	$(QUIET)$(TIMELIMIT)$(ROOT)/$*
+	@touch $@
+
+$(ROOT)/fiber_aarch64_gc_scan.done: $(ROOT)/%.done : $(ROOT)/%$(DOTEXE)
 	@echo Testing $*
 	$(QUIET)$(TIMELIMIT)$(ROOT)/$*
 	@touch $@
