@@ -3507,17 +3507,50 @@ private void parameterToBuffer(Parameter p, ref OutBuffer buf, ref HdrGenState h
 {
     if (p.userAttribDecl)
     {
-        buf.writeByte('@');
+        // Weka (Option A): a caller-required attribute (`@mayYield` etc.) on a parameter is
+        // kept on `userAttribDecl` (enforcement reads it) AND folded into the parameter's
+        // delegate/function TYPE, where it now renders as a clean postfix `@mayYield`. Suppress
+        // caller-attr UDAs HERE so they render once (via the type) rather than twice — and never
+        // as the raw `@((callerAttr!("mayYield", false)))` form. Non-caller UDAs still render.
+        Expressions* atts = p.userAttribDecl.atts;
+        Expressions* rendered = atts;
+        if (atts && atts.length)
+        {
+            bool hasCallerAttr;
+            foreach (e; (*atts)[])
+            {
+                const(char)[] n; bool fake;
+                if (e && isCallerAttrExp(e, n, fake))
+                    hasCallerAttr = true;
+            }
+            if (hasCallerAttr)
+            {
+                auto filtered = new Expressions();
+                foreach (e; (*atts)[])
+                {
+                    const(char)[] n; bool fake;
+                    if (e && isCallerAttrExp(e, n, fake))
+                        continue; // caller-attr: rendered via the type
+                    filtered.push(e);
+                }
+                rendered = filtered;
+            }
+        }
 
-        bool isAnonymous = p.userAttribDecl.atts.length > 0 && !(*p.userAttribDecl.atts)[0].isCallExp();
-        if (isAnonymous)
-            buf.writeByte('(');
+        if (rendered && rendered.length)
+        {
+            buf.writeByte('@');
 
-        argsToBuffer(p.userAttribDecl.atts, buf, hgs);
+            bool isAnonymous = rendered.length > 0 && !(*rendered)[0].isCallExp();
+            if (isAnonymous)
+                buf.writeByte('(');
 
-        if (isAnonymous)
-            buf.writeByte(')');
-        buf.writeByte(' ');
+            argsToBuffer(rendered, buf, hgs);
+
+            if (isAnonymous)
+                buf.writeByte(')');
+            buf.writeByte(' ');
+        }
     }
     if (p.storageClass & STC.auto_)
         buf.writestring("auto ");

@@ -137,6 +137,7 @@ import core.stdc.string;
 import dmd.aggregate;
 import dmd.arraytypes;
 import dmd.astenums;
+import dmd.attrib : isCallerAttrExp;
 import dmd.basicmangle;
 import dmd.dclass;
 import dmd.declaration;
@@ -401,11 +402,66 @@ void mangleFuncType(TypeFunction t, TypeFunction ta, ubyte modMask, Type tret, r
     buf.writeByte('Z' - t.parameterList.varargs); // mark end of arg list
     if (tret !is null)
         mangleType(tret, 0, buf, backref);
+    // Weka (Option A): caller-required attributes (`@mayYield` etc.) are part of the
+    // function/delegate TYPE identity. Emit them into `deco` so two otherwise-identical
+    // function types that differ only by a caller-attr get distinct decos, and therefore
+    // `Type.equals` / `Parameter.opEquals` treat them as distinct (breaking the overload
+    // collision even when the delegate type is routed through an alias). This replaces the
+    // old collision-gated symbol-level `mangleCallerAttrDisc` discriminator.
+    // Encoding per attr: 'Y' <'F' fake | 'R' real> <len> <name>.
+    mangleCallerAttrs(t.callerAttrs, buf);
     t.inuse--;
 }
 
 /*************************************************************
+ * Emit the caller-required attributes carried by a function/delegate type into
+ * its mangle, in declaration order. Encoding matches the retired symbol-level
+ * discriminator: 'Y' <'F' fake | 'R' real> <len> <name> per caller-attr.
  */
+void mangleCallerAttrs(Expressions* callerAttrs, ref OutBuffer buf)
+{
+    if (!callerAttrs)
+        return;
+    void emit(Expression e)
+    {
+        if (!e)
+            return;
+        const(char)[] name;
+        bool fake;
+        if (isCallerAttrExp(e, name, fake))
+        {
+            // Weka (Option B — gating): do NOT mangle FAKE (`@mayYieldUnchecked`) caller-attrs
+            // into the symbol name. Fakes are non-propagating migration shims; putting them in
+            // the mangle gives widely-shared boundary functions (e.g. ReactorThreadPool.submitTask)
+            // a caller-attr name suffix that some cross-unit / template-instantiated references
+            // fail to reproduce, causing "undefined symbol" link errors. The attribute still lives
+            // on the TYPE (`callerAttrs`) for conversion/enforcement — only the mangled NAME reverts
+            // to baseline, so definitions and all references agree. REAL `@mayYield` is still
+            // mangled (needed to keep overload siblings like the dual `opApply` distinct).
+            if (fake)
+                return;
+            buf.writeByte('Y');
+            buf.writeByte('R');
+            buf.print(cast(int) name.length);
+            buf.writestring(name);
+        }
+    }
+
+    foreach (e; (*callerAttrs)[])
+    {
+        if (auto tup = e ? e.isTupleExp() : null)
+        {
+            foreach (te; (*tup.exps)[])
+                emit(te);
+        }
+        else
+            emit(e);
+    }
+}
+
+/*************************************************************
+ */
+
 void mangleParameter(Parameter p, ref OutBuffer buf, ref Backref backref)
 {
     // https://dlang.org/spec/abi.html#Parameter
@@ -572,6 +628,11 @@ public:
         //printf("fd.type = %s\n", fd.type.toChars());
         if (fd.needThis() || fd.isNested())
             buf.writeByte('M');
+
+        // Weka (Option A): caller-required attributes are now part of the function TYPE
+        // identity and are emitted by `mangleFuncType` (see `mangleCallerAttrs`). The old
+        // collision-gated symbol-level discriminator (`mangleCallerAttrDisc`) is retired so
+        // the attribute is encoded exactly once and consistently across compilation units.
 
         if (!fd.type || fd.type.ty == Terror)
         {

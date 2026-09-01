@@ -5889,6 +5889,11 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
                 s = new AST.ExpStatement(loc, exp);
                 break;
             }
+        case TOK.at:
+            // A statement beginning with `@` is an attributed declaration. (The glued
+            // caller-attr call-site marker `callee@CTX_SWITCH(args)` never starts a
+            // statement — it lives inside the postfix-expression chain, parsePostExp.)
+            goto Ldeclaration;
         case TOK.static_:
             {
                 // Look ahead to see if it's static assert() or static if()
@@ -5974,7 +5979,6 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
         case TOK.pure_:
         case TOK.ref_:
         case TOK.gshared:
-        case TOK.at:
         case TOK.struct_:
         case TOK.union_:
         case TOK.class_:
@@ -8937,11 +8941,36 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
 
     private AST.Expression parsePostExp(AST.Expression e)
     {
+        // Glued caller-attr call-site marker (`callee@CTX_SWITCH(args)`): when `@name`
+        // appears between a callee and its call `(`, the marker is stashed here and
+        // attached to the CallExp built from that `(`.
+        Identifier pendingCallerAttr = null;
         while (1)
         {
             const loc = token.loc;
             switch (token.value)
             {
+            case TOK.at:
+                // Glued caller-attr marker `callee@CTX_SWITCH(args)`: the marker sits
+                // between the callee (including any `!(...)` template args) and the call
+                // `(`. Stash it for the upcoming `(`; with no following `(` it marks a
+                // zero-arg call (`callee@CTX_SWITCH`).
+                if (peekNext() == TOK.identifier)
+                {
+                    nextToken();                 // skip `@`
+                    pendingCallerAttr = token.ident;
+                    nextToken();                 // skip the marker identifier
+                    if (token.value != TOK.leftParenthesis)
+                    {
+                        auto ce = new AST.CallExp(loc, e);
+                        ce.markedCallerAttr = pendingCallerAttr;
+                        e = ce;
+                        pendingCallerAttr = null;
+                    }
+                    continue;
+                }
+                return e;
+
             case TOK.dot:
                 nextToken();
                 if (token.value == TOK.identifier)
@@ -8979,6 +9008,11 @@ class Parser(AST, Lexer = dmd.lexer.Lexer) : Lexer
                 AST.Identifiers* names = new AST.Identifiers();
                 parseNamedArguments(args, names);
                 e = new AST.CallExp(loc, e, args, names);
+                if (pendingCallerAttr)
+                {
+                    e.isCallExp().markedCallerAttr = pendingCallerAttr;
+                    pendingCallerAttr = null;
+                }
                 continue;
 
             case TOK.leftBracket:
