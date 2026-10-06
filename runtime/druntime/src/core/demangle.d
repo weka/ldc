@@ -305,6 +305,8 @@ pure @safe:
             }
             else
             {
+                if (empty)
+                    return 0; // invalid back reference: ran off the end of the input
                 t = front;
                 popFront();
             }
@@ -2723,6 +2725,8 @@ else
         // back references
         ["_D4core4stdc5errnoQgFZi", "int core.stdc.errno.errno()"], // identifier back reference
         ["_D4testFS10structnameQnZb", "bool test(structname, structname)"], // type back reference
+        ["_D4weka3lib9exception__T6ASSERTVAyaa37_536e617073686f742075706c6f6164206661696c6564202573202573202573202573202573VQDea6_49474e4f5245VEQ",
+        "_D4weka3lib9exception__T6ASSERTVAyaa37_536e617073686f742075706c6f6164206661696c6564202573202573202573202573202573VQDea6_49474e4f5245VEQ"],
         ["_D3std11parallelism__T4TaskS8unittest3cmpTAyaTQeZQBb6__dtorMFNfZv",
         "@safe void std.parallelism.Task!(unittest.cmp, immutable(char)[], immutable(char)[]).Task.__dtor()"],
         // 1.s.s.foo from https://issues.dlang.org/show_bug.cgi?id=15831
