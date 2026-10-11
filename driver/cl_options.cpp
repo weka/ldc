@@ -474,6 +474,13 @@ cl::opt<std::string>
              cl::desc("Write module dependencies in Makefile compatible format "
                       "to <filename>/stdout (only imports)"));
 
+cl::opt<std::string>
+    bodyUse("body-use", cl::ZeroOrMore, cl::value_desc("filename"),
+            cl::desc("Write to <filename> the modules analysed, the files of "
+                     "the function bodies analysed or interpreted, and the "
+                     "files of the declarations read by "
+                     "__traits(getLocation)"));
+
 cl::opt<bool> m32bits("m32", cl::desc("32 bit target"), cl::ZeroOrMore);
 
 cl::opt<bool> m64bits("m64", cl::desc("64 bit target"), cl::ZeroOrMore);
