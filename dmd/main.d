@@ -828,6 +828,9 @@ else
     if (params.makeDeps.doOutput)
         emitMakeDeps(params);
 
+    import dmd.bodyuse : emitBodyUse;
+    emitBodyUse();
+
     if (global.warnings)
         errorOnWarning();
 

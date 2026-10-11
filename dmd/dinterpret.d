@@ -482,6 +482,8 @@ private Expression interpretFunction(UnionExp* pue, FuncDeclaration fd, InterSta
     }
 
     assert(pue);
+    import dmd.bodyuse : recordBodyUse;
+    recordBodyUse(fd);
     if (fd.semanticRun == PASS.semantic3)
     {
         fdError("circular dependency. Functions cannot be interpreted while being compiled");

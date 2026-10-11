@@ -109,6 +109,9 @@ static cl::opt<bool> enableGC(
 // Deprecated options
 extern llvm::cl::opt<bool> checkPrintf;
 
+// in dmd/bodyuse.d
+void setBodyUseFile(const char *name);
+
 namespace {
 
 // This function exits the program.
@@ -396,6 +399,9 @@ void parseCommandLine(Strings &sourceFiles) {
     if (!makeDeps.empty())
       global.params.makeDeps.name = opts::dupPathString(makeDeps);
   }
+
+  if (!bodyUse.empty())
+    setBodyUseFile(bodyUse.c_str());
 
 #if _WIN32
   const auto toWinPaths = [](Strings &paths) {

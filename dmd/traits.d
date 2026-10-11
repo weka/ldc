@@ -2005,6 +2005,8 @@ version (IN_LLVM)
             return ErrorExp.get();
         }
 
+        import dmd.bodyuse : recordUse, Use;
+        recordUse(s.loc, Use.location);
         auto exps = new Expressions(3);
         (*exps)[0] = new StringExp(e.loc, s.loc.filename.toDString());
         (*exps)[1] = new IntegerExp(e.loc, s.loc.linnum,Type.tint32);
