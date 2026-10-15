@@ -388,6 +388,7 @@ struct Global
     unsigned gag;            // !=0 means gag reporting of errors & warnings
     unsigned gaggedErrors;   // number of errors reported while gagged
     unsigned gaggedWarnings; // number of warnings reported while gagged
+    unsigned deferredErrors; // errors printed while gagged but counted only once the outermost endGagging returns
 
     void* console;         // opaque pointer to console for controlling text attributes
 
