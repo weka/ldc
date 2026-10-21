@@ -181,8 +181,9 @@ private:
 // - pointers to size_t.
 template BaseType(T)
 {
+    import core.internal.traits : lvalueOf;
     static if (__traits(isStaticArray, T))
-        alias BaseType = BaseType!(typeof(T.init[0]));
+        alias BaseType = BaseType!(typeof(lvalueOf!T[0]));
     else static if (is(immutable T == immutable void))
         alias BaseType = ubyte;
     else static if (is(T == E*, E))

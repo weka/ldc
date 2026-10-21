@@ -248,8 +248,8 @@ template hasElaborateMove(S)
     }
     else static if (is(S == struct))
     {
-        enum hasElaborateMove = (is(typeof(S.init.opPostMove(lvalueOf!S))) &&
-                                    !is(typeof(S.init.opPostMove(rvalueOf!S)))) ||
+        enum hasElaborateMove = (is(typeof(lvalueOf!S.opPostMove(lvalueOf!S))) &&
+                                    !is(typeof(lvalueOf!S.opPostMove(rvalueOf!S)))) ||
                                 anySatisfy!(.hasElaborateMove, Fields!S);
     }
     else
@@ -331,8 +331,8 @@ template hasElaborateAssign(S)
     }
     else static if (is(S == struct))
     {
-        enum hasElaborateAssign = is(typeof(S.init.opAssign(rvalueOf!S))) ||
-                                  is(typeof(S.init.opAssign(lvalueOf!S))) ||
+        enum hasElaborateAssign = is(typeof(lvalueOf!S.opAssign(rvalueOf!S))) ||
+                                  is(typeof(lvalueOf!S.opAssign(lvalueOf!S))) ||
                                   anySatisfy!(.hasElaborateAssign, Fields!S);
     }
     else
@@ -428,7 +428,7 @@ private template AliasThisTypeOf(T)
     alias members = __traits(getAliasThis, T);
 
     static if (members.length == 1)
-        alias AliasThisTypeOf = typeof(__traits(getMember, T.init, members[0]));
+        alias AliasThisTypeOf = typeof(__traits(getMember, lvalueOf!T, members[0]));
     else
         static assert(0, T.stringof~" does not have alias this type");
 }

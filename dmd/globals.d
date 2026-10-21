@@ -405,6 +405,7 @@ extern (C++) struct Global
     uint gag;               /// !=0 means gag reporting of errors & warnings
     uint gaggedErrors;      /// number of errors reported while gagged
     uint gaggedWarnings;    /// number of warnings reported while gagged
+    uint deferredErrors;    /// errors printed while gagged but counted only once the outermost `endGagging` returns
 
     void* console;         /// opaque pointer to console for controlling text attributes
 
@@ -478,6 +479,11 @@ else
         // to be original errors + new ungagged errors.
         errors -= (gaggedErrors - oldGagged);
         gaggedErrors = oldGagged;
+        if (!gag)
+        {
+            errors += deferredErrors;
+            deferredErrors = 0;
+        }
         return anyErrs;
     }
 

@@ -2952,6 +2952,255 @@ Type merge2(Type type)
     return t;
 }
 
+/* `.init` of a static array, struct, vector or sequence type is built as a literal
+ * (`Type.defaultInitLiteral`) that holds one pointer-sized slot per static-array element
+ * and per struct field, so it costs compiler memory even when only its type is used, as in
+ * `typeof(T.init.field)`. Report a literal whose cost exceeds the --ctfe-max-alloc limit.
+ * The report bypasses gagging: inside `is(typeof(...))` or `__traits(compiles, ...)` a
+ * gagged error would only flip the result, which silently changes traits built on them.
+ * Under a gag the error is counted only when the outermost gag ends, so the gagged code
+ * sees no error: a gagged instance whose semantic changes `global.errors` is discarded
+ * while its speculative caller, seeing no gagged error, goes on using it.
+ */
+private void checkInitLiteralSize(Type t, Scope* sc, const ref Loc loc)
+{
+    const limit = global.params.ctfeMaxAllocSize;
+    if (limit == 0)
+        return;
+    ulong cost;
+    initLiteralCost(t, cost, limit, loc);
+    if (cost <= limit)
+        return;
+
+    const oldGag = global.gag;
+    global.gag = 0;
+    scope (exit)
+    {
+        global.gag = oldGag;
+        if (oldGag)
+        {
+            --global.errors;
+            ++global.deferredErrors;
+        }
+    }
+    OutBuffer name;
+    safeName(t, name);
+    error(loc, "`%s.init` builds a literal of at least %llu bytes, which exceeds `--ctfe-max-alloc=%llu`",
+        name.peekChars(), cost, cast(ulong)limit);
+    errorSupplemental(loc,
+        "take the property from the type, e.g. `typeof(T.field)` rather than `typeof(T.init.field)`");
+    // Not TemplateInstance.printInstantiationTrace: it marks every instance in the
+    // chain as failed, which would change the result of a speculative instantiation.
+    // `is(...)`, `__traits(compiles, ...)` and `static assert` clear sc.tinst (`typeof`
+    // does not), so fall back to the enclosing instance.
+    TemplateInstance first = sc ? sc.tinst : null;
+    if (!first && sc && sc.parent)
+    {
+        first = sc.parent.isTemplateInstance();
+        if (!first || first.isTemplateMixin())
+            first = sc.parent.isInstantiated();
+    }
+    const maxShown = global.params.v.errorSupplementCount();
+    uint shown;
+    for (TemplateInstance ti = first; ti; ti = ti.tinst)
+    {
+        if (shown++ == maxShown)
+        {
+            errorSupplemental(ti.loc, "... (more instantiations, -v to show) ...");
+            break;
+        }
+        OutBuffer tiName;
+        safeName(ti, tiName);
+        errorSupplemental(ti.loc, "instantiated from here: `%s`", tiName.peekChars());
+    }
+}
+
+/* Adds to `cost` the bytes `t.defaultInitLiteral` allocates, following its structure:
+ * one slot per static-array element, per struct field and per sequence element. The
+ * literal of an array's element type is built once and shared by all elements, a struct
+ * field with an explicit initializer reuses the initializer's expression
+ * (`getConstInitializer` allocates nothing for an analyzed `ExpInitializer`), and any
+ * other field's type gets a literal of its own. `cost` saturates at ulong.max and the
+ * walk stops once it exceeds `limit`, so it is a lower bound then.
+ */
+private void initLiteralCost(Type t, ref ulong cost, ulong limit, const ref Loc loc)
+{
+    static void addSlots(ref ulong cost, ulong slots)
+    {
+        bool overflow;
+        const bytes = mulu(slots, (Expression*).sizeof, overflow);
+        cost = addu(cost, bytes, overflow);
+        if (overflow)
+            cost = ulong.max;
+    }
+
+    if (cost > limit)
+        return;
+    switch (t.ty)
+    {
+    case Tvector:
+    {
+        initLiteralCost(t.isTypeVector().basetype, cost, limit, loc);
+        break;
+    }
+    case Tsarray:
+    {
+        auto tsa = t.isTypeSArray();
+        addSlots(cost, tsa.dim.toInteger());
+        // `void` elements are built as `ubyte`, which allocates nothing.
+        if (tsa.next.ty != Tvoid)
+            initLiteralCost(tsa.next, cost, limit, loc);
+        break;
+    }
+    case Tstruct:
+    {
+        auto sd = t.isTypeStruct().sym;
+        sd.size(loc);
+        if (sd.sizeok != Sizeok.done)
+            break;
+        const nfields = sd.nonHiddenFields();
+        addSlots(cost, nfields);
+        uint offset = 0;
+        foreach (j; 0 .. nfields)
+        {
+            if (cost > limit)
+                break;
+            VarDeclaration vd = sd.fields[j];
+            if (vd.inuse)
+                break;
+            if (vd.offset < offset || vd.type.size() == 0)
+                continue;
+            if (vd._init)
+            {
+                if (vd._init.isVoidInitializer())
+                    continue;
+            }
+            else
+                initLiteralCost(vd.type, cost, limit, loc);
+            offset = vd.offset + cast(uint)vd.type.size();
+        }
+        break;
+    }
+    case Ttuple:
+    {
+        auto args = t.isTypeTuple().arguments;
+        addSlots(cost, args.length);
+        foreach (p; *args)
+            initLiteralCost(p.type, cost, limit, loc);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
+/* Like toChars(), but never evaluates a template argument. toChars() optimizes a
+ * variable argument to its value, and when the variable is a manifest constant still
+ * being initialized (e.g. druntime's `hasContextPointers` passing itself to
+ * `anySatisfy`), that fails with "recursive initialization of constant".
+ */
+private void safeName(RootObject o, ref OutBuffer buf, MOD outerMod = 0)
+{
+    if (!o)
+        return;
+    if (auto ti = isDsymbol(o) ? isDsymbol(o).isTemplateInstance() : null)
+    {
+        buf.writestring(ti.name.toString());
+        buf.writestring("!(");
+        if (ti.tiargs)
+            foreach (i, arg; *ti.tiargs)
+            {
+                if (i)
+                    buf.writestring(", ");
+                safeName(arg, buf);
+            }
+        buf.writeByte(')');
+    }
+    else if (auto t = isType(o))
+    {
+        // As hdrgen: a modifier the enclosing type already applies is not repeated.
+        const m = cast(MOD)(t.mod & ~outerMod);
+        if (m)
+        {
+            buf.writestring(MODtoString(m));
+            buf.writeByte('(');
+        }
+        if (auto ts = t.isTypeSArray())
+        {
+            safeName(ts.next, buf, t.mod);
+            buf.writeByte('[');
+            if (auto ie = ts.dim.isIntegerExp())
+                buf.print(ie.toInteger());
+            else
+                buf.writestring("...");
+            buf.writeByte(']');
+        }
+        else if (auto ta = t.isTypeDArray())
+        {
+            safeName(ta.next, buf, t.mod);
+            buf.writestring("[]");
+        }
+        else if (auto tp = t.isTypePointer())
+        {
+            safeName(tp.next, buf, t.mod);
+            buf.writeByte('*');
+        }
+        else if (auto ts = t.isTypeStruct())
+            safeAggregateName(ts.sym, buf);
+        else if (auto tc = t.isTypeClass())
+            safeAggregateName(tc.sym, buf);
+        else if (auto te = t.isTypeEnum())
+            safeAggregateName(te.sym, buf);
+        else if (auto tt = t.isTypeTuple())
+        {
+            buf.writeByte('(');
+            foreach (i, p; *tt.arguments)
+            {
+                if (i)
+                    buf.writestring(", ");
+                safeName(p.type, buf);
+            }
+            buf.writeByte(')');
+        }
+        else if (t.isTypeBasic())
+            buf.writestring(t.castMod(0).toChars().toDString());
+        else
+            buf.writestring(t.kind().toDString());
+        if (m)
+            buf.writeByte(')');
+    }
+    else if (auto e = isExpression(o))
+    {
+        if (auto ve = e.isVarExp())
+            buf.writestring(ve.var.ident ? ve.var.ident.toString() : "...");
+        else
+            buf.writestring(e.toChars().toDString());
+    }
+    else if (auto s = isDsymbol(o))
+        buf.writestring(s.ident ? s.ident.toString() : s.kind().toDString());
+    else if (auto tup = isTuple(o))
+    {
+        foreach (i, arg; tup.objects)
+        {
+            if (i)
+                buf.writestring(", ");
+            safeName(arg, buf);
+        }
+    }
+    else
+        buf.writestring("...");
+}
+
+private void safeAggregateName(Dsymbol sym, ref OutBuffer buf)
+{
+    // As hdrgen prints a type: an eponymous member is named by its template instance.
+    TemplateInstance ti = sym.parent ? sym.parent.isTemplateInstance() : null;
+    if (ti && ti.aliasdecl == sym)
+        safeName(ti, buf);
+    else
+        buf.writestring(sym.ident.toString());
+}
+
 /***************************************
  * Calculate built-in properties which just the type is necessary.
  *
@@ -2992,6 +3241,7 @@ Expression getProperty(Type t, Scope* scope_, const ref Loc loc, Identifier iden
         else if (ident == Id._init)
         {
             Type tb = mt.toBasetype();
+            checkInitLiteralSize(mt, scope_, loc);
             e = mt.defaultInitLiteral(loc);
             if (tb.ty == Tstruct && tb.needsNested())
             {
@@ -3353,6 +3603,7 @@ Expression getProperty(Type t, Scope* scope_, const ref Loc loc, Identifier iden
         }
         else if (ident == Id._init)
         {
+            checkInitLiteralSize(mt, scope_, loc);
             e = mt.defaultInitLiteral(loc);
         }
         else if (flag)
@@ -4099,6 +4350,7 @@ Expression dotExp(Type mt, Scope* sc, Expression e, Identifier ident, DotExpFlag
             else if (ident == Id._init)
             {
                 Type tb = mt.toBasetype();
+                checkInitLiteralSize(mt, sc, e.loc);
                 e = mt.defaultInitLiteral(e.loc);
                 if (tb.ty == Tstruct && tb.needsNested())
                 {
