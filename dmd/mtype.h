@@ -572,6 +572,7 @@ public:
     PURE purity;                 // PURExxxx
     char inuse;
     ArgumentList inferenceArguments; // function arguments
+    Expressions *callerAttrs;        // Weka: caller-required attributes in the type identity
 
     static TypeFunction *create(Parameters *parameters, Type *treturn, VarArg varargs, LINK linkage, StorageClass stc = 0);
     const char *kind() override;

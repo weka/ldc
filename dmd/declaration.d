@@ -1166,6 +1166,7 @@ version (IN_LLVM)
         bool doNotInferReturn;  /// do not infer 'return' for this variable
 
         bool isArgDtorVar;      /// temporary created to handle scope destruction of a function argument
+        bool callerAttrForeachRange; /// Option A: compiler-generated `foreach` range temp (`__r`); @ATTR calls on it (.empty/.front/.popFront/.back/.popBack) are treated as implicitly marked
         bool isCmacro;          /// it is a C macro turned into a C declaration
         bool dllImport;         /// __declspec(dllimport)
         bool dllExport;         /// __declspec(dllexport)

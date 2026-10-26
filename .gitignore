@@ -1,0 +1,3 @@
+
+# LDC out-of-source build dir (do not commit binaries/CMake artifacts)
+/build/

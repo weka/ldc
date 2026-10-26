@@ -302,3 +302,37 @@ enum mustuse;
  * This is only allowed on `shared` static constructors, not thread-local module constructors.
  */
 enum standalone;
+
+/**
+ * Option A — caller-required attributes (Weka extension).
+ *
+ * `callerAttr!"NAME"` produces a compiler-recognized UDA type. A function tagged
+ * with such a UDA "carries" the named caller-required attribute; every call to it
+ * must be written with the glued call-site marker `callee@NAME(args)`, and the
+ * enclosing function must itself carry `NAME` (the property propagates upward to
+ * a single declared root). `callerAttrUnchecked!"NAME"` is the migration variant:
+ * it carries the attribute for forwarding but does not force the requirement onto
+ * its callers.
+ *
+ * Example:
+ * ---
+ * import core.attribute : callerAttr, callerAttrUnchecked;
+ * alias mayYield          = callerAttr!"mayYield";
+ * alias mayYieldUnchecked = callerAttrUnchecked!"mayYield";
+ *
+ * @mayYield void yieldNow() {}
+ * @mayYield void worker() { yieldNow@mayYield(); }   // ok
+ * void bad()              { yieldNow@mayYield(); }   // error: bad is not @mayYield
+ * ---
+ */
+struct callerAttr(string name_, bool fake_ = false)
+{
+    enum string name = name_;
+    enum bool fake = fake_;
+}
+
+/// ditto
+template callerAttrUnchecked(string name_)
+{
+    alias callerAttrUnchecked = callerAttr!(name_, true);
+}

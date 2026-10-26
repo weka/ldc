@@ -3078,6 +3078,11 @@ extern (C++) final class TypeFunction : TypeNext
     PURE purity = PURE.impure;
     byte inuse;
     ArgumentList inferenceArguments; // function arguments to determine `auto ref` in type semantic
+    Expressions* callerAttrs;        // Weka: caller-required attributes (`@mayYield` etc.) carried by
+                                     // this function/delegate type. Part of the type identity —
+                                     // participates in typeof/equals/deco-mangling/implicitConvTo.
+                                     // Holds the `callerAttr!(name, fake)` UDA TypeExps; decode via
+                                     // isCallerAttrExp(). null == none.
 
     extern (D) this(ParameterList pl, Type treturn, LINK linkage, StorageClass stc = 0) @safe
     {
@@ -3151,6 +3156,7 @@ extern (C++) final class TypeFunction : TypeNext
         t.isInOutQual = isInOutQual;
         t.trust = trust;
         t.inferenceArguments = inferenceArguments;
+        t.callerAttrs = callerAttrs;
         t.isctor = isctor;
         return t;
     }
@@ -5278,6 +5284,35 @@ void attributesApply(const TypeFunction tf, void delegate(string) dg, TRUSTforma
         dg("scope");
     if (tf.islive)
         dg("@live");
+
+    // Weka (Option A): caller-required attributes (`@mayYield` etc.) are part of the type
+    // identity; render them as postfix attributes (consistent with `@nogc`/`@live`) so a
+    // `@mayYield` delegate/function type shows `@mayYield` in `typeof`/`.stringof` and error
+    // messages distinguish it from a plain one. Only REAL (non-fake) attrs are shown.
+    if (tf.callerAttrs)
+    {
+        import dmd.attrib : isCallerAttrExp;
+        auto attrs = cast(Expressions*) tf.callerAttrs;
+        void emit(Expression e)
+        {
+            if (!e)
+                return;
+            const(char)[] name;
+            bool fake;
+            if (isCallerAttrExp(e, name, fake) && !fake)
+                dg("@" ~ cast(string) name);
+        }
+        foreach (e; (*attrs)[])
+        {
+            if (auto tup = e ? e.isTupleExp() : null)
+            {
+                foreach (te; (*tup.exps)[])
+                    emit(te);
+            }
+            else
+                emit(e);
+        }
+    }
 
     TRUST trustAttrib = tf.trust;
 

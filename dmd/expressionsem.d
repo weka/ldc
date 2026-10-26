@@ -6625,6 +6625,7 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
                 exp.f.checkPurity(exp.loc, sc);
                 exp.f.checkSafety(exp.loc, sc);
                 exp.f.checkNogc(exp.loc, sc);
+                checkCallerAttr(exp, sc, exp.f);
                 if (exp.f.checkNestedReference(sc, exp.loc))
                     return setError();
             }
@@ -6653,6 +6654,12 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
                 if (err)
                     return setError();
             }
+
+            // Option A: caller-attr enforcement for indirect (delegate / function-pointer)
+            // calls. The attribute is carried by the callee variable's declaration, e.g.
+            // a `@CTX_SWITCH void delegate()` parameter.
+            if (!exp.f)
+                checkCallerAttr(exp, sc, callerAttrCalleeVar(exp.e1));
 
             if (t1.ty == Tpointer)
             {
@@ -6763,6 +6770,10 @@ private extern (C++) final class ExpressionSemanticVisitor : Visitor
             exp.arguments = new Expressions();
         if (functionParameters(exp.loc, sc, cast(TypeFunction)t1, ethis, tthis, exp.argumentList, exp.f, &exp.type, &argprefix))
             return setError();
+
+        // Option A: a context-switching callable (e.g. a lambda that infers @CTX_SWITCH)
+        // may only be passed to a parameter that itself carries that caller-attribute.
+        checkCallerAttrArgs(exp, sc, cast(TypeFunction)t1);
 
         if (!exp.type)
         {
@@ -16276,6 +16287,406 @@ bool checkAddressable(Expression e, Scope* sc)
  *  f   = function to be checked
  * Returns: `true` if error occur.
  */
+/******************************************
+ * Option A — caller-required attributes (e.g. `@CTX_SWITCH`).
+ *
+ * Returns true (filling `name`/`fake`) if `ident`, resolved in `sc`, names a
+ * `callerAttr` alias — i.e. a `@ATTR` glued call-site marker (`callee@ATTR(args)`).
+ */
+private bool callerAttrMarkerName(Scope* sc, Loc loc, Identifier ident, out const(char)[] name, out bool fake)
+{
+    if (!ident)
+        return false;
+    Dsymbol pscopesym;
+    Dsymbol s = sc.search(loc, ident, pscopesym);
+    if (!s)
+        return false;
+    s = s.toAlias();
+    if (auto t = s.getType())
+        if (auto ts = t.isTypeStruct())
+            return isCallerAttrStruct(ts.sym, name, fake);
+    if (auto sd = s.isStructDeclaration())
+        return isCallerAttrStruct(sd, name, fake);
+    return false;
+}
+
+/// Returns true if function `fd` carries the caller-attribute `wantName` with the given `wantFake` flag.
+private bool symCarriesCallerAttr(Dsymbol sym, Scope* sc, const(char)[] wantName, bool wantFake)
+{
+    if (!sym)
+        return false;
+    bool found;
+    foreachUda(sym, sc, (Expression e) {
+        const(char)[] n;
+        bool f;
+        if (isCallerAttrExp(e, n, f) && f == wantFake && n == wantName)
+        {
+            found = true;
+            return 1;
+        }
+        return 0;
+    });
+    return found;
+}
+
+/// Returns the UDA-carrying variable behind a callee expression, for indirect
+/// (delegate / function-pointer) calls — e.g. the parameter `dg` in `dg.ATTR()`.
+private VarDeclaration callerAttrCalleeVar(Expression e1)
+{
+    if (auto ve = e1.isVarExp())
+        return ve.var ? ve.var.isVarDeclaration() : null;
+    if (auto dve = e1.isDotVarExp())
+        return dve.var ? dve.var.isVarDeclaration() : null;
+    return null;
+}
+
+/******************************************
+ * Option A enforcement, run per call. `callee` is the UDA-carrying symbol of the
+ * thing being called: a `FuncDeclaration` for a direct call, or the delegate /
+ * function-pointer `VarDeclaration` for an indirect call (may be null when the
+ * callee carries no usable symbol, e.g. a function literal).
+ *
+ *  - the `@ATTR` glued marker must match the callee's actual caller-attributes (E2/E3),
+ *  - a caller-required attribute propagates upward: the enclosing function must
+ *    itself carry it (E1), unless the callee is a `callerAttrUnchecked` migration shim.
+ */
+private void checkCallerAttr(CallExp ce, Scope* sc, Dsymbol callee)
+{
+    if (ce.ignoreAttributes)
+        return;
+
+    // The parser records the raw marker identifier (`@CTX_SWITCH`); resolve it through
+    // its `callerAttr` alias to the actual attribute name.
+    const(char)[] markName = null;
+    if (ce.markedCallerAttr)
+    {
+        bool mfake;
+        if (!callerAttrMarkerName(sc, ce.loc, ce.markedCallerAttr, markName, mfake))
+        {
+            error(ce.loc, "`@%s` is not a caller-required attribute (declare it with `callerAttr`)",
+                ce.markedCallerAttr.toChars());
+            return;
+        }
+    }
+    bool markerMatched = false;
+
+    // A call is "auto-marked" when it is compiler-generated with no place for a user marker:
+    // a `foreach`->`opApply` lowering (ce.callerAttrAutoMarked), or a `foreach` range-primitive
+    // call (`__r.empty`/`.front`/`.popFront`/`.back`/`.popBack`) on the generated range temp.
+    // Such calls skip the E2 marker requirement but still propagate via E1.
+    bool autoMarked = ce.callerAttrAutoMarked;
+    if (!autoMarked)
+        if (auto dve = ce.e1.isDotVarExp())
+            if (auto ve = dve.e1.isVarExp())
+                if (auto vd = ve.var ? ve.var.isVarDeclaration() : null)
+                    if (vd.callerAttrForeachRange)
+                        autoMarked = true;
+
+    if (callee)
+    foreachUda(callee, sc, (Expression e) {
+        const(char)[] name;
+        bool fake;
+        if (!isCallerAttrExp(e, name, fake))
+            return 0;
+
+        if (markName !is null && markName == name)
+            markerMatched = true;
+
+        if (fake)
+            return 0; // fake shim: no marker requirement, no propagation
+
+        // E2: a `@name` call must carry the glued `callee@name()` marker — unless this is a
+        // compiler-generated call that is implicitly marked (e.g. a `foreach`->`opApply` lowering),
+        // where there is no place for a user marker; such calls still propagate via E1 below.
+        if ((markName is null || markName != name) && !autoMarked)
+        {
+            error(ce.loc, "call to `@%.*s` function `%s` must be marked `%s@%.*s()`",
+                cast(int) name.length, name.ptr, callee.toPrettyChars(),
+                ce.e1.toChars(), cast(int) name.length, name.ptr);
+            return 0;
+        }
+
+        // E1: upward propagation — the enclosing function must itself carry `name`
+        // (real or fake). Exception: a lambda (function literal) infers the
+        // attribute from its body instead of erroring, just like `@nogc`/`@safe`,
+        // so an in-place lambda may perform a marked context-switch call.
+        if (sc.func &&
+            !symCarriesCallerAttr(sc.func, sc, name, false) &&
+            !symCarriesCallerAttr(sc.func, sc, name, true))
+        {
+            if (sc.func.isFuncLiteralDeclaration())
+            {
+                recordInferredCallerAttr(sc.func, name); // lambda infers `@name`
+                // Remember where the lambda first context-switches, so a `foreach` over this body
+                // can point its propagation error at the real `... @name` call (see below).
+                if (cast(void*) sc.func !in inferredCallerAttrLocByFunc)
+                    inferredCallerAttrLocByFunc[cast(void*) sc.func] = ce.loc;
+            }
+            else
+            {
+                // For a compiler-generated `foreach`->`opApply` call (auto-marked, no user marker),
+                // report at the context-switching call inside the loop body and word it for the
+                // foreach case, instead of pointing at the generated call site.
+                if (ce.callerAttrAutoMarked && ce.arguments)
+                {
+                    foreach (a; *ce.arguments)
+                    {
+                        auto bodyFd = argCallable(a);
+                        if (bodyFd)
+                            if (auto p = cast(void*) bodyFd in inferredCallerAttrLocByFunc)
+                            {
+                                error(*p, "non-`@%.*s` %s `%s` context-switches here (via `foreach` over `@%.*s` function `%s`)",
+                                    cast(int) name.length, name.ptr, sc.func.kind(), sc.func.toPrettyChars(),
+                                    cast(int) name.length, name.ptr, callee.toPrettyChars());
+                                return 0;
+                            }
+                    }
+                }
+                error(ce.loc, "non-`@%.*s` %s `%s` cannot call `@%.*s` function `%s`",
+                    cast(int) name.length, name.ptr, sc.func.kind(), sc.func.toPrettyChars(),
+                    cast(int) name.length, name.ptr, callee.toPrettyChars());
+            }
+        }
+        return 0;
+    });
+
+    // E3: a `@name` marker was written, but the callee carries no such attribute.
+    if (markName !is null && !markerMatched)
+    {
+        const(char)* who = callee ? callee.toPrettyChars() : ce.e1.toChars();
+        error(ce.loc, "`%s` is not a `@%.*s` function; remove the `@%.*s` marker",
+            who, cast(int) markName.length, markName.ptr,
+            cast(int) markName.length, markName.ptr);
+    }
+}
+
+// Side table of caller-attributes inferred on function literals (lambdas), keyed by
+// the literal's declaration. Avoids adding a field to the C++-mirrored FuncDeclaration.
+private __gshared const(char)[][][void*] inferredCallerAttrsByFunc;
+
+// Side table: where each lambda first performs a context-switching call. Used to point a `foreach`'s
+// propagation error at the real `... @ATTR` call inside the loop body (the body is lowered to this lambda).
+private __gshared Loc[void*] inferredCallerAttrLocByFunc;
+
+private void recordInferredCallerAttr(FuncDeclaration fd, const(char)[] name)
+{
+    auto key = cast(void*) fd;
+    if (auto existing = key in inferredCallerAttrsByFunc)
+    {
+        foreach (n; *existing)
+            if (n == name)
+                return;
+        *existing ~= name;
+    }
+    else
+        inferredCallerAttrsByFunc[key] = [name];
+}
+
+/// Weka (Option A): the REAL caller-attribute names inferred for `fd` (e.g. a `foreach`
+/// body lowered to a lambda that performs a context-switching call). Used to reflect the
+/// inferred attribute into the lambda's delegate TYPE so it matches a `@mayYield` `opApply`
+/// parameter exactly (and, per the asymmetric conversion rule, no longer matches the plain
+/// overload). Returns an empty slice if none.
+const(char)[][] funcInferredCallerAttrNames(FuncDeclaration fd)
+{
+    if (!fd)
+        return null;
+    if (auto existing = cast(void*) fd in inferredCallerAttrsByFunc)
+        return *existing;
+    return null;
+}
+
+/// Does `fd` carry caller-attribute `name` — either explicitly (UDA) or inferred (lambda)?
+private bool funcHasCallerAttr(FuncDeclaration fd, Scope* sc, const(char)[] name)
+{
+    if (!fd)
+        return false;
+    if (symCarriesCallerAttr(fd, sc, name, false) || symCarriesCallerAttr(fd, sc, name, true))
+        return true;
+    if (auto existing = cast(void*) fd in inferredCallerAttrsByFunc)
+        foreach (n; *existing)
+            if (n == name)
+                return true;
+    return false;
+}
+
+/// Returns the callable behind an argument expression, if it is a function/delegate
+/// literal or a reference to a function (`&fn`).
+private FuncDeclaration argCallable(Expression a)
+{
+    if (auto ce2 = a.isCommaExp())
+        a = ce2.e2;
+    if (auto fe = a.isFuncExp())
+        return fe.fd;
+    if (auto de = a.isDelegateExp())
+        return de.func;
+    if (auto soe = a.isSymOffExp())
+        return soe.var ? soe.var.isFuncDeclaration() : null;
+    if (auto ve = a.isVarExp())
+        return ve.var ? ve.var.isFuncDeclaration() : null;
+    return null;
+}
+
+/// True if parameter `p` carries caller-attribute `name` (real or fake).
+private bool paramCarriesCallerAttr(Parameter p, Scope* sc, const(char)[] name)
+{
+    if (!p || !p.userAttribDecl)
+        return false;
+    bool found;
+    auto udas = p.userAttribDecl.getAttributes();
+    arrayExpressionSemantic(udas.peekSlice(), sc, true);
+    foreach (uda; *udas)
+    {
+        auto tup = uda.isTupleExp();
+        if (!tup)
+            continue;
+        foreach (e; *tup.exps)
+        {
+            const(char)[] n;
+            bool f;
+            if (isCallerAttrExp(e, n, f) && n == name)
+                found = true;
+        }
+    }
+    return found;
+}
+
+/******************************************
+ * Option A value-side check: a context-switching callable argument (e.g. a lambda
+ * that infers `@CTX_SWITCH`, or a function carrying it) may only be passed to a
+ * parameter that itself carries that caller-attribute. Otherwise the capability
+ * would leak into a context that never acknowledged it.
+ */
+private void checkCallerAttrArgs(CallExp ce, Scope* sc, TypeFunction tf)
+{
+    if (ce.ignoreAttributes || !tf || !ce.arguments)
+        return;
+    const size_t nparams = tf.parameterList.length;
+    foreach (i, arg; (*ce.arguments)[])
+    {
+        if (i >= nparams)
+            break;
+        auto callee = argCallable(arg);
+        if (!callee)
+            continue;
+        Parameter p = tf.parameterList[i];
+        // For every caller-attribute the argument carries (explicit or inferred),
+        // the parameter must carry it too.
+        const(char)* calleeDesc = callee.isFuncLiteralDeclaration() ? "lambda" : callee.toPrettyChars();
+        void checkName(const(char)[] name)
+        {
+            if (name.length && !paramCarriesCallerAttr(p, sc, name))
+                error(ce.loc, "cannot pass `@%.*s` %s to non-`@%.*s` parameter `%s`",
+                    cast(int) name.length, name.ptr, calleeDesc,
+                    cast(int) name.length, name.ptr,
+                    p.ident ? p.ident.toChars() : arg.toChars());
+        }
+        // explicit UDAs on the callee
+        foreachUda(callee, sc, (Expression e) {
+            const(char)[] n;
+            bool f;
+            if (isCallerAttrExp(e, n, f) && !f)
+                checkName(n);
+            return 0;
+        });
+        // inferred (lambda) caller-attrs
+        if (auto existing = cast(void*) callee in inferredCallerAttrsByFunc)
+            foreach (n; *existing)
+                checkName(n);
+    }
+}
+
+/******************************************
+ * Option A overload tie-breaker. Two overloads can match a call identically by type yet differ only
+ * by a parameter's caller-required attribute (a UDA, not part of the type), which makes the call
+ * ambiguous. Prefer the overload whose parameter caller-attrs best fit the arguments': a
+ * context-switching callable argument selects the overload whose matching parameter carries the
+ * attribute; a plain argument selects the overload whose parameter does not. Returns the preferred
+ * function, or null when caller-attributes are not involved / do not disambiguate.
+ */
+FuncDeclaration disambiguateCallerAttrOverload(FuncDeclaration f1, FuncDeclaration f2, Expressions* fargs, Scope* sc)
+{
+    if (!fargs || !f1 || !f2)
+        return null;
+
+    // Caller-attr names carried by a parameter (real or fake).
+    static void paramCallerAttrNames(Parameter p, Scope* sc, ref const(char)[][] names)
+    {
+        if (!p || !p.userAttribDecl)
+            return;
+        auto udas = p.userAttribDecl.getAttributes();
+        arrayExpressionSemantic(udas.peekSlice(), sc, true);
+        foreach (uda; *udas)
+        {
+            auto tup = uda.isTupleExp();
+            if (!tup)
+                continue;
+            foreach (e; *tup.exps)
+            {
+                const(char)[] n; bool f;
+                if (isCallerAttrExp(e, n, f))
+                    names ~= n;
+            }
+        }
+    }
+    // Caller-attr names carried by a callable argument (explicit non-fake UDA + inferred on a lambda).
+    static void calleeCallerAttrNames(FuncDeclaration callee, Scope* sc, ref const(char)[][] names)
+    {
+        foreachUda(callee, sc, (Expression e) {
+            const(char)[] n; bool f;
+            if (isCallerAttrExp(e, n, f) && !f)
+                names ~= n;
+            return 0;
+        });
+        if (auto existing = cast(void*) callee in inferredCallerAttrsByFunc)
+            foreach (n; *existing)
+                names ~= n;
+    }
+    static bool hasName(const(char)[][] names, const(char)[] n)
+    {
+        foreach (x; names)
+            if (x == n)
+                return true;
+        return false;
+    }
+
+    bool relevant = false;
+    int mismatches(FuncDeclaration f)
+    {
+        auto tf = f.type ? f.type.isTypeFunction() : null;
+        if (!tf)
+            return int.max;
+        const np = tf.parameterList.length;
+        int m = 0;
+        foreach (i, arg; (*fargs)[])
+        {
+            if (i >= np)
+                break;
+            auto callable = argCallable(arg);
+            if (!callable)
+                continue;
+            const(char)[][] an, pn;
+            calleeCallerAttrNames(callable, sc, an);
+            paramCallerAttrNames(tf.parameterList[i], sc, pn);
+            if (an.length || pn.length)
+                relevant = true;
+            foreach (n; an) if (!hasName(pn, n)) m++;   // arg carries it, the parameter doesn't
+            foreach (n; pn) if (!hasName(an, n)) m++;   // parameter carries it, the arg doesn't
+        }
+        return m;
+    }
+
+    const m1 = mismatches(f1);
+    const m2 = mismatches(f2);
+    if (!relevant)
+        return null;
+    if (m1 < m2)
+        return f1;
+    if (m2 < m1)
+        return f2;
+    return null;
+}
+
 private bool checkFunctionAttributes(Expression exp, Scope* sc, FuncDeclaration f)
 {
     bool error = f.checkDisabled(exp.loc, sc);
@@ -16283,6 +16694,8 @@ private bool checkFunctionAttributes(Expression exp, Scope* sc, FuncDeclaration 
     error |= f.checkPurity(exp.loc, sc);
     error |= f.checkSafety(exp.loc, sc);
     error |= f.checkNogc(exp.loc, sc);
+    if (auto ce = exp.isCallExp())
+        checkCallerAttr(ce, sc, f);
     return error;
 }
 
