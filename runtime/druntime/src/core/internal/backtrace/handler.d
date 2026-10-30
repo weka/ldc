@@ -63,11 +63,13 @@ class LibunwindHandler : Throwable.TraceInfo
         while (frames_to_skip > 0 && unw_step(&cursor) > 0)
             --frames_to_skip;
 
-        unw_proc_info_t pip = void;
+        // The return address less one, as the execinfo DefaultTraceInfo records, so the frame resolves to
+        // the line of the call; the function's start would resolve to the line of its declaration.
         foreach (idx, ref frame; this.callstack)
         {
-            if (unw_get_proc_info(&cursor, &pip) == 0)
-                frame.address += pip.start_ip;
+            unw_word_t ip = void;
+            if (unw_get_reg(&cursor, UNW_REG_IP, &ip) == 0)
+                frame.address = cast(const(void)*) (ip - 1);
 
             this.numframes++;
             if (unw_step(&cursor) <= 0)
@@ -104,8 +106,8 @@ class LibunwindHandler : Throwable.TraceInfo
                     return info.dli_fname[0 .. strlen(info.dli_fname)];
             }
 
-            // `dladdr` failed
-            return "<ERROR: Unable to retrieve function name>";
+            // `dladdr` finds nothing in a static executable: no name, as with execinfo
+            return null;
         }
 
         return traceHandlerOpApplyImpl(numframes,

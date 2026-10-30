@@ -28,7 +28,10 @@ struct sysinfo_
     c_ulong totalhigh; /* Total high memory size */
     c_ulong freehigh;  /* Available high memory size */
     uint mem_unit;     /* Memory unit size in bytes */
-    ubyte[20-2 * c_ulong.sizeof - uint.sizeof] _f; /* Padding: libc5 uses this.. */
+    version (CRuntime_Musl)
+        char[256] __reserved;
+    else
+        ubyte[20-2 * c_ulong.sizeof - uint.sizeof] _f; /* Padding: libc5 uses this.. */
 }
 
 
