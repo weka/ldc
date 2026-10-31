@@ -89,8 +89,22 @@ else version (CRuntime_Musl)
         time_t      tv_sec;
         suseconds_t tv_usec;
     }
+    struct itimerval
+    {
+        timeval it_interval;
+        timeval it_value;
+    }
+
+    enum ITIMER_REAL    = 0;
+    enum ITIMER_VIRTUAL = 1;
+    enum ITIMER_PROF    = 2;
+
+    pragma(mangle, muslRedirTime64Mangle!("getitimer", "__getitimer_time64"))
+    int getitimer(int, itimerval*);
     pragma(mangle, muslRedirTime64Mangle!("gettimeofday", "__gettimeofday_time64"))
     int gettimeofday(timeval*, void*);
+    pragma(mangle, muslRedirTime64Mangle!("setitimer", "__setitimer_time64"))
+    int setitimer(int, const scope itimerval*, itimerval*);
     pragma(mangle, muslRedirTime64Mangle!("utimes", "__utimes_time64"))
     int utimes(const scope char*, ref const(timeval)[2]);
 }

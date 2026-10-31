@@ -858,6 +858,19 @@ version (CRuntime_Glibc)
     int     tcsendbreak(int, int);
     int     tcsetattr(int, int, const scope termios*);
 }
+else version (CRuntime_Musl)
+{
+    speed_t cfgetispeed(const scope termios*);
+    speed_t cfgetospeed(const scope termios*);
+    int     cfsetispeed(termios*, speed_t);
+    int     cfsetospeed(termios*, speed_t);
+    int     tcdrain(int);
+    int     tcflow(int, int);
+    int     tcflush(int, int);
+    int     tcgetattr(int, termios*);
+    int     tcsendbreak(int, int);
+    int     tcsetattr(int, int, const scope termios*);
+}
 else version (Darwin)
 {
     speed_t cfgetispeed(const scope termios*);
@@ -989,6 +1002,40 @@ pid_t   tcgetsid(int);
 */
 
 version (CRuntime_Glibc)
+{
+    enum IXANY      = 0x0000800; // 0004000
+
+    enum ONLCR      = 0x0000004; // 0000004
+    enum OCRNL      = 0x0000008; // 0000010
+    enum ONOCR      = 0x0000010; // 0000020
+    enum ONLRET     = 0x0000020; // 0000040
+    enum OFILL      = 0x0000040; // 0000100
+    enum NLDLY      = 0x0000100; // 0000400
+    enum   NL0      = 0x0000000; // 0000000
+    enum   NL1      = 0x0000100; // 0000400
+    enum CRDLY      = 0x0000600; // 0003000
+    enum   CR0      = 0x0000000; // 0000000
+    enum   CR1      = 0x0000200; // 0001000
+    enum   CR2      = 0x0000400; // 0002000
+    enum   CR3      = 0x0000600; // 0003000
+    enum TABDLY     = 0x0001800; // 0014000
+    enum   TAB0     = 0x0000000; // 0000000
+    enum   TAB1     = 0x0000800; // 0004000
+    enum   TAB2     = 0x0001000; // 0010000
+    enum   TAB3     = 0x0001800; // 0014000
+    enum BSDLY      = 0x0002000; // 0020000
+    enum   BS0      = 0x0000000; // 0000000
+    enum   BS1      = 0x0002000; // 0020000
+    enum VTDLY      = 0x0004000; // 0040000
+    enum   VT0      = 0x0000000; // 0000000
+    enum   VT1      = 0x0004000; // 0040000
+    enum FFDLY      = 0x0008000; // 0100000
+    enum   FF0      = 0x0000000; // 0000000
+    enum   FF1      = 0x0008000; // 0100000
+
+    pid_t   tcgetsid(int);
+}
+else version (CRuntime_Musl)
 {
     enum IXANY      = 0x0000800; // 0004000
 

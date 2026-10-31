@@ -2473,9 +2473,28 @@ version (CRuntime_Glibc)
 }
 else version (CRuntime_Musl)
 {
-    int fchdir(int) @trusted;
-    int lockf(int, int, off_t);
+    char*      crypt(const scope char*, const scope char*);
+    char*      ctermid(char*);
+    void       encrypt(ref char[64], int) @trusted;
+    int        fchdir(int) @trusted;
+    c_long     gethostid() @trusted;
+    pid_t      getpgid(pid_t) @trusted;
+    pid_t      getsid(pid_t) @trusted;
+    int        lchown(const scope char*, uid_t, gid_t);
+    int        lockf(int, int, off_t);
     alias lockf lockf64;
+    int        nice(int) @trusted;
+    ssize_t    pread(int, void*, size_t, off_t);
+    ssize_t    pwrite(int, const scope void*, size_t, off_t);
+    pid_t      setpgrp() @trusted;
+    int        setregid(gid_t, gid_t) @trusted;
+    int        setreuid(uid_t, uid_t) @trusted;
+    void       swab(const scope void*, void*, ssize_t);
+    void       sync() @trusted;
+    int        truncate(const scope char*, off_t);
+    useconds_t ualarm(useconds_t, useconds_t) @trusted;
+    int        usleep(useconds_t) @trusted;
+    pid_t      vfork();
 }
 else version (Darwin)
 {

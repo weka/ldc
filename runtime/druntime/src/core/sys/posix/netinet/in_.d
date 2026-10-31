@@ -1596,6 +1596,83 @@ else version (CRuntime_Musl)
     }
     extern __gshared immutable in6_addr in6addr_any;
     extern __gshared immutable in6_addr in6addr_loopback;
+
+    // macros
+    extern (D) int IN6_IS_ADDR_UNSPECIFIED( const scope in6_addr* addr ) pure
+    {
+        return addr.s6_addr32[0] == 0 &&
+               addr.s6_addr32[1] == 0 &&
+               addr.s6_addr32[2] == 0 &&
+               addr.s6_addr32[3] == 0;
+    }
+
+    extern (D) int IN6_IS_ADDR_LOOPBACK( const scope in6_addr* addr ) pure
+    {
+        return addr.s6_addr32[0] == 0 &&
+               addr.s6_addr32[1] == 0 &&
+               addr.s6_addr32[2] == 0 &&
+               addr.s6_addr32[3] == htonl( 1 );
+    }
+
+    extern (D) int IN6_IS_ADDR_MULTICAST( const scope in6_addr* addr ) pure
+    {
+        return addr.s6_addr[0] == 0xff;
+    }
+
+    extern (D) int IN6_IS_ADDR_LINKLOCAL( const scope in6_addr* addr ) pure
+    {
+        return (addr.s6_addr32[0] & htonl( 0xffc00000 )) == htonl( 0xfe800000 );
+    }
+
+    extern (D) int IN6_IS_ADDR_SITELOCAL( const scope in6_addr* addr ) pure
+    {
+        return (addr.s6_addr32[0] & htonl( 0xffc00000 )) == htonl( 0xfec00000 );
+    }
+
+    extern (D) int IN6_IS_ADDR_V4MAPPED( const scope in6_addr* addr ) pure
+    {
+        return addr.s6_addr32[0] == 0 &&
+               addr.s6_addr32[1] == 0 &&
+               addr.s6_addr32[2] == htonl( 0xffff );
+    }
+
+    extern (D) int IN6_IS_ADDR_V4COMPAT( const scope in6_addr* addr ) pure
+    {
+        return addr.s6_addr32[0] == 0 &&
+               addr.s6_addr32[1] == 0 &&
+               addr.s6_addr32[2] == 0 &&
+               ntohl( addr.s6_addr32[3] ) > 1;
+    }
+
+    extern (D) int IN6_IS_ADDR_MC_NODELOCAL( const scope in6_addr* addr ) pure
+    {
+        return IN6_IS_ADDR_MULTICAST( addr ) &&
+               (addr.s6_addr[1] & 0xf) == 0x1;
+    }
+
+    extern (D) int IN6_IS_ADDR_MC_LINKLOCAL( const scope in6_addr* addr ) pure
+    {
+        return IN6_IS_ADDR_MULTICAST( addr ) &&
+               (addr.s6_addr[1] & 0xf) == 0x2;
+    }
+
+    extern (D) int IN6_IS_ADDR_MC_SITELOCAL( const scope in6_addr* addr ) pure
+    {
+        return IN6_IS_ADDR_MULTICAST( addr ) &&
+               (addr.s6_addr[1] & 0xf) == 0x5;
+    }
+
+    extern (D) int IN6_IS_ADDR_MC_ORGLOCAL( const scope in6_addr* addr ) pure
+    {
+        return IN6_IS_ADDR_MULTICAST( addr ) &&
+               (addr.s6_addr[1] & 0xf) == 0x8;
+    }
+
+    extern (D) int IN6_IS_ADDR_MC_GLOBAL( const scope in6_addr* addr ) pure
+    {
+        return IN6_IS_ADDR_MULTICAST( addr ) &&
+               (addr.s6_addr[1] & 0xf) == 0xe;
+    }
 }
 else version (CRuntime_UClibc)
 {
